@@ -1,0 +1,59 @@
+name: Live evals
+
+# Manual only. These call the real API, so they cost money and are never part
+# of CI — see .github/workflows/ci.yml, which runs `mix test` with the :live
+# tag excluded.
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "Optional: narrow the run to one file, e.g. test/claudex/live/streaming_live_test.exs. Leave empty to run every eval in test/claudex/live/."
+        required: false
+        type: string
+
+env:
+  MIX_ENV: test
+
+jobs:
+  live:
+    name: Live evals against the real API
+    runs-on: ubuntu-latest
+
+    # Point this at a GitHub environment holding ANTHROPIC_API_KEY if you want
+    # a required reviewer before anything is billed.
+    environment: live
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        id: beam
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.19.5"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+
+      - run: mix deps.get
+
+      - name: Fail early if no key is configured
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # Without a key the live tests skip themselves and the run reports
+        # success having tested nothing.
+        run: test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY secret is not set"; exit 1; }
+
+      # `--only live` against the live directory runs those evals and nothing
+      # else. `mix test.live` would re-run the whole offline suite that CI has
+      # already run. It exits non-zero if the tag matches nothing, so a live
+      # folder that stopped being tagged fails here rather than passing empty.
+      - name: Run the live evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: mix test --only live ${{ inputs.file || 'test/claudex/live/' }}

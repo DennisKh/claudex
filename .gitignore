@@ -29,3 +29,8 @@ claudex-*.tar
 # .env.test.example is the tracked template; this file holds the real, pasted-in key.
 /.env.test
 
+# Local-only working files: never part of the package.
+/scripts/
+.tool-versions
+.claude/
+.elixir_ls/
