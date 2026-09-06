@@ -1,5 +1,3 @@
-Claudex.TestSupport.DotEnv.load(Path.expand("../.env.test", __DIR__))
-
 # Stash the key somewhere no test writes to. `mix test` starts async tests
 # while other test files are still loading, so a test that deletes
 # ANTHROPIC_API_KEY (client_test.exs does, to cover the missing-key path) can
