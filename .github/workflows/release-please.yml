@@ -1,0 +1,21 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Opens and maintains a release PR from the conventional commits on main
+      # (see Rule 6 in CLAUDE.md), bumping the version in mix.exs and writing
+      # CHANGELOG.md. Merging that PR tags the release.
+      - uses: googleapis/release-please-action@v4
+        with:
+          release-type: elixir
