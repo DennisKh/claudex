@@ -1,8 +1,5 @@
 name: Live evals
 
-# Manual only. These call the real API, so they cost money and are never part
-# of CI — see .github/workflows/ci.yml, which runs `mix test` with the :live
-# tag excluded.
 on:
   workflow_dispatch:
     inputs:
@@ -19,8 +16,6 @@ jobs:
     name: Live evals against the real API
     runs-on: ubuntu-latest
 
-    # Point this at a GitHub environment holding ANTHROPIC_API_KEY if you want
-    # a required reviewer before anything is billed.
     environment: live
 
     steps:
