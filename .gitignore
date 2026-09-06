@@ -34,7 +34,3 @@ claudex-*.tar
 .tool-versions
 .claude/
 .elixir_ls/
-
-# Planning notes, kept out of the published repo.
-/PLAN.md
-/*_dev_plan.md
