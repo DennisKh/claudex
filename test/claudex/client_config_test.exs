@@ -5,7 +5,7 @@ defmodule Claudex.ClientConfigTest do
 
   use ExUnit.Case, async: false
 
-  alias Claudex.Client
+  alias Claudex.{Client, Message, Messages}
 
   @keys [
     :api_key,
@@ -198,6 +198,84 @@ defmodule Claudex.ClientConfigTest do
 
       assert header(client, "anthropic-version") == "2024-01-01"
       assert header(client, "x-api-key") == "sk-ant-test"
+    end
+  end
+
+  describe "applied to a real request" do
+    @message %{
+      "id" => "msg_1",
+      "type" => "message",
+      "role" => "assistant",
+      "model" => "claude-haiku-4-5",
+      "content" => [%{"type" => "text", "text" => "hi"}],
+      "stop_reason" => "end_turn",
+      "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
+    }
+
+    defp params do
+      %{model: "claude-haiku-4-5", max_tokens: 16, messages: [Message.user("hi")]}
+    end
+
+    test "a client built entirely from config talks to the configured host with its headers" do
+      parent = self()
+
+      Application.put_env(:claudex, :api_key, "sk-ant-configured")
+      Application.put_env(:claudex, :base_url, "https://proxy.internal")
+      Application.put_env(:claudex, :beta, ["files-api-2025-04-14", "fast-mode-2026-02-01"])
+      Application.put_env(:claudex, :req_options, plug: {Req.Test, __MODULE__})
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(parent, {:request, conn.host, conn.req_headers})
+
+        Req.Test.json(conn, @message)
+      end)
+
+      assert {:ok, _message} = Messages.create(Client.new(), params())
+
+      assert_received {:request, host, headers}
+      assert host == "proxy.internal"
+      assert {"x-api-key", "sk-ant-configured"} in headers
+      assert {"anthropic-beta", "files-api-2025-04-14,fast-mode-2026-02-01"} in headers
+    end
+
+    test "a configured max_retries actually retries" do
+      Application.put_env(:claudex, :api_key, "sk-ant-test")
+      Application.put_env(:claudex, :max_retries, 2)
+
+      Application.put_env(:claudex, :req_options,
+        plug: {Req.Test, __MODULE__},
+        retry_delay: 0,
+        retry_log_level: false
+      )
+
+      Req.Test.expect(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "") end)
+      Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, @message) end)
+
+      assert {:ok, _message} = Messages.create(Client.new(), params())
+    end
+
+    test "a configured max_retries of 0 gives up on the first failure" do
+      parent = self()
+
+      Application.put_env(:claudex, :api_key, "sk-ant-test")
+      Application.put_env(:claudex, :max_retries, 0)
+
+      Application.put_env(:claudex, :req_options,
+        plug: {Req.Test, __MODULE__},
+        retry_delay: 0,
+        retry_log_level: false
+      )
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(parent, :attempt)
+
+        Plug.Conn.send_resp(conn, 503, "")
+      end)
+
+      assert {:error, %Claudex.Error{status: 503}} = Messages.create(Client.new(), params())
+
+      assert_received :attempt
+      refute_received :attempt
     end
   end
 end
