@@ -97,4 +97,13 @@ defmodule Claudex.ErrorTest do
     assert %Error{type: :overloaded, error_type: "overloaded_error"} =
              Error.from_stream_event(body)
   end
+
+  test "from_stream_event/1 survives an error field that isn't an object" do
+    body = %{"type" => "error", "error" => "boom"}
+
+    assert %Error{type: :api_status, error_type: nil, message: message} =
+             Error.from_stream_event(body)
+
+    assert message =~ "ended the stream with an error"
+  end
 end
