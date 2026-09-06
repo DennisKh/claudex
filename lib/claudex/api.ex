@@ -3,6 +3,13 @@ defmodule Claudex.API do
 
   alias Claudex.{Client, Error}
 
+  @doc """
+  Runs one request against the client and reduces the result to a tagged tuple:
+  the decoded body on a 2xx, a `Claudex.Error` on anything else, including a
+  transport failure.
+
+  Wraps the call in the `[:claudex, :request, ...]` telemetry events.
+  """
   @spec request(Client.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def request(%Client{} = client, options) do
     metadata =
@@ -29,11 +36,6 @@ defmodule Claudex.API do
       handle(raw)
     catch
       kind, reason ->
-        # Deliberately not `:telemetry.span/3`: it puts `:reason` and
-        # `:stacktrace` in the exception event's metadata, and a stacktrace
-        # frame from inside a Req step holds the whole `%Req.Request{}` — the
-        # `x-api-key` header and the JSON body with it. Only the kind and the
-        # exception's module go out.
         :telemetry.execute(
           [:claudex, :request, :exception],
           %{duration: System.monotonic_time() - started},
@@ -44,17 +46,31 @@ defmodule Claudex.API do
     end
   end
 
-  # `catch :error, reason` hands back the raw Erlang term, so normalizing is
-  # what turns `:function_clause` into `FunctionClauseError`. Only the module
-  # is taken — the normalized struct holds the call's arguments.
+  @doc "GETs `url`, with `params` as the query string."
+  @spec get(Client.t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
+  @spec get(Client.t(), String.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
+  def get(%Client{} = client, url, params \\ []) do
+    request(client, method: :get, url: url, params: params)
+  end
+
+  @doc "POSTs `body` to `url` as JSON."
+  @spec post(Client.t(), String.t(), map()) :: {:ok, term()} | {:error, Error.t()}
+  def post(%Client{} = client, url, body) do
+    request(client, method: :post, url: url, json: body)
+  end
+
+  @doc "DELETEs `url`."
+  @spec delete(Client.t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
+  def delete(%Client{} = client, url) do
+    request(client, method: :delete, url: url)
+  end
+
   defp error_module(:error, reason, stacktrace) do
     :error |> Exception.normalize(reason, stacktrace) |> Map.fetch!(:__struct__)
   end
 
   defp error_module(_kind, _reason, _stacktrace), do: nil
 
-  # The model is the one thing in the body worth reporting: it decides cost and
-  # behaviour, and a log line without it can't be compared against another.
   defp put_model(metadata, options) do
     case Keyword.get(options, :json) do
       %{} = body -> maybe_put_model(metadata, body[:model] || body["model"])
@@ -67,8 +83,6 @@ defmodule Claudex.API do
 
   defp maybe_put_model(metadata, _model), do: metadata
 
-  # Metadata only: status, request id, token counts. Never the body — logs
-  # travel further than conversations should.
   defp response_metadata({:ok, %Req.Response{} = response}) do
     %{status: response.status, request_id: request_id(response)}
     |> Map.merge(usage(response.body))
@@ -90,21 +104,6 @@ defmodule Claudex.API do
   end
 
   defp usage(_body), do: %{}
-
-  @spec get(Client.t(), String.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
-  def get(%Client{} = client, url, params \\ []) do
-    request(client, method: :get, url: url, params: params)
-  end
-
-  @spec post(Client.t(), String.t(), map()) :: {:ok, term()} | {:error, Error.t()}
-  def post(%Client{} = client, url, body) do
-    request(client, method: :post, url: url, json: body)
-  end
-
-  @spec delete(Client.t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
-  def delete(%Client{} = client, url) do
-    request(client, method: :delete, url: url)
-  end
 
   defp handle({:ok, %Req.Response{status: status, body: body}}) when status in 200..299 do
     {:ok, body}

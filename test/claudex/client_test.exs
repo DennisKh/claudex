@@ -83,48 +83,62 @@ defmodule Claudex.ClientTest do
     end)
   end
 
-  test "retry?/2 retries rate limits, 5xx, and proxy timeouts" do
+  test "retry_decision/2 retries rate limits, 5xx, and proxy timeouts" do
     for status <- [408, 429, 500, 503, 504, 529] do
-      assert Client.retry?(request(), response(status))
+      assert Client.retry_decision(request(), response(status)) == true
     end
 
     for status <- [200, 400, 401, 402, 404, 413, 422] do
-      refute Client.retry?(request(), response(status))
+      refute Client.retry_decision(request(), response(status))
     end
   end
 
-  test "retry?/2 does not retry a 409, which the API says to resolve first" do
-    refute Client.retry?(request(), response(409))
+  test "retry_decision/2 retries a connection that never reached the API" do
+    assert Client.retry_decision(request(), %Req.TransportError{reason: :closed}) == true
+    assert Client.retry_decision(request(), %Req.TransportError{reason: :timeout}) == true
+  end
+
+  test "retry_decision/2 does not retry a 409, which the API says to resolve first" do
+    refute Client.retry_decision(request(), response(409))
   end
 
   describe "retry-after" do
     test "a 529 naming a delay is retried after that long" do
       overloaded = response(529, [{"retry-after", "30"}])
 
-      assert Client.retry?(request(), overloaded) == {:delay, 30_000}
+      assert Client.retry_decision(request(), overloaded) == {:delay, 30_000}
     end
 
     test "a 529 with no delay falls back to Req's backoff" do
-      assert Client.retry?(request(), response(529)) == true
+      assert Client.retry_decision(request(), response(529)) == true
     end
 
     # Req reads the header itself for these two and handles the date form.
     test "429 and 503 are left to Req" do
-      assert Client.retry?(request(), response(429, [{"retry-after", "30"}])) == true
-      assert Client.retry?(request(), response(503, [{"retry-after", "30"}])) == true
+      assert Client.retry_decision(request(), response(429, [{"retry-after", "30"}])) == true
+      assert Client.retry_decision(request(), response(503, [{"retry-after", "30"}])) == true
+    end
+
+    test "a negative delay is ignored rather than passed to Process.sleep/1" do
+      assert Client.retry_decision(request(), response(529, [{"retry-after", "-5"}])) == true
+    end
+
+    test "a zero delay is honoured as an immediate retry" do
+      assert Client.retry_decision(request(), response(529, [{"retry-after", "0"}])) ==
+               {:delay, 0}
     end
 
     test "an HTTP-date delay is ignored rather than misread" do
       dated = response(529, [{"retry-after", "Wed, 21 Oct 2026 07:28:00 GMT"}])
 
-      assert Client.retry?(request(), dated) == true
+      assert Client.retry_decision(request(), dated) == true
     end
 
     # Req raises if :retry_delay is set and the retry fun returns {:delay, _}.
     test "a caller's own retry_delay wins, because Req refuses to combine them" do
       configured = Req.new(retry_delay: 0)
 
-      assert Client.retry?(configured, response(529, [{"retry-after", "30"}])) == true
+      assert Client.retry_decision(configured, response(529, [{"retry-after", "30"}])) == true
     end
   end
 

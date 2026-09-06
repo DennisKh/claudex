@@ -7,15 +7,6 @@ defmodule Claudex.Client do
   `Claudex.Messages.create/2`. Clients are plain structs, so you can hold
   several at once (different keys, different workspaces) without any shared
   process state.
-
-  A client hides its API key when inspected:
-
-      iex> inspect(Claudex.new(api_key: "sk-ant-secret"))
-      "#Claudex.Client<base_url: \"https://api.anthropic.com\", max_retries: 2, ...>"
-
-  That covers logs, `IO.inspect`, and crash reports. One gap to know about:
-  `client.req` is a `Req.Request` that carries the key in its `x-api-key`
-  header, and inspecting *that* directly still prints it.
   """
 
   @default_base_url "https://api.anthropic.com"
@@ -24,9 +15,6 @@ defmodule Claudex.Client do
   @default_connect_timeout :timer.seconds(5)
   @anthropic_version "2023-06-01"
 
-  # Inspecting a client must not print the key. `:req` is hidden for the same
-  # reason — it carries the key in its `x-api-key` header. Both fields still
-  # work normally; only `inspect/1` is affected.
   @derive {Inspect, only: [:base_url, :max_retries]}
   @enforce_keys [:api_key, :req]
   defstruct [:api_key, :req, base_url: @default_base_url, max_retries: @default_max_retries]
@@ -69,10 +57,9 @@ defmodule Claudex.Client do
       They become one `anthropic-beta` header.
     * `:req_options` - extra options merged into the underlying `Req.new/1`
       call, for anything not covered above (a custom `:adapter` for tests,
-      a `:finch` pool, ...). A `:headers` or `:connect_options` entry here
-      is merged with — not replacing — the defaults above, so you can add
-      an extra header or transport option without losing the rest.
+      a `:finch` pool, ...).
   """
+  @spec new() :: t()
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     api_key = fetch_api_key!(opts)
@@ -89,7 +76,7 @@ defmodule Claudex.Client do
         receive_timeout: receive_timeout,
         connect_options: [timeout: connect_timeout],
         max_retries: max_retries,
-        retry: &retry?/2,
+        retry: &retry_decision/2,
         headers: default_headers(api_key) ++ beta_headers(beta)
       ]
       |> merge_req_options(req_options)
@@ -97,6 +84,33 @@ defmodule Claudex.Client do
 
     %__MODULE__{api_key: api_key, req: req, base_url: base_url, max_retries: max_retries}
   end
+
+  @doc """
+  Decides whether a failed request should be retried, and how long to wait
+  first. This is the `:retry` function every Claudex client is built with.
+
+  Returns `false` to give up, `true` to retry on Req's exponential backoff, or
+  `{:delay, milliseconds}` to wait exactly that long — the last of these when
+  the response named a `retry-after`, for the statuses Req doesn't already
+  read that header on itself.
+
+  Connection errors, rate limits and 5xx are retried. A 409 is not: the API
+  says to resolve the conflict first, so repeating the request can only fail
+  again or duplicate work. A 408 is, because it comes from a proxy that gave
+  up before the request reached the model — nothing was generated and nothing
+  was billed, so the retry costs only the round trip.
+  """
+  @spec retry_decision(Req.Request.t(), Req.Response.t() | Exception.t()) ::
+          boolean() | {:delay, non_neg_integer()}
+  def retry_decision(request, %Req.Response{status: status} = response) do
+    if status in [408, 429] or status >= 500 do
+      server_delay(request, response) || true
+    else
+      false
+    end
+  end
+
+  def retry_decision(_request, %{__exception__: true}), do: true
 
   defp default_headers(api_key) do
     [
@@ -106,10 +120,6 @@ defmodule Claudex.Client do
     ]
   end
 
-  # Keyword.merge/2 replaces a key wholesale rather than combining it, so a
-  # blind merge of req_options would silently drop the default auth headers
-  # (or connect options) the moment a caller sets their own. Merge those two
-  # keys explicitly; everything else in req_options overrides normally.
   defp merge_req_options(defaults, req_options) do
     {extra_headers, req_options} = Keyword.pop(req_options, :headers, [])
     {extra_connect_options, req_options} = Keyword.pop(req_options, :connect_options, [])
@@ -120,32 +130,11 @@ defmodule Claudex.Client do
     |> Keyword.merge(req_options)
   end
 
-  # Req accumulates same-named headers rather than replacing them, so a
-  # caller overriding one would end up sending it twice. Drop the default
-  # whenever the caller supplies that header themselves.
   defp merge_headers(defaults, extra) do
     extra_names = Enum.map(extra, fn {name, _value} -> String.downcase(name) end)
 
     Enum.reject(defaults, fn {name, _value} -> String.downcase(name) in extra_names end) ++ extra
   end
-
-  @doc false
-  @spec retry?(Req.Request.t(), Req.Response.t() | Exception.t()) :: boolean()
-  # The API documents retrying connection errors, rate limits, and 5xx. Two
-  # calls beyond that: 409 is not retried, because the docs say to resolve the
-  # conflict first, so repeating the request can only fail again or duplicate
-  # work. 408 is retried — it isn't a status this API returns, it comes from a
-  # proxy that gave up before the request reached the model, so nothing was
-  # generated and nothing was billed; the retry costs only the round trip.
-  def retry?(request, %Req.Response{status: status} = response) do
-    if status in [408, 429] or status >= 500 do
-      server_delay(request, response) || true
-    else
-      false
-    end
-  end
-
-  def retry?(_request, %{__exception__: true}), do: true
 
   # Req reads `retry-after` itself, but only for 429 and 503. Anthropic signals
   # overload with 529 and may name a delay there, so honour it for the statuses
@@ -156,7 +145,7 @@ defmodule Claudex.Client do
   defp server_delay(request, response) do
     with nil <- Req.Request.get_option(request, :retry_delay),
          [value | _rest] <- Req.Response.get_header(response, "retry-after"),
-         {seconds, ""} <- Integer.parse(value) do
+         {seconds, ""} when seconds >= 0 <- Integer.parse(value) do
       {:delay, seconds * 1000}
     else
       _no_usable_delay -> nil
@@ -185,7 +174,9 @@ defmodule Claudex.Client do
   end
 
   defp beta_headers([]), do: []
+
   defp beta_headers(beta) when is_binary(beta), do: beta_headers([beta])
+
   defp beta_headers(betas) when is_list(betas), do: [{"anthropic-beta", Enum.join(betas, ",")}]
 
   defp user_agent do
