@@ -30,3 +30,5 @@ claudex-*.tar
 .tool-versions
 .claude/
 .elixir_ls/
+/PLAN.md
+/*_dev_plan.md
