@@ -1,6 +1,7 @@
 defmodule Claudex.Messages.BatchResult do
   @moduledoc """
-  What became of one request in a batch.
+  One request's outcome in a batch: the `custom_id` it was submitted with
+  and the `result` it ended in.
 
   Match on `result` to handle each outcome:
 

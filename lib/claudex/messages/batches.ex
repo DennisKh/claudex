@@ -5,10 +5,18 @@ defmodule Claudex.Messages.Batches do
 
   The flow is submit, check back, collect:
 
-      {:ok, batch} = Batches.create(client, [
-        %{custom_id: "ticket-1", params: %{model: "claude-opus-5", max_tokens: 1024,
-                                           messages: [%{role: "user", content: "..."}]}}
-      ])
+      requests = [
+        %{
+          custom_id: "ticket-1",
+          params: %{
+            model: "claude-opus-5",
+            max_tokens: 1024,
+            messages: [%{role: "user", content: "..."}]
+          }
+        }
+      ]
+
+      {:ok, batch} = Batches.create(client, requests)
 
       # later, from a job runner
       {:ok, batch} = Batches.retrieve(client, batch.id)
@@ -21,9 +29,11 @@ defmodule Claudex.Messages.Batches do
   Claudex doesn't poll for you. A batch has 24 hours to finish, so check on it
   from your app's job runner with the batch id persisted.
 
-  Submitting a batch doesn't validate each request's params: the API accepts a
-  batch containing a request the Messages API would reject outright, and the
-  problem shows up in that request's result rather than in `create/2`.
+  Each request's `params` are validated asynchronously, and a validation error
+  arrives with that request's result once the batch has ended — so a batch
+  containing a request the Messages API would reject outright is still
+  accepted. Check a request's shape against `Claudex.Messages.create/2` before
+  batching a lot of them.
 
   Results come back in whatever order the requests finished, so match them to
   your requests by `custom_id`. `results/2` streams them, so a batch far too
@@ -41,6 +51,32 @@ defmodule Claudex.Messages.Batches do
   which takes exactly what `Claudex.Messages.create/2` takes. `:tools` in
   those params accepts a module the same way, and `max_tokens` must be at
   least 1.
+
+  ## Examples
+
+      requests = [
+        %{
+          custom_id: "ticket-1",
+          params: %{
+            model: "claude-opus-5",
+            max_tokens: 1024,
+            messages: [Claudex.Message.user("Summarise: the printer is offline")]
+          }
+        },
+        %{
+          custom_id: "ticket-2",
+          params: %{
+            model: "claude-opus-5",
+            max_tokens: 1024,
+            messages: [Claudex.Message.user("Summarise: billed twice in March")]
+          }
+        }
+      ]
+
+      {:ok, batch} = Claudex.Messages.Batches.create(client, requests)
+      batch.id
+      #=> "msgbatch_01HkcTjaV5uDC8jWR4ZsDV8d"
+
   """
   @spec create(Client.t(), [map()]) :: {:ok, Batch.t()} | {:error, Error.t()}
   def create(%Client{} = client, requests) when is_list(requests) do
