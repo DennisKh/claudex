@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/DennisKh/claudex/compare/v0.2.0...v0.3.0) (2026-09-07)
+
+
+### Features
+
+* **tool_runner:** add the agentic loop over registered tools ([6915af6](https://github.com/DennisKh/claudex/commit/6915af65cb31e4394ef363e8594a677d33caa6fa))
+* **tool_runner:** add the agentic loop over registered tools ([e24c1e9](https://github.com/DennisKh/claudex/commit/e24c1e92215209795c14fde007db504e90a2902b))
+
 ## [0.2.0](https://github.com/DennisKh/claudex/compare/v0.1.1...v0.2.0) (2026-09-07)
 
 
