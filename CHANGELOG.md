@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/DennisKh/claudex/compare/v0.3.0...v0.4.0) (2026-09-07)
+
+
+### Features
+
+* **models:** add the Models API with shared pagination ([26d26ef](https://github.com/DennisKh/claudex/commit/26d26ef0e3d493dc92bdd813012607fec8d7bb91))
+* **models:** add the Models API with shared pagination ([4179ff5](https://github.com/DennisKh/claudex/commit/4179ff5f65e706a2c04cef40ca31e28897c94d03))
+
 ## [0.3.0](https://github.com/DennisKh/claudex/compare/v0.2.0...v0.3.0) (2026-09-07)
 
 
