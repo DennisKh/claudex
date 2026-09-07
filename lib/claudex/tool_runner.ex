@@ -74,11 +74,10 @@ defmodule Claudex.ToolRunner do
         Claudex.ToolRunner.run(client, params)
 
   It returns a `Claudex.ToolRunner.Turn`, the same thing `stream/3` yields.
-  `message` is the final
-  reply, `messages` the whole conversation, and `stop` says why it ended:
-  `:completed`, `:refusal`, or `:max_turns`. Match on `stop` rather than
-  assuming Claude finished; hitting the turn limit is not an error, and looks
-  identical without it.
+  `message` is the final reply, `messages` the whole conversation,
+  and `stop` says why it ended: `:completed`, `:refusal`, or `:max_turns`.
+  Match on `stop` rather than assuming Claude finished; hitting the turn limit
+  is not an error, and looks identical without it.
 
   Returns `{:error, %Claudex.Error{}}` if a request fails.
   """
@@ -152,8 +151,6 @@ defmodule Claudex.ToolRunner do
   defp continue(turn, registry, messages, index, max_turns) do
     results = Enum.map(turn.tool_uses, &run_tool(&1, registry))
 
-    # Every result for one reply goes back in a single message; splitting them
-    # teaches Claude to stop making parallel tool calls.
     messages = Message.append(messages, Message.tool_results(results))
     turn = %{turn | tool_results: results, messages: messages}
 
