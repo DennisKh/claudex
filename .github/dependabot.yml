@@ -1,0 +1,25 @@
+version: 2
+
+updates:
+  - package-ecosystem: mix
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Conventional commits, so release-please can read the result. Runtime
+      # dependency bumps ship to users, so they are `fix`; dev and test tools
+      # are `chore` and stay out of the changelog.
+      prefix: fix
+      prefix-development: chore
+      include: scope
+    groups:
+      dev-tooling:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
