@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "max_tokens: 999999999 > 64000, which is the maximum allowed number of output tokens for claude-haiku-4-5-20251001",
+    "type": "invalid_request_error"
+  },
+  "request_id": "req_011CejG2RbBg4zsBksKdw1H2",
+  "type": "error"
+}
