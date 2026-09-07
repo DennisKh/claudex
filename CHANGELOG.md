@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/DennisKh/claudex/compare/v0.6.0...v0.6.1) (2026-09-07)
+
+
+### Build System
+
+* add Hex package metadata, ex_doc and an MIT licence ([#20](https://github.com/DennisKh/claudex/issues/20)) ([89a2712](https://github.com/DennisKh/claudex/commit/89a2712e2c78f7f5903063f3ce67b1b69c033b9c))
+
 ## [0.6.0](https://github.com/DennisKh/claudex/compare/v0.5.0...v0.6.0) (2026-09-07)
 
 

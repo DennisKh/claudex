@@ -1,7 +1,7 @@
 defmodule Claudex.MixProject do
   use Mix.Project
 
-  @version "0.6.0"
+  @version "0.6.1"
   @source_url "https://github.com/DennisKh/claudex"
   @description "An Elixir SDK for the Claude API: messages, streaming, tools, files and batches."
 
