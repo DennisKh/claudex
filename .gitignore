@@ -32,3 +32,4 @@ claudex-*.tar
 .elixir_ls/
 /PLAN.md
 /*_dev_plan.md
+.DS_Store
