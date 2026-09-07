@@ -70,10 +70,9 @@ defmodule Claudex.Error do
         }
 
   @doc """
-  Builds an error from an HTTP response: a status code and its body.
-
-  The body may arrive undecoded — a download asks Req not to parse what it
-  fetches — so a JSON error body is decoded here rather than lost.
+  Builds an error from an HTTP response: a status code and its body. The body
+  may be a decoded map or the raw bytes; either way the API's own message and
+  error type end up on the struct.
   """
   @spec from_response(pos_integer(), map() | binary() | nil) :: t()
   def from_response(status, body) do
@@ -148,6 +147,8 @@ defmodule Claudex.Error do
     end
   end
 
+  # A download asks Req not to parse what it fetches, so an error body on one
+  # of those arrives as raw bytes.
   defp decode_body(body) when is_binary(body) do
     case JSON.decode(body) do
       {:ok, json} when is_map(json) -> json
