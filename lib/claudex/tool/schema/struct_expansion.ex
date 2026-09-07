@@ -19,7 +19,7 @@ defmodule Claudex.Tool.Schema.StructExpansion do
       (`embeds_one`, `embeds_many`) are genuine data, not a relationship,
       and are expanded.
     * a plain struct with `@type t :: %__MODULE__{...}` — read from the
-      module's own compiled typespec via `Code.Typespec`.
+      module's own compiled typespec.
 
   A struct with neither still expands, with every field left unconstrained
   (`%{}`) — the field names alone are more useful to Claude than nothing,
