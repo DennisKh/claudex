@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/DennisKh/claudex/compare/v0.4.0...v0.5.0) (2026-09-07)
+
+
+### Features
+
+* **telemetry:** document the events and ship a default logger ([c26395b](https://github.com/DennisKh/claudex/commit/c26395bf461abe1acc5142950e4ab697589142b3))
+* **telemetry:** document the events and ship a default logger ([5be1451](https://github.com/DennisKh/claudex/commit/5be1451fdb92eb2d48562895676744957a95eddc))
+
 ## [0.4.0](https://github.com/DennisKh/claudex/compare/v0.3.0...v0.4.0) (2026-09-07)
 
 
