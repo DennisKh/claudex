@@ -1,8 +1,7 @@
 defmodule Claudex.Messages.Batch.RequestCounts do
   @moduledoc """
-  How the requests in a batch are doing. Everything starts in `processing`;
-  the other four stay zero until the whole batch ends. The five always sum to
-  the number of requests you submitted.
+  Per-status tallies for one batch: `processing`, plus the four end states a
+  request can reach — `succeeded`, `errored`, `canceled`, `expired`.
   """
 
   defstruct processing: 0, succeeded: 0, errored: 0, canceled: 0, expired: 0
