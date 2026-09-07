@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "model: claude-does-not-exist",
+    "type": "not_found_error"
+  },
+  "request_id": "req_011CejG2QUDm7xp53Petn2bM",
+  "type": "error"
+}

@@ -1,0 +1,35 @@
+{
+  "content": [
+    {
+      "signature": "EtsGCpoBCBEYAipAXOZB6ST7N5ukwl2R3PWqDR9W2ntY5vYVI+/fCojgiD8bGB4k1vlbyoOboQ4lbnAVZ5O7tgrBNGF7sWtp3ACUSTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okMzdlYmFlY2QtMTA5ZC00ZTUxLTg0MDAtZWIzMDQwODcyMTYzqAHRju3UBhIMKN7Mrb7FxtncTgUXGgytfIDz7WlqBYablkwiMHLbWblHnOGfksO3wXHMi34duwAhvUhbh4uVHiptg/koivKGLCXTrr5CPK+O9PXyfSrtBIZegge8UcXo/8uF3ZeKvIRyMmvtGmJPJbioEkAIg4oKv7HlqRXR15t99jwjXPc12hqgrQkiw01YsBFjIbw0RfKS/99BalDT/8R8DACrXCBbByJTch334Q+tHkqeQ2xw1UbZjsJbHsTN884PGOctbtpiKkTWzKHskFNiCdI75tBlc1UVcpHCtmpBMd/UkM2Y+VpL0k+0+s80StSZ4Hg03ZWL26xcNsdJCrQ4fkP1TD20Yos2WDtUgwXdWpXHrsSCTbrGXau5cVnZ0hN3AFlAGYygp5Hyr0c25N8/N3nk+t0jEajHWu1EiHSmvWRFTMOxBp23/+t93IgDh4f67yy7tImzDKi8zdk6Q5SMBXtL4vONKTvcDjZHJx4BM6mQgx3/OS+ZoDcJfxdhhtpXtoX8QVHvGkCGt/Ivmzwx7dKbo7mzPBnqEpRPvkeeKzAODWBzRLA3FOFN/1tvoAybQ3qDYSg04P0UUYAq/Sof/dGFvypDhr0S1Y3FEkBl/W9i1syB+lbOKziT9lMZeikuHWMBDOCR8yItECB59qcisvZBQDqq06U5QTzgn6lX0tLyf9a5viNkK2FUiGyFo4gsjuzisTKNUzf9ZTCeAJOxBwnsnDtoFLbRbFjerHwcux7lQV097B/ryxBhXHz1q/DTZhEmg0qw7136r2OnE6cJLOXxWdt2Gl5QVShiiotEQqcpfwVrJ97ITpTueOOPUlQnx/Q/5DFMw0WVakbeT14CiDvGlfIWo8+u3ftPH2z6EHV/egjJ+rxq4S6CIPUqKDIDyz61NXC8lCdYj7gaIFHmfy7UZhM1uGEXFcwgcXgrBlGFIBgB",
+      "thinking": "On a phone keypad, letters are mapped to numbers like this:\n- 2: ABC\n- 3: DEF\n- 4: GHI\n- 5: JKL\n- 6: MNO\n- 7: PQRS\n- 8: TUV\n- 9: WXYZ\n\nTo spell BANANA, I need:\n- B\n- A\n- N\n- A\n- N\n- A\n\nLet me figure out which keys and how many presses:\n\nB is on key 2 (ABC): B is the 2nd letter, so 2 presses\nA is on key 2 (ABC): A is the 1st letter, so 1 press\nN is on key 6 (MNO): N is the 2nd letter, so 2 presses\nA is on key 2 (ABC): A is the 1st letter, so 1 press\nN is on key 6 (MNO): N is the 2nd letter, so 2 presses\nA is on key 2 (ABC): A is the 1st letter, so 1 press\n\nTotal: 2 + 1 + 2 + 1 + 2 + 1 = 9 keystrokes",
+      "type": "thinking"
+    },
+    {
+      "text": "# Typing 'BANANA' on a Phone Keypad\n\nOn a traditional phone keypad, letters are mapped like this:\n- Key 2: ABC\n- Key 6: MNO\n\nHere's the breakdown:\n\n| Letter | Key | Position | Keystrokes |\n|--------|-----|----------|-----------|\n| B | 2 | 2nd letter (ABC) | 2 |\n| A | 2 | 1st letter (ABC) | 1 |\n| N | 6 | 2nd letter (MNO) | 2 |\n| A | 2 | 1st letter (ABC) | 1 |\n| N | 6 | 2nd letter (MNO) | 2 |\n| A | 2 | 1st letter (ABC) | 1 |\n\n**Total: 2 + 1 + 2 + 1 + 2 + 1 = 9 keystrokes**",
+      "type": "text"
+    }
+  ],
+  "id": "msg_011CejCHHg8sPtNbCPUuJuoC",
+  "model": "claude-haiku-4-5-20251001",
+  "role": "assistant",
+  "stop_details": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "inference_geo": "not_available",
+    "input_tokens": 60,
+    "output_tokens": 543,
+    "output_tokens_details": {
+      "thinking_tokens": 306
+    },
+    "service_tier": "standard"
+  }
+}
