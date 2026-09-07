@@ -2,9 +2,8 @@ defmodule Claudex.Tool.Dispatch do
   @moduledoc """
   Calls a registered tool function with a decoded `tool_use` input map.
 
-  Arguments are matched to the function's parameters by name, not by the
-  order keys happen to come back from JSON decoding — Elixir maps don't
-  guarantee that order matches the function's declared parameter order.
+  Arguments are matched to the function's parameters by name, in the order
+  the tool's `entry` declares.
   """
 
   @typedoc "One dispatchable tool: its wire name, the function it calls, and that function's parameters in order."
@@ -44,7 +43,7 @@ defmodule Claudex.Tool.Dispatch do
   defp ordered_args(params, args) do
     resolved =
       Enum.map(params, fn {name, has_default} ->
-        {name, has_default, Map.fetch(args, Atom.to_string(name))}
+        {name, has_default, Map.fetch(args, name)}
       end)
 
     case missing_required(resolved) do
@@ -56,7 +55,7 @@ defmodule Claudex.Tool.Dispatch do
   defp missing_required(resolved) do
     resolved
     |> Enum.filter(fn {_name, has_default, fetch} -> not has_default and fetch == :error end)
-    |> Enum.map(fn {name, _has_default, _fetch} -> Atom.to_string(name) end)
+    |> Enum.map(fn {name, _has_default, _fetch} -> name end)
   end
 
   defp values(resolved) do

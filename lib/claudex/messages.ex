@@ -22,20 +22,14 @@ defmodule Claudex.Messages do
   supports works here — see the
   [Messages API reference](https://platform.claude.com/docs/en/api/messages).
 
-  `:tools` also accepts a module that `use`s `Claudex.Tool` (or a list
-  mixing such modules with plain tool maps) — see `Claudex.Tool.list/1`,
-  which this runs on `:tools` for you. So `tools: MyApp.Tools` works
-  directly; you don't need to expand it with `Claudex.Tool.list/1` yourself.
+  `:tools` takes a module that `use`s `Claudex.Tool`, a list of them, plain
+  tool maps, or any mix of the two — see `Claudex.Tool.list/1`.
 
   Every other key in `params` goes into the JSON request body verbatim.
-  There's no separate channel for per-request client settings here, so
-  `timeout: 5_000` would ship as a literal `"timeout"` field rather than
-  shortening the request — set timeouts on the client instead
-  (`Claudex.Client.new/1`).
 
   This function always sends a non-streaming request. Passing `stream: true`
-  returns `{:error, %Claudex.Error{type: :bad_request}}` rather than quietly
-  ignoring it — use `stream!/2` or `stream_to/3` instead.
+  returns `{:error, %Claudex.Error{type: :bad_request}}`,
+  use `stream!/2` or `stream_to/3` instead.
 
   Returns `{:error, %Claudex.Error{}}` for a non-2xx response, a timeout, or
   a connection failure.
@@ -50,8 +44,9 @@ defmodule Claudex.Messages do
   end
 
   @doc """
-  Counts the tokens a request would use, without sending it or being billed
-  for a reply.
+  Counts the input tokens your messages, system prompt and tools would use.
+  Claude generates nothing, and the call is free — it spends a request against
+  a rate limit of its own, not tokens.
 
       {:ok, tokens} =
         Claudex.Messages.count_tokens(client, %{
@@ -65,7 +60,7 @@ defmodule Claudex.Messages do
   `:tool_choice`) is optional and passed through, and `:tools` takes a module
   the same way `create/2` does.
 
-  The count covers the input only: your messages, system prompt, and tools.
+  The number is an estimate; a real request can come out a little different.
   """
   @spec count_tokens(Client.t(), map() | keyword()) ::
           {:ok, non_neg_integer()} | {:error, Error.t()}
@@ -115,12 +110,14 @@ defmodule Claudex.Messages do
   end
 
   @doc """
-  Streams a reply to a process as messages, for a GenServer or LiveView that
-  can't sit and block on a stream.
+  Runs a stream in its own process and returns straight away, delivering each
+  event to a mailbox.
+
+  `params` takes exactly what `create/2` takes; `stream: true` is set for you.
 
   Returns `{:ok, %Claudex.Stream.Handle{ref: ref}}` and then sends:
 
-    * `{:claudex, ref, {:event, event}}` for each event
+    * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`
     * `{:claudex, ref, {:error, %Claudex.Error{}}}` if the request fails
     * `{:claudex, ref, :done}` when the reply is complete
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
@@ -147,10 +144,6 @@ defmodule Claudex.Messages do
   defp normalize_tools(%{tools: tools} = body), do: %{body | tools: Tool.list(tools)}
   defp normalize_tools(body), do: body
 
-  # A reply decodes into structs; the API wants maps. Converting here means a
-  # caller can append a `%Claudex.Message{}` straight into the history instead
-  # of writing the translation themselves — and can't drop a thinking block or
-  # a block type Claudex doesn't model yet while doing it.
   defp normalize_messages(%{messages: messages} = body) when is_list(messages) do
     %{body | messages: Enum.map(messages, &Message.to_param/1)}
   end

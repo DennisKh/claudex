@@ -20,7 +20,7 @@ defmodule Claudex.Tool.SchemaTest do
     built = build(:add, args, specs)
 
     assert built.properties == %{"a" => %{type: "integer"}, "b" => %{type: "number"}}
-    assert built.params == [{:a, false}, {:b, false}]
+    assert built.params == [{"a", false}, {"b", false}]
   end
 
   test "params with a default value are not required" do
@@ -29,7 +29,7 @@ defmodule Claudex.Tool.SchemaTest do
 
     built = build(:add, args, specs)
 
-    assert built.params == [{:a, false}, {:b, true}]
+    assert built.params == [{"a", false}, {"b", true}]
   end
 
   test "falls back to an unconstrained property when there's no matching @spec" do

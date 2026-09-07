@@ -2,7 +2,8 @@ defmodule Claudex.ContentBlock.RedactedThinking do
   @moduledoc """
   A thinking step Claude redacted for safety. `data` is opaque and
   encrypted — there's nothing to read here. Pass it back to the API
-  unchanged when continuing the conversation.
+  unchanged when continuing the conversation: dropping one of these from an
+  assistant message you echo back is a 400.
   """
 
   defstruct [:data]

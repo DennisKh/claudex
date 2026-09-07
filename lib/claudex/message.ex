@@ -59,8 +59,8 @@ defmodule Claudex.Message do
   @doc """
   Turns a decoded message back into the map the API expects in `messages`.
 
-  You rarely need this — `Claudex.Messages.create/2` and friends run it for you,
-  so a `%Claudex.Message{}` can go straight back into the conversation:
+  `Claudex.Messages.create/2` and friends run this for you, so a
+  `%Claudex.Message{}` can go straight back into the conversation:
 
       {:ok, reply} = Claudex.Messages.create(client, %{model: model, max_tokens: 1024, messages: history})
       history = history ++ [reply, %{role: "user", content: "and then?"}]
@@ -112,12 +112,6 @@ defmodule Claudex.Message do
   @spec user(String.t() | [map() | ContentBlock.t()]) :: map()
   def user(content), do: %{role: "user", content: content}
 
-  # There is no `system/1` on purpose. The system prompt is the `:system`
-  # request parameter, not a message — the API rejects a `role: "system"`
-  # entry at the start of `messages` and says so. The mid-conversation
-  # directive form is a separate, model-gated feature; build it as a plain map
-  # if you need it.
-
   @doc """
   Builds an assistant message, for putting words in Claude's mouth when you're
   replaying a conversation you stored somewhere.
@@ -133,10 +127,9 @@ defmodule Claudex.Message do
 
       Claudex.Message.tool_results([Claudex.Tool.result(tool_use.id, "42")])
 
-  The surprise worth knowing: results go back with `role: "user"`, because
-  they're input to Claude, not something it said. Put every result for one
-  reply in a single message — splitting them teaches Claude to stop making
-  parallel tool calls.
+  Results go back with `role: "user"`, because they're input to Claude, not
+  something it said. Put every result for one reply in a single message —
+  splitting them teaches Claude to stop making parallel tool calls.
 
   `Claudex.ToolRunner` does this for you; reach for it when you're driving the
   loop yourself.

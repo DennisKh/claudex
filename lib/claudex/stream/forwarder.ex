@@ -4,9 +4,7 @@ defmodule Claudex.Stream.Forwarder do
   forwards each event to another process as a message.
 
   It's linked to whoever started it, so it goes away with them. There's no
-  `child_spec/1`: a stream can't be restarted — you can't resume a half-read
-  reply, and re-running the request bills it again — so a supervisor has
-  nothing useful to do with one beyond what the link already provides.
+  `child_spec/1`, so it can't go in a supervision tree.
   """
 
   alias Claudex.{Client, Error, Messages}
