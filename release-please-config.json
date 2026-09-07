@@ -4,8 +4,7 @@
     ".": {
       "release-type": "elixir",
       "bump-minor-pre-major": true,
-      "changelog-path": "CHANGELOG.md",
-      "bump-patch-for-minor-pre-major": true
+      "changelog-path": "CHANGELOG.md"
     }
   }
 }
