@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/DennisKh/claudex/compare/v0.5.0...v0.6.0) (2026-09-07)
+
+
+### Features
+
+* **batches:** add the Message Batches API ([#18](https://github.com/DennisKh/claudex/issues/18)) ([c0a2710](https://github.com/DennisKh/claudex/commit/c0a27104dbdae4052e3df63a5e618ad418a33f50))
+* **files:** add the Files API ([#17](https://github.com/DennisKh/claudex/issues/17)) ([e5b738a](https://github.com/DennisKh/claudex/commit/e5b738a6c4c12db18a5ed82a62dcbe5d9f9da789))
+
 ## [0.5.0](https://github.com/DennisKh/claudex/compare/v0.4.0...v0.5.0) (2026-09-07)
 
 
