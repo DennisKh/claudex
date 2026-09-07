@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/DennisKh/claudex/compare/v0.1.1...v0.2.0) (2026-09-07)
+
+
+### Features
+
+* **messages:** add the Messages API with streaming and tool schemas ([557ffaf](https://github.com/DennisKh/claudex/commit/557ffaf3478d953617eac7d94bd5ca892b5f8924))
+
+
+### Bug Fixes
+
+* **ci:** let a feat bump the minor version again ([410ebb5](https://github.com/DennisKh/claudex/commit/410ebb59be29bcad7e5064282af843b342fd97bf))
+* **ci:** let a feat bump the minor version again ([08d9635](https://github.com/DennisKh/claudex/commit/08d963550ea03c79c40614ab8c0a51702d864f96))
+
 ## [0.1.1](https://github.com/DennisKh/claudex/compare/v0.1.0...v0.1.1) (2026-09-06)
 
 
