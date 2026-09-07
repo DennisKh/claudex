@@ -13,11 +13,9 @@ defmodule Claudex.Tool.Schema.StructExpansion do
       Verified against Ecto 3.14 — a field whose type Claudex doesn't
       recognize (an older Ecto's internal representation for a
       parameterized type, or a custom `Ecto.Type` that doesn't implement
-      `type/0`) raises `Claudex.Tool.SchemaError` rather than silently
-      producing a wrong schema. Association fields (`belongs_to`,
-      `has_many`, `has_one`, `many_to_many`) are skipped — Ecto doesn't
-      even include them in `__schema__(:fields)`, and expanding them would
-      risk unbounded recursion through relationship graphs anyway. Embeds
+      `type/0`) raises `Claudex.Tool.SchemaError`. Association fields
+      (`belongs_to`, `has_many`, `has_one`, `many_to_many`) are skipped —
+      Ecto doesn't even include them in `__schema__(:fields)`. Embeds
       (`embeds_one`, `embeds_many`) are genuine data, not a relationship,
       and are expanded.
     * a plain struct with `@type t :: %__MODULE__{...}` — read from the
@@ -64,7 +62,6 @@ defmodule Claudex.Tool.Schema.StructExpansion do
     end
   end
 
-  @spec visit(Schema.context(), module()) :: Schema.context()
   defp visit(ctx, module), do: %{ctx | visited: [module | ctx.visited], current_module: module}
 
   defp ecto_schema?(module), do: function_exported?(module, :__schema__, 1)

@@ -1,16 +1,18 @@
 defmodule Claudex.Stream.Accumulator do
   @moduledoc """
-  Folds stream events back into the `Claudex.Message` they describe — the
-  same struct `Claudex.Messages.create/2` would have returned.
+  Folds the `Claudex.Stream.Event` structs a stream yields back into the
+  `Claudex.Message` they describe — the same struct
+  `Claudex.Messages.create/2` would have returned.
 
-      events
+      client
+      |> Claudex.Messages.stream!(params)
       |> Enum.reduce(Accumulator.new(), &Accumulator.add(&2, &1))
       |> Accumulator.message()
 
-  `message/1` works at any point, so you can take a snapshot mid-stream. One
-  thing to know: a tool call's `input` is only filled in once its
-  `content_block_stop` arrives, because the API sends the arguments as JSON
-  fragments that are only parseable together.
+  `message/1` works at any point, so you can take a snapshot mid-stream. A
+  tool call's `input` is only filled in once its `content_block_stop`
+  arrives, because the API sends the arguments as JSON fragments that are
+  only parseable together.
   """
 
   alias Claudex.ContentBlock.{Text, Thinking, ToolUse}

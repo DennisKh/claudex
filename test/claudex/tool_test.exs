@@ -168,6 +168,63 @@ defmodule Claudex.ToolTest do
     assert Claudex.Tool.list(nil) == []
   end
 
+  describe "@tool options" do
+    defp define(opts) do
+      Code.compile_string("""
+      defmodule BadOpts#{System.unique_integer([:positive])} do
+        use Claudex.Tool
+        @doc "X."
+        @tool #{opts}
+        @spec a() :: :ok
+        def a, do: :ok
+      end
+      """)
+    end
+
+    test "an unknown key names itself instead of being ignored" do
+      assert_raise Claudex.Tool.SchemaError, ~r/unknown `@tool` option :stirct/, fn ->
+        define(~s(%{stirct: true}))
+      end
+    end
+
+    test ":strict must be a boolean, not merely truthy" do
+      assert_raise Claudex.Tool.SchemaError, ~r/:strict must be true or false, got: 0/, fn ->
+        define("%{strict: 0}")
+      end
+
+      assert_raise Claudex.Tool.SchemaError, ~r/:strict must be true or false/, fn ->
+        define(~s(%{strict: "yes"}))
+      end
+    end
+
+    test "@tool takes true or a map, nothing else" do
+      assert_raise Claudex.Tool.SchemaError, ~r/takes true or a map of options, got: :yes/, fn ->
+        define(":yes")
+      end
+    end
+
+    test "a tool with no @doc warns and falls back to a placeholder" do
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          Code.compile_string("""
+          defmodule NoDocTool#{System.unique_integer([:positive])} do
+            use Claudex.Tool
+            @tool true
+            @spec a() :: :ok
+            def a, do: :ok
+          end
+          """)
+        end)
+
+      assert warning =~ "is tagged `@tool` but has no `@doc`"
+    end
+
+    test "valid options still compile" do
+      assert [{_module, _bin}] = define("%{strict: true}")
+      assert [{_module, _bin}] = define(~s(%{args_schema: %{"a" => %{type: "string"}}}))
+    end
+  end
+
   test "list/1 raises for a module that doesn't use Claudex.Tool" do
     assert_raise ArgumentError, ~r/doesn't `use Claudex.Tool`/, fn ->
       Claudex.Tool.list(String)

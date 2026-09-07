@@ -11,21 +11,20 @@ defmodule Claudex.Tool.Schema do
   schema.
 
   A typespec construct that can't be mapped raises
-  `Claudex.Tool.SchemaError` rather than silently producing an
-  unconstrained (or wrong) schema — see `build/4`.
+  `Claudex.Tool.SchemaError` — see `build/4`.
   """
 
   alias Claudex.Tool.Schema.StructExpansion
   alias Claudex.Tool.SchemaError
 
   @typedoc "A function parameter: its name and whether it has a default value."
-  @type param :: {name :: atom(), has_default :: boolean()}
+  @type param :: {name :: String.t(), has_default :: boolean()}
 
   @typedoc """
   Threaded through every recursive call:
 
     * `env` — the compile-time environment, needed to resolve an aliased
-      module reference (`Ticket.t()` after `alias My.App.Ticket`) into
+      module reference (e.g. `Ticket.t()` after `alias My.App.Ticket`) into
       its real module name
     * `visited` — struct modules already being expanded on the current
       path, so a self- or mutually-referential struct stops instead of
@@ -37,6 +36,40 @@ defmodule Claudex.Tool.Schema do
   @type context :: %{visited: [module()], env: Macro.Env.t(), current_module: module()}
 
   @unspecified :__claudex_unspecified_type__
+
+  # Elixir's zero-arity built-in types and the JSON schema each becomes. The
+  # clauses matching them are generated below, so adding a type is one line.
+  @builtin_types %{
+    any: %{},
+    atom: %{type: "string"},
+    binary: %{type: "string"},
+    bitstring: %{type: "string"},
+    boolean: %{type: "boolean"},
+    charlist: %{type: "array", items: %{type: "integer"}},
+    float: %{type: "number"},
+    integer: %{type: "integer"},
+    iodata: %{type: "string"},
+    iolist: %{type: "string"},
+    keyword: %{type: "object"},
+    list: %{type: "array"},
+    map: %{type: "object"},
+    non_neg_integer: %{type: "integer", minimum: 0},
+    nonempty_list: %{type: "array", minItems: 1},
+    number: %{type: "number"},
+    pos_integer: %{type: "integer", minimum: 1},
+    struct: %{type: "object"},
+    term: %{}
+  }
+
+  # Stdlib structs the API expects as strings; anything else goes to
+  # StructExpansion.
+  @remote_types %{
+    Date => %{type: "string", format: "date"},
+    DateTime => %{type: "string", format: "date-time"},
+    NaiveDateTime => %{type: "string", format: "date-time"},
+    String => %{type: "string"},
+    Time => %{type: "string", format: "time"}
+  }
 
   @doc """
   Extracts each parameter's name and whether it has a default value, from
@@ -58,12 +91,10 @@ defmodule Claudex.Tool.Schema do
   needs the order later to dispatch tool calls correctly.
 
   A parameter with no matching `@spec` at all gets an unconstrained
-  (`%{}`) property — that's a normal, documented fallback. A parameter
-  whose `@spec` type Claudex can't map — an unsupported typespec
-  construct, or a `Mod.t()` that isn't a loaded struct or Ecto schema —
-  raises `Claudex.Tool.SchemaError` instead: a schema that silently
-  omits real constraints is worse than a loud compile error telling you
-  to fix the spec or pass `args_schema:`.
+  (`%{}`) property. A parameter whose `@spec` type Claudex can't map — an
+  unsupported typespec construct, or a `Mod.t()` that isn't a loaded struct
+  or Ecto schema — raises `Claudex.Tool.SchemaError`. Fix the spec, or pass
+  `args_schema:` for that tool.
   """
 
   @spec build(atom(), [Macro.t()], [tuple()], Macro.Env.t()) :: %{
@@ -80,7 +111,7 @@ defmodule Claudex.Tool.Schema do
       param_list
       |> Enum.zip(pad(arg_types, length(param_list)))
       |> Map.new(fn {{param_name, _has_default}, type_ast} ->
-        {Atom.to_string(param_name), type_to_schema(type_ast, ctx)}
+        {param_name, type_to_schema(type_ast, ctx)}
       end)
 
     %{properties: properties, params: param_list}
@@ -104,43 +135,9 @@ defmodule Claudex.Tool.Schema do
 
   def type_to_schema(literal, _ctx) when is_atom(literal), do: %{const: Atom.to_string(literal)}
 
-  def type_to_schema({:binary, _, []}, _ctx), do: %{type: "string"}
-
-  def type_to_schema({:bitstring, _, []}, _ctx), do: %{type: "string"}
-
-  def type_to_schema({:iodata, _, []}, _ctx), do: %{type: "string"}
-
-  def type_to_schema({:iolist, _, []}, _ctx), do: %{type: "string"}
-
-  def type_to_schema({:charlist, _, []}, _ctx), do: %{type: "array", items: %{type: "integer"}}
-
-  def type_to_schema({:any, _, []}, _ctx), do: %{}
-
-  def type_to_schema({:term, _, []}, _ctx), do: %{}
-
-  def type_to_schema({:list, _, []}, _ctx), do: %{type: "array"}
-
-  def type_to_schema({:nonempty_list, _, []}, _ctx), do: %{type: "array", minItems: 1}
-
-  def type_to_schema({:keyword, _, []}, _ctx), do: %{type: "object"}
-
-  def type_to_schema({:struct, _, []}, _ctx), do: %{type: "object"}
-
-  def type_to_schema({:integer, _, []}, _ctx), do: %{type: "integer"}
-
-  def type_to_schema({:non_neg_integer, _, []}, _ctx), do: %{type: "integer", minimum: 0}
-
-  def type_to_schema({:pos_integer, _, []}, _ctx), do: %{type: "integer", minimum: 1}
-
-  def type_to_schema({:float, _, []}, _ctx), do: %{type: "number"}
-
-  def type_to_schema({:number, _, []}, _ctx), do: %{type: "number"}
-
-  def type_to_schema({:boolean, _, []}, _ctx), do: %{type: "boolean"}
-
-  def type_to_schema({:atom, _, []}, _ctx), do: %{type: "string"}
-
-  def type_to_schema({:map, _, []}, _ctx), do: %{type: "object"}
+  for {name, schema} <- @builtin_types do
+    def type_to_schema({unquote(name), _meta, []}, _ctx), do: unquote(Macro.escape(schema))
+  end
 
   def type_to_schema({:%{}, _, _}, _ctx), do: %{type: "object"}
 
@@ -190,10 +187,10 @@ defmodule Claudex.Tool.Schema do
   # `def read(_path)` would otherwise publish a property literally named
   # "_path", which Claude never sends.
   defp param_name({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
-    name |> Atom.to_string() |> String.trim_leading("_") |> String.to_atom()
+    name |> Atom.to_string() |> String.trim_leading("_")
   end
 
-  defp param_name(_pattern), do: :arg
+  defp param_name(_pattern), do: "arg"
 
   defp spec_arg_types(name, arity, module_specs) do
     Enum.find_value(module_specs, [], fn
@@ -208,21 +205,15 @@ defmodule Claudex.Tool.Schema do
 
   defp pad(list, size), do: list ++ List.duplicate(@unspecified, max(size - length(list), 0))
 
-  @spec new_context(Macro.Env.t()) :: context()
   defp new_context(env), do: %{visited: [], env: env, current_module: env.module}
 
   defp module_ref({:__aliases__, _, _} = alias_ast, env), do: Macro.expand(alias_ast, env)
 
   defp module_ref(mod, _env) when is_atom(mod), do: mod
 
-  defp remote_type_schema(String, _ctx), do: %{type: "string"}
-
-  defp remote_type_schema(mod, _ctx) when mod in [DateTime, NaiveDateTime],
-    do: %{type: "string", format: "date-time"}
-
-  defp remote_type_schema(Date, _ctx), do: %{type: "string", format: "date"}
-
-  defp remote_type_schema(Time, _ctx), do: %{type: "string", format: "time"}
+  for {module, schema} <- @remote_types do
+    defp remote_type_schema(unquote(module), _ctx), do: unquote(Macro.escape(schema))
+  end
 
   defp remote_type_schema(module, ctx) do
     case StructExpansion.expand(module, ctx) do

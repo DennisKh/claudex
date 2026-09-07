@@ -19,8 +19,8 @@ defmodule Claudex.Tool do
       Claudex.Tool.list(MyApp.Tools)
       #=> [%{name: "add", description: "Adds two numbers.", input_schema: %{...}}]
 
-  You rarely need even that — `Claudex.Messages.create/2` takes the module
-  directly as `tools:` and expands it for you.
+  `Claudex.Messages.create/2` takes the module directly as `tools:` and
+  expands it for you.
 
   Pass a map instead of `true` for options:
 
@@ -31,20 +31,46 @@ defmodule Claudex.Tool do
       Claudex can't map (see below), or when you need something a
       typespec can't express (a per-argument `description`, an `enum`)
 
+  `:args_schema` is the `properties` object, not the whole input schema —
+  `required` still comes from which parameters have defaults:
+
+      @doc "Fetches the current weather for a city."
+      @tool %{
+        args_schema: %{
+          "city" => %{type: "string", description: "City and country, e.g. Lisbon, PT"},
+          "unit" => %{type: "string", enum: ["celsius", "fahrenheit"]}
+        }
+      }
+      @spec get_weather(String.t(), String.t()) :: String.t()
+      def get_weather(city, unit \\ "celsius"), do: ...
+
+      # input_schema: %{
+      #   type: "object",
+      #   properties: %{"city" => ..., "unit" => ...},
+      #   required: ["city"],
+      #   additionalProperties: false
+      # }
+
   When a `tool_use` block comes back from Claude, `call/3` runs the matching
   function:
 
       Claudex.Tool.call(MyApp.Tools, "add", %{"a" => 1, "b" => 2})
       #=> {:ok, 3}
 
-  Usually you won't do that either: `Claudex.ToolRunner` runs the tools Claude
-  asks for and feeds the results back, so a whole tool conversation is one
-  call.
+  `Claudex.ToolRunner` does this natively — it runs the tools Claude asks for
+  and feeds the results back, so a whole tool conversation is one call.
 
-  A function with no `@spec` at all still registers, just with
-  unconstrained properties — that's a normal fallback, not an error. Put
-  the `@spec` above the function (or anywhere earlier in the module) and
-  make sure its arity matches, or Claudex won't find it either.
+  The `@doc` is what Claude reads to decide when to call a tool, so a `@tool`
+  without one compiles with a warning and a placeholder description.
+
+  A function with no `@spec` at all still registers, with unconstrained
+  properties. Put the `@spec` above the function (or anywhere earlier in the
+  module) and make sure its arity matches, or Claudex won't find it either.
+
+  A defaulted argument makes two arities, and Claudex reads the widest one:
+  `@spec add(number()) :: number()` alone won't match `def add(a, b \\ 0)`,
+  and both properties come out unconstrained. Writing one `@spec` per arity
+  is fine — the matching one is picked whichever order they're in.
 
   A struct type in a `@spec` — `Ticket.t()` for a plain `defstruct` with a
   `@type t`, or for an Ecto schema — expands into a nested object schema
@@ -58,13 +84,14 @@ defmodule Claudex.Tool do
 
   A `@spec` type Claudex genuinely can't map — an unsupported typespec
   construct, or a `Mod.t()` that isn't a loaded struct or Ecto schema —
-  raises `Claudex.Tool.SchemaError` at compile time rather than silently
-  registering an incomplete or wrong schema. Fix the spec, or pass
+  raises `Claudex.Tool.SchemaError` at compile time. Fix the spec, or pass
   `:args_schema` to skip inference for that tool entirely. See
   `Claudex.Tool.Schema.StructExpansion` for exactly what's supported.
   """
 
-  alias Claudex.Tool.{Dispatch, Schema}
+  alias Claudex.Tool.{Dispatch, Schema, SchemaError}
+
+  @tool_opts [:args_schema, :strict]
 
   defmacro __using__(_opts) do
     quote do
@@ -84,7 +111,7 @@ defmodule Claudex.Tool do
         :ok
 
       _tool_opts when kind != :def ->
-        raise Claudex.Tool.SchemaError, message: private_tool_message(name, args, kind)
+        raise SchemaError, message: private_tool_message(name, args, kind)
 
       tool_opts ->
         register(env, name, args, tool_opts)
@@ -127,10 +154,19 @@ defmodule Claudex.Tool do
   Arguments are matched to the function's parameters by name, so their order in
   the map doesn't matter, and a trailing optional parameter can be left out.
 
-  A tool that raises comes back as an error rather than taking the caller down
-  with it: `{:error, {:tool_refused, message}}` when it raised
-  `Claudex.Tool.Error` on purpose, `{:error, {:tool_raised, message}}` for
-  anything else — a thrown value or an exit included.
+  A tool that fails returns an error instead of taking the caller down with
+  it. The two tags separate a refusal from a bug:
+
+    * `{:error, {:tool_refused, message}}` — the tool raised
+      `Claudex.Tool.Error`, which is how a tool declines to do something
+    * `{:error, {:tool_raised, message}}` — anything else went wrong: another
+      exception, a `throw`, or an `exit`
+
+  For `:tool_raised` the exception type is part of the message, so a bug
+  reads differently to Claude than a considered refusal:
+
+      {:error, {:tool_refused, "path is outside the workspace"}}
+      {:error, {:tool_raised, "KeyError: key :missing not found in:\n\n    %{}\n"}}
   """
 
   @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, Dispatch.error()}
@@ -224,7 +260,7 @@ defmodule Claudex.Tool do
 
     tool = %{
       name: Atom.to_string(name),
-      description: description(module),
+      description: description(env, name, args),
       input_schema: input_schema
     }
 
@@ -257,19 +293,57 @@ defmodule Claudex.Tool do
 
   defp normalize_opts(true), do: %{}
 
-  defp normalize_opts(opts) when is_map(opts), do: opts
+  defp normalize_opts(opts) when is_map(opts) do
+    opts |> check_known_opts!() |> check_strict!()
+  end
+
+  defp normalize_opts(other) do
+    raise SchemaError,
+      message: "`@tool` takes true or a map of options, got: #{inspect(other)}"
+  end
+
+  defp check_known_opts!(opts) do
+    case Enum.find(Map.keys(opts), &(&1 not in @tool_opts)) do
+      nil ->
+        opts
+
+      unknown ->
+        raise SchemaError,
+          message:
+            "unknown `@tool` option #{inspect(unknown)} — " <>
+              "`@tool` takes #{Enum.map_join(@tool_opts, " and ", &inspect/1)}"
+    end
+  end
+
+  defp check_strict!(%{strict: strict} = opts) when is_boolean(strict), do: opts
+
+  defp check_strict!(%{strict: strict}) do
+    raise SchemaError,
+      message: "`@tool` option :strict must be true or false, got: #{inspect(strict)}"
+  end
+
+  defp check_strict!(opts), do: opts
 
   defp required_params(params, properties) do
     params
     |> Enum.reject(fn {_name, has_default} -> has_default end)
-    |> Enum.map(fn {name, _has_default} -> Atom.to_string(name) end)
+    |> Enum.map(fn {name, _has_default} -> name end)
     |> Enum.filter(&Map.has_key?(properties, &1))
   end
 
-  defp description(module) do
-    case Module.get_attribute(module, :doc) do
-      {_line, doc} when is_binary(doc) -> doc
-      _other -> "No description provided."
+  defp description(env, name, args) do
+    case Module.get_attribute(env.module, :doc) do
+      {_line, doc} when is_binary(doc) ->
+        doc
+
+      _no_doc ->
+        IO.warn(
+          "#{inspect(env.module)}.#{name}/#{length(args)} is tagged `@tool` but has no " <>
+            "`@doc` — Claude picks a tool by its description, so it only sees the name",
+          env
+        )
+
+        "No description provided."
     end
   end
 
