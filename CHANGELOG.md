@@ -5,47 +5,47 @@
 
 ### Features
 
-* **telemetry:** document the events and ship a default logger ([c26395b](https://github.com/DennisKh/claudex/commit/c26395bf461abe1acc5142950e4ab697589142b3))
-* **telemetry:** document the events and ship a default logger ([5be1451](https://github.com/DennisKh/claudex/commit/5be1451fdb92eb2d48562895676744957a95eddc))
+* **telemetry:** document the events and ship a default logger ([cbed35a](https://github.com/DennisKh/claudex/commit/cbed35ab03749cbee00ad4a8360190dd7aa0bcf2))
+* **telemetry:** document the events and ship a default logger ([c16f67c](https://github.com/DennisKh/claudex/commit/c16f67cd0e9fce913a53755ea1884023374c5e1c))
 
 ## [0.4.0](https://github.com/DennisKh/claudex/compare/v0.3.0...v0.4.0) (2026-09-07)
 
 
 ### Features
 
-* **models:** add the Models API with shared pagination ([26d26ef](https://github.com/DennisKh/claudex/commit/26d26ef0e3d493dc92bdd813012607fec8d7bb91))
-* **models:** add the Models API with shared pagination ([4179ff5](https://github.com/DennisKh/claudex/commit/4179ff5f65e706a2c04cef40ca31e28897c94d03))
+* **models:** add the Models API with shared pagination ([bb0a231](https://github.com/DennisKh/claudex/commit/bb0a231063c1194d51ad777b6b4e053f34bf1cc3))
+* **models:** add the Models API with shared pagination ([d29b551](https://github.com/DennisKh/claudex/commit/d29b551e04c46da49ae810f1ba9cb6b2521507cf))
 
 ## [0.3.0](https://github.com/DennisKh/claudex/compare/v0.2.0...v0.3.0) (2026-09-07)
 
 
 ### Features
 
-* **tool_runner:** add the agentic loop over registered tools ([6915af6](https://github.com/DennisKh/claudex/commit/6915af65cb31e4394ef363e8594a677d33caa6fa))
-* **tool_runner:** add the agentic loop over registered tools ([e24c1e9](https://github.com/DennisKh/claudex/commit/e24c1e92215209795c14fde007db504e90a2902b))
+* **tool_runner:** add the agentic loop over registered tools ([d416912](https://github.com/DennisKh/claudex/commit/d4169128f4114bc1aec7ed72b2cf371992ca07df))
+* **tool_runner:** add the agentic loop over registered tools ([f72a1e2](https://github.com/DennisKh/claudex/commit/f72a1e26372e480933194a4c1df9e9063a635df4))
 
 ## [0.2.0](https://github.com/DennisKh/claudex/compare/v0.1.1...v0.2.0) (2026-09-07)
 
 
 ### Features
 
-* **messages:** add the Messages API with streaming and tool schemas ([557ffaf](https://github.com/DennisKh/claudex/commit/557ffaf3478d953617eac7d94bd5ca892b5f8924))
+* **messages:** add the Messages API with streaming and tool schemas ([7fb59f8](https://github.com/DennisKh/claudex/commit/7fb59f86f54e0b89144c3c521d77e0b84ccff805))
 
 
 ### Bug Fixes
 
-* **ci:** let a feat bump the minor version again ([410ebb5](https://github.com/DennisKh/claudex/commit/410ebb59be29bcad7e5064282af843b342fd97bf))
-* **ci:** let a feat bump the minor version again ([08d9635](https://github.com/DennisKh/claudex/commit/08d963550ea03c79c40614ab8c0a51702d864f96))
+* **ci:** let a feat bump the minor version again ([d298d07](https://github.com/DennisKh/claudex/commit/d298d07c7ab4739f1ec05c315dd315946356d2ee))
+* **ci:** let a feat bump the minor version again ([a981e87](https://github.com/DennisKh/claudex/commit/a981e87aef9040b69473416ff301e93c9a4b1364))
 
 ## [0.1.1](https://github.com/DennisKh/claudex/compare/v0.1.0...v0.1.1) (2026-09-06)
 
 
 ### Features
 
-* add the base client, request layer and error handling ([337665f](https://github.com/DennisKh/claudex/commit/337665f4ecc4e6a4fac7d3761bee8a78f3a17865))
-* add the base client, request layer and error handling ([6e14cb6](https://github.com/DennisKh/claudex/commit/6e14cb6d37ed3b9e19ebb2e22ad5d1c1d6491850))
+* add the base client, request layer and error handling ([3ee95c1](https://github.com/DennisKh/claudex/commit/3ee95c14a45ee0ef9e2a910adf7bef1296577be8))
+* add the base client, request layer and error handling ([d8c9686](https://github.com/DennisKh/claudex/commit/d8c9686cee1f00fdf888caaf42c332f0fb6a8804))
 
 
 ### Bug Fixes
 
-* **ci:** anchor release-please at 0.1.0 so the next release is 0.2.0 ([e0f782b](https://github.com/DennisKh/claudex/commit/e0f782b82c19b00e4b81442c6468f94a872c2c70))
+* **ci:** anchor release-please at 0.1.0 so the next release is 0.2.0 ([5bc6c58](https://github.com/DennisKh/claudex/commit/5bc6c580ac1411f2d3c2d363975b284a6125275c))
