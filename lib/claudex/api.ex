@@ -65,18 +65,29 @@ defmodule Claudex.API do
     request(client, method: :delete, url: url)
   end
 
-  defp error_module(:error, reason, stacktrace) do
-    :error |> Exception.normalize(reason, stacktrace) |> Map.fetch!(:__struct__)
-  end
-
-  defp error_module(_kind, _reason, _stacktrace), do: nil
-
-  defp put_model(metadata, options) do
+  @doc false
+  @spec put_model(map(), keyword()) :: map()
+  def put_model(metadata, options) do
     case Keyword.get(options, :json) do
       %{} = body -> maybe_put_model(metadata, body[:model] || body["model"])
       _not_a_body -> metadata
     end
   end
+
+  @doc false
+  @spec request_id(Req.Response.t()) :: String.t() | nil
+  def request_id(response) do
+    case Req.Response.get_header(response, "request-id") do
+      [request_id | _rest] -> request_id
+      [] -> nil
+    end
+  end
+
+  defp error_module(:error, reason, stacktrace) do
+    :error |> Exception.normalize(reason, stacktrace) |> Map.fetch!(:__struct__)
+  end
+
+  defp error_module(_kind, _reason, _stacktrace), do: nil
 
   defp maybe_put_model(metadata, model) when is_binary(model),
     do: Map.put(metadata, :model, model)
@@ -90,13 +101,6 @@ defmodule Claudex.API do
 
   defp response_metadata({:error, exception}) do
     %{status: nil, error: exception.__struct__}
-  end
-
-  defp request_id(response) do
-    case Req.Response.get_header(response, "request-id") do
-      [request_id | _rest] -> request_id
-      [] -> nil
-    end
   end
 
   defp usage(%{"usage" => %{} = usage}) do

@@ -1,7 +1,7 @@
 defmodule Claudex.ChunkStream do
   @moduledoc false
 
-  alias Claudex.{Client, Error}
+  alias Claudex.{API, Client, Error}
 
   @doc """
   Streams a response body as raw binary chunks.
@@ -33,19 +33,28 @@ defmodule Claudex.ChunkStream do
         run(client, request_options, consumer, ref)
       end)
 
-    path = Keyword.get(request_options, :url)
+    metadata =
+      %{
+        method: Keyword.get(request_options, :method, :get),
+        path: Keyword.get(request_options, :url)
+      }
+      |> API.put_model(request_options)
 
-    :telemetry.execute([:claudex, :stream, :start], %{system_time: System.system_time()}, %{
-      path: path
-    })
+    :telemetry.execute(
+      [:claudex, :request, :start],
+      %{system_time: System.system_time()},
+      metadata
+    )
 
     %{
       producer: producer,
       monitor: monitor,
       ref: ref,
       done?: false,
-      path: path,
+      metadata: metadata,
       chunks: 0,
+      bytes: 0,
+      response: %{status: nil, request_id: nil},
       started: System.monotonic_time()
     }
   end
@@ -56,10 +65,10 @@ defmodule Claudex.ChunkStream do
     receive do
       {^ref, :chunk, data} ->
         send(state.producer, {ref, :demand})
-        {[data], %{state | chunks: state.chunks + 1}}
+        {[data], %{state | chunks: state.chunks + 1, bytes: state.bytes + byte_size(data)}}
 
-      {^ref, :done} ->
-        {:halt, %{state | done?: true}}
+      {^ref, {:done, response}} ->
+        {:halt, %{state | done?: true, response: response}}
 
       {^ref, {:error, error}} ->
         raise error
@@ -75,9 +84,13 @@ defmodule Claudex.ChunkStream do
     Process.exit(producer, :kill)
 
     :telemetry.execute(
-      [:claudex, :stream, :stop],
-      %{duration: System.monotonic_time() - state.started, chunks: state.chunks},
-      %{path: state.path}
+      [:claudex, :request, :stop],
+      %{
+        duration: System.monotonic_time() - state.started,
+        chunks: state.chunks,
+        bytes: state.bytes
+      },
+      Map.merge(state.metadata, state.response)
     )
 
     :ok
@@ -139,7 +152,8 @@ defmodule Claudex.ChunkStream do
     end
   end
 
-  defp outcome({:ok, %Req.Response{status: status}}) when status in 200..299, do: :done
+  defp outcome({:ok, %Req.Response{status: status} = response}) when status in 200..299,
+    do: {:done, %{status: status, request_id: API.request_id(response)}}
 
   defp outcome({:ok, %Req.Response{status: status, body: body}}) do
     {:error, Error.from_response(status, body)}
