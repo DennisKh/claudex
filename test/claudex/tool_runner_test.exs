@@ -1,7 +1,7 @@
 defmodule Claudex.ToolRunnerTest do
   use ExUnit.Case, async: true
 
-  alias Claudex.{Client, Error, Message, ToolRunner}
+  alias Claudex.{Client, ContentBlock, Error, Message, ToolRunner}
   alias Claudex.ToolRunner.Turn
 
   defmodule Calculator do
@@ -258,5 +258,84 @@ defmodule Claudex.ToolRunnerTest do
 
     assert [%{content: content, is_error: false}] = first.tool_results
     assert content =~ ":not_found"
+  end
+
+  describe ":before_call" do
+    test "a denial skips the tool and sends the reason back as an error result" do
+      test_pid = self()
+
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("I could not add those.")], "end_turn")
+      ])
+
+      deny = fn %ContentBlock.ToolUse{} = call ->
+        send(test_pid, {:asked, call.name, call.input})
+        {:deny, "The user declined this tool call."}
+      end
+
+      assert [first, last] =
+               client() |> ToolRunner.stream(@params, before_call: deny) |> Enum.to_list()
+
+      assert_received {:asked, "add", %{"a" => 12, "b" => 30}}
+
+      assert [%{content: "The user declined this tool call.", is_error: true}] =
+               first.tool_results
+
+      assert last.stop == :completed
+    end
+
+    test "returning :ok runs the tool as usual" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42.")], "end_turn")
+      ])
+
+      allow = fn %ContentBlock.ToolUse{} -> :ok end
+
+      assert [first, _last] =
+               client() |> ToolRunner.stream(@params, before_call: allow) |> Enum.to_list()
+
+      assert [%{content: "42", is_error: false}] = first.tool_results
+    end
+
+    test "each call is offered separately" do
+      test_pid = self()
+
+      respond_with([
+        message(
+          [
+            tool_use("add", %{"a" => 1, "b" => 2}, "toolu_1"),
+            tool_use("add", %{"a" => 3, "b" => 4}, "toolu_2")
+          ],
+          "tool_use"
+        ),
+        message([text("done")], "end_turn")
+      ])
+
+      gate = fn %ContentBlock.ToolUse{id: id} ->
+        send(test_pid, {:asked, id})
+        if id == "toolu_1", do: :ok, else: {:deny, "only the first"}
+      end
+
+      assert [first, _last] =
+               client() |> ToolRunner.stream(@params, before_call: gate) |> Enum.to_list()
+
+      assert_received {:asked, "toolu_1"}
+      assert_received {:asked, "toolu_2"}
+
+      assert [%{content: "3", is_error: false}, %{content: "only the first", is_error: true}] =
+               first.tool_results
+    end
+
+    test "an unexpected return value is a programmer error" do
+      respond_with([message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use")])
+
+      assert_raise ArgumentError, ~r/:before_call must return :ok or \{:deny, reason\}/, fn ->
+        client()
+        |> ToolRunner.stream(@params, before_call: fn _call -> :maybe end)
+        |> Enum.to_list()
+      end
+    end
   end
 end

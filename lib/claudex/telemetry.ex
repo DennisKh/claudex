@@ -42,7 +42,7 @@ defmodule Claudex.Telemetry do
   ### `[:claudex, :tool, :start | :stop | :exception]`
 
   A span around one tool call. `:stop` metadata has `:tool` and an `:outcome`
-  of `:ok`, `:refused`, `:failed`, or `:unknown_tool`.
+  of `:ok`, `:refused`, `:denied`, `:failed`, or `:unknown_tool`.
 
   ### `[:claudex, :tool_runner, :turn]` and `[:claudex, :tool_runner, :stop]`
 

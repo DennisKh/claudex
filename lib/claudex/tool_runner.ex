@@ -58,6 +58,30 @@ defmodule Claudex.ToolRunner do
 
     * `:max_turns` - how many times to go around before giving up, defaulting
       to #{@default_max_turns}. The last turn then carries `stop: :max_turns`.
+    * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
+      before the tool does, returning `:ok` or `{:deny, reason}`
+
+  ## Approving a tool call
+
+  `:before_call` is where a call gets gated — a confirmation prompt, an
+  allowlist, a human clicking approve. It runs per call, before dispatch:
+
+      Claudex.ToolRunner.run(client, params,
+        before_call: fn %Claudex.ContentBlock.ToolUse{name: name, input: input} ->
+          if MyApp.Approvals.granted?(name, input) do
+            :ok
+          else
+            {:deny, "The user declined this tool call."}
+          end
+        end
+      )
+
+  A denial sends `reason` back as a `tool_result` with `is_error: true` and the
+  conversation carries on, so Claude can explain itself or try another way. The
+  tool is never called, so nothing it would have done happens.
+
+  The function is called in the process enumerating the stream, so it can block
+  — waiting on a `GenServer.call` for a decision from a UI, say.
   """
 
   require Logger
@@ -109,12 +133,18 @@ defmodule Claudex.ToolRunner do
   @spec stream(Client.t(), map() | keyword(), keyword()) :: Enumerable.t()
   def stream(%Client{} = client, params, opts \\ []) do
     params = Map.new(params)
-    registry = Tool.registry(params[:tools])
-    max_turns = Keyword.get(opts, :max_turns, @default_max_turns)
+
+    config = %{
+      client: client,
+      params: params,
+      registry: Tool.registry(params[:tools]),
+      max_turns: Keyword.get(opts, :max_turns, @default_max_turns),
+      before_call: Keyword.get(opts, :before_call)
+    }
 
     Stream.unfold({Message.append([], params[:messages] || []), 1}, fn
       :done -> nil
-      {messages, index} -> next_turn(client, params, registry, messages, index, max_turns)
+      {messages, index} -> next_turn(config, messages, index)
     end)
     |> Stream.map(&emit_turn/1)
   end
@@ -133,8 +163,8 @@ defmodule Claudex.ToolRunner do
     turn
   end
 
-  defp next_turn(client, params, registry, messages, index, max_turns) do
-    message = request!(client, params, messages)
+  defp next_turn(config, messages, index) do
+    message = request!(config, messages)
     messages = Message.append(messages, message)
     tool_uses = tool_uses(message)
 
@@ -145,12 +175,12 @@ defmodule Claudex.ToolRunner do
       # effects Claude never confirmed, and the results couldn't be replayed.
       message.stop_reason == "refusal" -> {%{turn | stop: :refusal}, :done}
       tool_uses == [] -> {%{turn | stop: :completed}, :done}
-      true -> continue(turn, registry, messages, index, max_turns)
+      true -> continue(config, turn, messages, index)
     end
   end
 
-  defp continue(turn, registry, messages, index, max_turns) do
-    results = Enum.map(turn.tool_uses, &run_tool(&1, registry))
+  defp continue(config, turn, messages, index) do
+    results = Enum.map(turn.tool_uses, &run_tool(&1, config))
 
     messages = Message.append(messages, Message.tool_results(results))
     turn = %{turn | tool_results: results, messages: messages}
@@ -158,15 +188,15 @@ defmodule Claudex.ToolRunner do
     # The limit is checked here rather than before the next request so the last
     # turn carries the reason. The tool results are already in the history, so
     # the conversation can be resumed by passing it back.
-    if index >= max_turns do
+    if index >= config.max_turns do
       {%{turn | stop: :max_turns}, :done}
     else
       {turn, {messages, index + 1}}
     end
   end
 
-  defp request!(client, params, messages) do
-    case Messages.create(client, Map.put(params, :messages, messages)) do
+  defp request!(config, messages) do
+    case Messages.create(config.client, Map.put(config.params, :messages, messages)) do
       {:ok, message} -> message
       {:error, error} -> raise error
     end
@@ -176,17 +206,44 @@ defmodule Claudex.ToolRunner do
     Enum.filter(content, &match?(%ToolUse{}, &1))
   end
 
-  defp run_tool(%ToolUse{} = tool_use, registry) do
+  defp run_tool(%ToolUse{} = tool_use, config) do
     :telemetry.span([:claudex, :tool], %{tool: tool_use.name}, fn ->
-      case Map.fetch(registry, tool_use.name) do
-        {:ok, module} ->
-          call(module, tool_use)
-
-        :error ->
-          {Tool.result(tool_use.id, "no tool named #{tool_use.name}", is_error: true),
-           %{tool: tool_use.name, outcome: :unknown_tool}}
+      case decide(config.before_call, tool_use) do
+        :ok -> dispatch(tool_use, config.registry)
+        {:deny, reason} -> denied(tool_use, reason)
       end
     end)
+  end
+
+  defp decide(nil, _tool_use), do: :ok
+
+  defp decide(before_call, tool_use) when is_function(before_call, 1) do
+    case before_call.(tool_use) do
+      :ok ->
+        :ok
+
+      {:deny, reason} when is_binary(reason) ->
+        {:deny, reason}
+
+      other ->
+        raise ArgumentError,
+              ":before_call must return :ok or {:deny, reason}, got: #{inspect(other)}"
+    end
+  end
+
+  defp denied(tool_use, reason) do
+    {Tool.result(tool_use.id, reason, is_error: true), %{tool: tool_use.name, outcome: :denied}}
+  end
+
+  defp dispatch(tool_use, registry) do
+    case Map.fetch(registry, tool_use.name) do
+      {:ok, module} ->
+        call(module, tool_use)
+
+      :error ->
+        {Tool.result(tool_use.id, "no tool named #{tool_use.name}", is_error: true),
+         %{tool: tool_use.name, outcome: :unknown_tool}}
+    end
   end
 
   defp call(module, tool_use) do
