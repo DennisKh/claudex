@@ -132,7 +132,9 @@ The `@doc` becomes the tool's description and the `@spec` becomes its schema, so
 
 `tools:` accepts the module directly — `Claudex.Messages.create/2` expands it for you. It also accepts a list mixing modules with plain tool maps.
 
-When Claude wants a tool, you usually shouldn't drive that by hand — `Claudex.ToolRunner` runs the whole conversation:
+## Tool runner
+
+`Claudex.ToolRunner` runs the whole back-and-forth, so you don't drive it by hand:
 
 ```elixir
 {:ok, turn} =
@@ -160,6 +162,8 @@ client
 end)
 ```
 
+### Deciding whether a call runs
+
 A tool decides for itself what it will and won't do — raise `Claudex.Tool.Error` and Claude sees the reason and adapts:
 
 ```elixir
@@ -177,11 +181,29 @@ defmodule MyApp.Tools do
 end
 ```
 
-Any other exception becomes an error result too, labelled as a failure and logged, so a bug in a tool doesn't read to Claude like a policy decision and doesn't end the conversation. If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
+Any other exception becomes an error result too, labelled as a failure and logged, so a bug in a tool doesn't read to Claude like a policy decision and doesn't end the conversation.
+
+When the decision belongs to the caller rather than the tool — a confirmation prompt, an allowlist, a human clicking approve — `:before_call` runs on each `tool_use` before dispatch:
+
+```elixir
+Claudex.ToolRunner.run(client, params,
+  before_call: fn %Claudex.ContentBlock.ToolUse{name: name, input: input} ->
+    if MyApp.Approvals.granted?(name, input) do
+      :ok
+    else
+      {:deny, "The user declined this tool call."}
+    end
+  end
+)
+```
+
+A denial sends the reason back as an error result and the conversation carries on, so Claude can explain itself or try another way; the tool is never called. Each call in a parallel batch is offered separately, so a batch can be partly approved. The function runs in the process enumerating the stream, so it can block — waiting on a `GenServer.call` while a LiveView shows an approve button, say.
+
+If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
 
 A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture.
 
-## Seeing what the SDK is doing
+## Telemetry and logging
 
 Claudex writes nothing to your logs on its own. It emits `:telemetry` events, and ships a logger you can turn on in one line while debugging:
 
