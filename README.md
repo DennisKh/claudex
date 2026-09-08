@@ -184,14 +184,31 @@ Claudex.Telemetry.attach_default_logger()
 
 ```
 [debug] claudex POST /v1/messages claude-opus-5 → 200 in 890.4ms (8 in / 16 out) request_id=req_011CQ...
+[debug] claudex POST /v1/messages claude-opus-5 → 200 in 6531.5ms, streamed 4821 B in 10 chunk(s) request_id=req_011CQ...
 [debug] claudex tool add → ok in 0.1ms
 [debug] claudex tool_runner turn 1 → 1 tool call(s)
 [debug] claudex tool_runner finished after 2 turn(s): completed
 ```
 
+Streaming and non-streaming report the same `[:claudex, :request, :*]` span; a
+streamed one adds the chunk and byte counts. Token counts arrive in the
+response body, so a streamed span has none — read `usage` off the message from
+`Claudex.Stream.final_message/1`.
+
+Every line carries the Logger domain `[:elixir, :claudex]`, so an application
+can tell them apart from its own — useful in a Phoenix app, where Ecto and
+LiveView fill the same `[debug]` stream. To see only Claudex's:
+
+```elixir
+:logger.add_primary_filter(
+  :claudex_only,
+  {&:logger_filters.domain/2, {:stop, :not_equal, [:elixir, :claudex]}}
+)
+```
+
 `Claudex.Telemetry.detach_default_logger/0` turns it off. For production, attach your own handler with `:telemetry.attach_many/4` and send the events to metrics or tracing instead.
 
-The events cover the things you can't otherwise see: the model and `request_id` behind each call (Claudex keeps the request id only on errors), streams that ended early, tool outcomes, why a tool conversation stopped, and retries Claudex *declined* because part of a response had already been delivered. Metadata carries model names, status, token counts, durations and tool names — never prompts, completions, tool arguments, or anything from your client.
+The events cover the things you can't otherwise see: the model and `request_id` behind each call (Claudex keeps the request id only on errors), tool outcomes, why a tool conversation stopped, and retries Claudex *declined* because part of a response had already been delivered. Metadata carries model names, status, token counts, durations and tool names — never prompts, completions, tool arguments, or anything from your client.
 
 ## Models and token counting
 

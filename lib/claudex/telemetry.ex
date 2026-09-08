@@ -32,12 +32,6 @@ defmodule Claudex.Telemetry do
   what Anthropic support asks for, and Claudex otherwise keeps it only on
   errors.
 
-  ### `[:claudex, :stream, :start | :stop]`
-
-  A streaming response, from the first byte to the last. `:stop` measurements
-  carry `:duration` and `:chunks`. Nothing else reports on a lazy stream, so
-  this is the only way to see one that ended early.
-
   ### `[:claudex, :retry, :declined]`
 
   A retry that Claudex refused because part of the response had already reached
@@ -63,7 +57,6 @@ defmodule Claudex.Telemetry do
   @events [
     [:claudex, :request, :stop],
     [:claudex, :request, :exception],
-    [:claudex, :stream, :stop],
     [:claudex, :retry, :declined],
     [:claudex, :tool, :stop],
     [:claudex, :tool_runner, :turn],
@@ -111,7 +104,8 @@ defmodule Claudex.Telemetry do
   def handle_event([:claudex, :request, :stop], measurements, metadata, config) do
     log(config, fn ->
       "#{method(metadata)} #{metadata.path}#{model(metadata)} → #{metadata[:status]} " <>
-        "in #{ms(measurements)}ms" <> tokens(metadata) <> request_id(metadata)
+        "in #{ms(measurements)}ms" <>
+        streamed(measurements) <> tokens(metadata) <> request_id(metadata)
     end)
   end
 
@@ -119,13 +113,6 @@ defmodule Claudex.Telemetry do
     log(config, fn ->
       "#{method(metadata)} #{metadata.path} raised #{inspect(metadata[:kind])} " <>
         "after #{ms(measurements)}ms"
-    end)
-  end
-
-  def handle_event([:claudex, :stream, :stop], measurements, metadata, config) do
-    log(config, fn ->
-      "stream #{metadata.path} ended after #{measurements[:chunks]} chunk(s) " <>
-        "in #{ms(measurements)}ms"
     end)
   end
 
@@ -149,7 +136,18 @@ defmodule Claudex.Telemetry do
     end)
   end
 
-  defp log(%{level: level}, message), do: Logger.log(level, fn -> "claudex " <> message.() end)
+  # The domain lets an application filter these lines apart from its own; in a
+  # Phoenix app they otherwise sit unmarked among Ecto and LiveView debug logs.
+  # Logger prepends `:elixir`, so the domain on the wire is `[:elixir, :claudex]`.
+  defp log(%{level: level}, message) do
+    # credo:disable-for-next-line Credo.Check.Warning.MissedMetadataKeyInLoggerConfig
+    Logger.log(level, fn -> "claudex " <> message.() end, domain: [:claudex])
+  end
+
+  defp streamed(%{chunks: chunks, bytes: bytes}),
+    do: ", streamed #{bytes} B in #{chunks} chunk(s)"
+
+  defp streamed(_measurements), do: ""
 
   defp method(metadata), do: metadata |> Map.get(:method, :get) |> to_string() |> String.upcase()
 

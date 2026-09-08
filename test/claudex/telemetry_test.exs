@@ -224,6 +224,58 @@ defmodule Claudex.TelemetryTest do
     assert logged =~ "(11 in / 7 out)"
   end
 
+  test "a streaming request reports the same span as a non-streaming one" do
+    sse = """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: message_stop
+    data: {"type":"message_stop"}
+
+    """
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} =
+        conn
+        |> Plug.Conn.put_resp_header("request-id", "req_test_stream")
+        |> Plug.Conn.send_chunked(200)
+        |> Plug.Conn.chunk(sse)
+
+      conn
+    end)
+
+    client() |> Messages.stream!(@params) |> Enum.to_list()
+
+    assert_receive {:telemetry, [:claudex, :request, :start], _measurements, start_metadata}
+    assert start_metadata.model == "claude-haiku-4-5"
+    assert start_metadata.path == "/v1/messages"
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], measurements, metadata}
+    assert metadata.status == 200
+    assert metadata.request_id == "req_test_stream"
+    assert metadata.model == "claude-haiku-4-5"
+    assert measurements.chunks > 0
+    assert measurements.bytes > 0
+  end
+
+  test "a streaming span carries no prompt, completion or key" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} =
+        conn
+        |> Plug.Conn.send_chunked(200)
+        |> Plug.Conn.chunk("event: message_stop\ndata: {}\n\n")
+
+      conn
+    end)
+
+    client() |> Messages.stream!(@params) |> Enum.to_list()
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, metadata}
+
+    assert Map.keys(metadata) |> Enum.sort() ==
+             [:method, :model, :path, :request_id, :status]
+  end
+
   test "a request without a model in its body reports none" do
     Req.Test.stub(__MODULE__, fn conn ->
       Req.Test.json(conn, %{"data" => [], "has_more" => false})
