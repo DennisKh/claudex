@@ -112,6 +112,11 @@ defmodule MyApp.Tools do
   @tool true
   @spec add(number(), number()) :: number()
   def add(a, b), do: a + b
+
+  @doc "Read a UTF-8 text file and return its contents."
+  @tool %{args: [path: "Absolute path, or relative to the project directory."]}
+  @spec read_file(String.t()) :: String.t()
+  def read_file(path), do: File.read!(path)
 end
 
 {:ok, message} =
@@ -122,6 +127,8 @@ end
     messages: [%{role: "user", content: "What's 12 plus 30?"}]
   })
 ```
+
+The `@doc` becomes the tool's description and the `@spec` becomes its schema, so both are prompt material. `:args` adds a description per argument, merged into the inferred schema — worth writing for any argument whose name doesn't say it all, since that description is how Claude decides what to pass.
 
 `tools:` accepts the module directly — `Claudex.Messages.create/2` expands it for you. It also accepts a list mixing modules with plain tool maps.
 

@@ -24,12 +24,28 @@ defmodule Claudex.Tool do
 
   Pass a map instead of `true` for options:
 
+    * `:args` - a description per argument, merged into the inferred schema
     * `:strict` - sets `strict: true` on the tool definition
     * `:args_schema` - use this JSON schema for the properties instead of
       inferring one from `@spec`. Takes full priority: when it's set, the
       `@spec` is never even inspected, so it's also the way out of a type
       Claudex can't map (see below), or when you need something a
-      typespec can't express (a per-argument `description`, an `enum`)
+      typespec can't express (an `enum`, say)
+
+  Claude picks arguments from their descriptions, so `:args` is worth writing
+  for anything whose name doesn't say it all. It merges into the inferred
+  schema rather than replacing it, so the types still come from the `@spec`:
+
+      @doc "Read a UTF-8 text file and return its contents."
+      @tool %{args: [path: "Absolute path, or relative to the project directory."]}
+      @spec read_file(String.t()) :: String.t()
+      def read_file(path), do: File.read!(path)
+
+      # properties: %{"path" => %{type: "string", description: "Absolute path, ..."}}
+
+  A key naming no argument raises at compile time, so renaming a parameter
+  can't silently drop its description. Describe an underscored parameter by
+  the name Claude sees: `_path` is published as `path`.
 
   `:args_schema` is the `properties` object, not the whole input schema —
   `required` still comes from which parameters have defaults:
@@ -91,7 +107,7 @@ defmodule Claudex.Tool do
 
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
 
-  @tool_opts [:args_schema, :strict]
+  @tool_opts [:args, :args_schema, :strict]
 
   defmacro __using__(_opts) do
     quote do
@@ -247,6 +263,7 @@ defmodule Claudex.Tool do
     module = env.module
     opts = normalize_opts(tool_opts)
     {properties, params} = schema_for(opts, name, args, module, env)
+    properties = describe_args(properties, opts, name)
 
     input_schema = %{
       type: "object",
@@ -291,7 +308,7 @@ defmodule Claudex.Tool do
   defp normalize_opts(true), do: %{}
 
   defp normalize_opts(opts) when is_map(opts) do
-    opts |> check_known_opts!() |> check_strict!()
+    opts |> check_known_opts!() |> check_strict!() |> check_args!()
   end
 
   defp normalize_opts(other) do
@@ -320,6 +337,44 @@ defmodule Claudex.Tool do
   end
 
   defp check_strict!(opts), do: opts
+
+  defp check_args!(%{args: args} = opts) when is_list(args) do
+    if Keyword.keyword?(args) and Enum.all?(args, fn {_name, text} -> is_binary(text) end) do
+      opts
+    else
+      raise SchemaError,
+        message: "`@tool` option :args must be a keyword list of argument to description"
+    end
+  end
+
+  defp check_args!(%{args: args}) do
+    raise SchemaError,
+      message: "`@tool` option :args must be a keyword list, got: #{inspect(args)}"
+  end
+
+  defp check_args!(opts), do: opts
+
+  defp describe_args(properties, opts, name) do
+    Enum.reduce(Map.get(opts, :args, []), properties, fn {argument, description}, properties ->
+      put_description(properties, Atom.to_string(argument), description, name)
+    end)
+  end
+
+  defp put_description(properties, argument, description, _name)
+       when is_map_key(properties, argument) do
+    Map.update!(properties, argument, &Map.put(&1, :description, description))
+  end
+
+  # A renamed parameter would otherwise drop its description silently, which is
+  # the failure this option exists to prevent.
+  defp put_description(properties, argument, _description, name) do
+    known = properties |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &inspect/1)
+
+    raise SchemaError,
+      message:
+        "`@tool args:` describes #{inspect(argument)}, but #{name} has no such " <>
+          "argument — it takes #{known}"
+  end
 
   defp required_params(params, properties) do
     params

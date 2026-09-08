@@ -170,14 +170,13 @@ defmodule Claudex.ToolTest do
   end
 
   describe "@tool options" do
-    defp define(opts) do
+    defp define(opts, function \\ "@spec a() :: :ok\ndef a, do: :ok") do
       Code.compile_string("""
-      defmodule BadOpts#{System.unique_integer([:positive])} do
+      defmodule ToolOpts#{System.unique_integer([:positive])} do
         use Claudex.Tool
         @doc "X."
         @tool #{opts}
-        @spec a() :: :ok
-        def a, do: :ok
+        #{function}
       end
       """)
     end
@@ -218,6 +217,53 @@ defmodule Claudex.ToolTest do
         end)
 
       assert warning =~ "is tagged `@tool` but has no `@doc`"
+    end
+
+    test ":args merges descriptions into the inferred schema" do
+      [{module, _bin}] =
+        define(~s(%{args: [a: "the first number", b: "the second number"]}), """
+        @spec add(integer(), integer()) :: integer()
+        def add(a, b), do: a + b
+        """)
+
+      [tool] = module.__tools__()
+
+      assert %{
+               "a" => %{type: "integer", description: "the first number"},
+               "b" => %{type: "integer", description: "the second number"}
+             } = tool.input_schema.properties
+
+      assert tool.input_schema.required == ["a", "b"]
+    end
+
+    test ":args describes an underscored parameter by its published name" do
+      [{module, _bin}] =
+        define(~s(%{args: [a: "still described"]}), """
+        @spec ignore(integer()) :: :ok
+        def ignore(_a), do: :ok
+        """)
+
+      [tool] = module.__tools__()
+
+      assert %{"a" => %{description: "still described"}} = tool.input_schema.properties
+    end
+
+    test ":args naming no argument raises rather than dropping the description" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/describes "typo", but .* has no such argument/,
+                   fn ->
+                     define(~s(%{args: [typo: "nothing is called this"]}))
+                   end
+    end
+
+    test ":args must be a keyword list of descriptions" do
+      assert_raise Claudex.Tool.SchemaError, ~r/:args must be a keyword list/, fn ->
+        define(~s(%{args: %{a: "a map, not a keyword list"}}))
+      end
+
+      assert_raise Claudex.Tool.SchemaError, ~r/:args must be a keyword list/, fn ->
+        define(~s(%{args: [a: :not_a_string]}))
+      end
     end
 
     test "valid options still compile" do
