@@ -15,22 +15,27 @@ defmodule Claudex.ChunkStream do
   owning process dying.
   """
   @spec stream(Client.t(), keyword()) :: Enumerable.t()
-  def stream(%Client{} = client, request_options) do
-    Stream.resource(fn -> connect(client, request_options) end, &next/1, &disconnect/1)
+  @spec stream(Client.t(), keyword(), reference()) :: Enumerable.t()
+  def stream(%Client{} = client, request_options, cancel_ref \\ make_ref()) do
+    Stream.resource(
+      fn -> connect(client, request_options, cancel_ref) end,
+      &next/1,
+      &disconnect/1
+    )
   end
 
-  defp connect(client, request_options) do
+  defp connect(client, request_options, cancel_ref) do
     consumer = self()
-    ref = make_ref()
+    producer_ref = make_ref()
 
     # Test stubs and sandboxes resolve ownership through $callers, and the
     # request runs in a process the caller never sees, so pass the chain on.
     callers = [consumer | Process.get(:"$callers", [])]
 
-    {producer, monitor} =
+    {producer, producer_monitor} =
       spawn_monitor(fn ->
         Process.put(:"$callers", callers)
-        run(client, request_options, consumer, ref)
+        run(client, request_options, consumer, producer_ref)
       end)
 
     metadata =
@@ -48,10 +53,11 @@ defmodule Claudex.ChunkStream do
 
     %{
       producer: producer,
-      monitor: monitor,
-      ref: ref,
+      producer_monitor: producer_monitor,
+      producer_ref: producer_ref,
       done?: false,
       metadata: metadata,
+      cancel_ref: cancel_ref,
       chunks: 0,
       bytes: 0,
       response: %{status: nil, request_id: nil},
@@ -61,26 +67,39 @@ defmodule Claudex.ChunkStream do
 
   defp next(%{done?: true} = state), do: {:halt, state}
 
-  defp next(%{ref: ref, monitor: monitor} = state) do
+  defp next(
+         %{producer_ref: producer_ref, producer_monitor: producer_monitor, cancel_ref: cancel_ref} =
+           state
+       ) do
     receive do
-      {^ref, :chunk, data} ->
-        send(state.producer, {ref, :demand})
+      # Halting will run disconnect/1, which kills the producer and closes the socket.
+      {:claudex_cancel, ^cancel_ref} = cancel ->
+        # The caller reads the same message to tell a cancelled stream from a
+        # finished one, and this receive runs in the caller's own process.
+        send(self(), cancel)
+        {:halt, state}
+
+      {^producer_ref, :chunk, data} ->
+        send(state.producer, {producer_ref, :demand})
         {[data], %{state | chunks: state.chunks + 1, bytes: state.bytes + byte_size(data)}}
 
-      {^ref, {:done, response}} ->
+      {^producer_ref, {:done, response}} ->
         {:halt, %{state | done?: true, response: response}}
 
-      {^ref, {:error, error}} ->
+      {^producer_ref, {:error, error}} ->
         raise error
 
-      {:DOWN, ^monitor, :process, _producer, reason} ->
+      {:DOWN, ^producer_monitor, :process, _producer, reason} ->
         raise Error.stream_error("the process running the request exited: #{inspect(reason)}")
     end
   end
 
-  defp disconnect(%{producer: producer, monitor: monitor, ref: ref} = state) do
-    send(producer, {ref, :cancel})
-    Process.demonitor(monitor, [:flush])
+  defp disconnect(
+         %{producer: producer, producer_monitor: producer_monitor, producer_ref: producer_ref} =
+           state
+       ) do
+    send(producer, {producer_ref, :cancel})
+    Process.demonitor(producer_monitor, [:flush])
     Process.exit(producer, :kill)
 
     :telemetry.execute(
@@ -96,36 +115,36 @@ defmodule Claudex.ChunkStream do
     :ok
   end
 
-  defp run(client, request_options, consumer, ref) do
+  defp run(client, request_options, consumer, producer_ref) do
     consumer_monitor = Process.monitor(consumer)
 
     options =
       Keyword.merge(request_options,
-        into: collector(consumer, ref, consumer_monitor),
+        into: collector(consumer, producer_ref, consumer_monitor),
         retry: &retry_decision/2
       )
 
-    send(consumer, {ref, outcome(Req.request(client.req, options))})
+    send(consumer, {producer_ref, outcome(Req.request(client.req, options))})
   end
 
-  defp collector(consumer, ref, consumer_monitor) do
+  defp collector(consumer, producer_ref, consumer_monitor) do
     fn {:data, data}, {request, response} ->
       if response.status in 200..299 do
-        send(consumer, {ref, :chunk, data})
+        send(consumer, {producer_ref, :chunk, data})
 
         request
         |> Req.Request.put_private(:claudex_streamed, true)
-        |> await_demand(response, ref, consumer_monitor)
+        |> await_demand(response, producer_ref, consumer_monitor)
       else
         {:cont, {request, %{response | body: response.body <> data}}}
       end
     end
   end
 
-  defp await_demand(request, response, ref, consumer_monitor) do
+  defp await_demand(request, response, producer_ref, consumer_monitor) do
     receive do
-      {^ref, :demand} -> {:cont, {request, response}}
-      {^ref, :cancel} -> {:halt, {request, response}}
+      {^producer_ref, :demand} -> {:cont, {request, response}}
+      {^producer_ref, :cancel} -> {:halt, {request, response}}
       {:DOWN, ^consumer_monitor, :process, _consumer, _reason} -> {:halt, {request, response}}
     end
   end

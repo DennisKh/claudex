@@ -136,9 +136,6 @@ defmodule Claudex.Telemetry do
     end)
   end
 
-  # The domain lets an application filter these lines apart from its own; in a
-  # Phoenix app they otherwise sit unmarked among Ecto and LiveView debug logs.
-  # Logger prepends `:elixir`, so the domain on the wire is `[:elixir, :claudex]`.
   defp log(%{level: level}, message) do
     # credo:disable-for-next-line Credo.Check.Warning.MissedMetadataKeyInLoggerConfig
     Logger.log(level, fn -> "claudex " <> message.() end, domain: [:claudex])

@@ -7,8 +7,8 @@ defmodule Claudex.Stream.Forwarder do
   `child_spec/1`, so it can't go in a supervision tree.
   """
 
-  alias Claudex.{Client, Error, Messages}
-  alias Claudex.Stream.Handle
+  alias Claudex.{Client, Error}
+  alias Claudex.Stream.{Connection, Handle}
 
   @doc false
   @spec start(Client.t(), map(), keyword()) :: {:ok, Handle.t()}
@@ -28,8 +28,9 @@ defmodule Claudex.Stream.Forwarder do
 
   defp forward(client, params, to, ref) do
     client
-    |> Messages.stream!(params)
+    |> Connection.stream(params, ref)
     |> Enum.reduce_while(:running, fn event, :running -> forward_event(event, to, ref) end)
+    |> outcome(ref)
     |> finish(to, ref)
   rescue
     error in Claudex.Error -> send(to, {:claudex, ref, {:error, error}})
@@ -61,9 +62,11 @@ defmodule Claudex.Stream.Forwarder do
   defp finish(:running, to, ref), do: send(to, {:claudex, ref, :done})
   defp finish(:cancelled, to, ref), do: send(to, {:claudex, ref, :cancelled})
 
-  # Cancellation is checked between events rather than by killing this
-  # process, so the stream's own cleanup runs and the connection is closed
-  # properly.
+  # The transport halts on the cancel message and puts it back, so a stream
+  # that was cancelled while the model was thinking still reports as cancelled
+  defp outcome(:running, ref), do: if(cancelled?(ref), do: :cancelled, else: :running)
+  defp outcome(state, _ref), do: state
+
   defp cancelled?(ref) do
     receive do
       {:claudex_cancel, ^ref} -> true

@@ -11,9 +11,10 @@ defmodule Claudex.Stream.Connection do
   into typed events.
   """
   @spec stream(Client.t(), map()) :: Enumerable.t()
-  def stream(%Client{} = client, body) do
+  @spec stream(Client.t(), map(), reference()) :: Enumerable.t()
+  def stream(%Client{} = client, body, cancel_ref \\ make_ref()) do
     client
-    |> ChunkStream.stream(method: :post, url: "/v1/messages", json: body)
+    |> ChunkStream.stream([method: :post, url: "/v1/messages", json: body], cancel_ref)
     |> Stream.transform(&SSE.new/0, &decode_chunk/2, &flush/1, fn _decoder -> :ok end)
   end
 
