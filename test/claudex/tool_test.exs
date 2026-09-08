@@ -2,6 +2,7 @@ defmodule Claudex.ToolTest do
   use ExUnit.Case, async: true
 
   alias Claudex.TestSupport.Schemas.{EctoTicket, Ticket}
+  alias Claudex.Tool.CallError
 
   doctest Claudex.Tool
 
@@ -109,7 +110,7 @@ defmodule Claudex.ToolTest do
   end
 
   test "__call_tool__/2 returns an error for an unknown tool" do
-    assert AgentTools.__call_tool__("nope", %{}) == {:error, {:unknown_tool, "nope"}}
+    assert {:error, %CallError{type: :unknown_tool}} = AgentTools.__call_tool__("nope", %{})
   end
 
   test "__tools__/0 expands a struct-typed argument into a nested object schema" do
@@ -266,10 +267,12 @@ defmodule Claudex.ToolTest do
   end
 
   test "call/3 tells a deliberate refusal apart from a bug" do
-    assert {:error, {:tool_refused, "not today"}} =
+    assert {:error, %CallError{type: :tool_refused, message: "not today"}} =
              Claudex.Tool.call(GuardedTools, "refuse", %{})
 
-    assert {:error, {:tool_raised, message}} = Claudex.Tool.call(GuardedTools, "break", %{})
+    assert {:error, %CallError{type: :tool_raised, message: message}} =
+             Claudex.Tool.call(GuardedTools, "break", %{})
+
     assert message =~ "kaboom"
   end
 end

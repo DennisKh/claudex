@@ -89,7 +89,7 @@ defmodule Claudex.Tool do
   `Claudex.Tool.Schema.StructExpansion` for exactly what's supported.
   """
 
-  alias Claudex.Tool.{Dispatch, Schema, SchemaError}
+  alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
 
   @tool_opts [:args_schema, :strict]
 
@@ -139,7 +139,7 @@ defmodule Claudex.Tool do
       def __tools__, do: unquote(tools)
 
       @doc false
-      @spec __call_tool__(String.t(), map()) :: {:ok, term()} | {:error, Dispatch.error()}
+      @spec __call_tool__(String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
       def __call_tool__(name, args), do: Dispatch.call(__MODULE__, unquote(entries), name, args)
     end
   end
@@ -154,22 +154,19 @@ defmodule Claudex.Tool do
   Arguments are matched to the function's parameters by name, so their order in
   the map doesn't matter, and a trailing optional parameter can be left out.
 
-  A tool that fails returns an error instead of taking the caller down with
-  it. The two tags separate a refusal from a bug:
+  A tool that fails returns `{:error, %Claudex.Tool.CallError{}}` instead of
+  taking the caller down with it. Its `type` separates a refusal from a bug,
+  and `message` is a sentence you can show or send back to Claude whatever the
+  type is:
 
-    * `{:error, {:tool_refused, message}}` — the tool raised
-      `Claudex.Tool.Error`, which is how a tool declines to do something
-    * `{:error, {:tool_raised, message}}` — anything else went wrong: another
-      exception, a `throw`, or an `exit`
+      {:error, %CallError{type: :tool_refused, message: "path is outside the workspace"}}
+      {:error, %CallError{type: :tool_raised, message: "KeyError: key :missing not found in:\n\n    %{}\n"}}
 
-  For `:tool_raised` the exception type is part of the message, so a bug
-  reads differently to Claude than a considered refusal:
-
-      {:error, {:tool_refused, "path is outside the workspace"}}
-      {:error, {:tool_raised, "KeyError: key :missing not found in:\n\n    %{}\n"}}
+  For `:tool_raised` the exception type is part of the message, so a bug reads
+  differently to Claude than a considered refusal.
   """
 
-  @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, Dispatch.error()}
+  @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
   def call(module, name, input) when is_atom(module) and is_map(input) do
     module.__call_tool__(name, input)
   end

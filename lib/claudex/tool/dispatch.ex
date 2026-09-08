@@ -9,11 +9,7 @@ defmodule Claudex.Tool.Dispatch do
   @typedoc "One dispatchable tool: its wire name, the function it calls, and that function's parameters in order."
   @type entry :: %{name: String.t(), function: atom(), params: [Claudex.Tool.Schema.param()]}
 
-  @type error ::
-          {:unknown_tool, String.t()}
-          | {:missing_args, [String.t()]}
-          | {:tool_refused, String.t()}
-          | {:tool_raised, String.t()}
+  alias Claudex.Tool.CallError
 
   @doc """
   Looks up `name` in `entries` and calls the matching function on `module`
@@ -25,10 +21,10 @@ defmodule Claudex.Tool.Dispatch do
   end of the argument list — so it's called with `nil` instead; keep
   optional tool parameters to the ones you're fine skipping that way.
   """
-  @spec call(module(), [entry()], String.t(), map()) :: {:ok, term()} | {:error, error()}
+  @spec call(module(), [entry()], String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
   def call(module, entries, name, args) do
     case Enum.find(entries, &(&1.name == name)) do
-      nil -> {:error, {:unknown_tool, name}}
+      nil -> {:error, CallError.unknown_tool(name)}
       entry -> call_entry(module, entry, args)
     end
   end
@@ -48,7 +44,7 @@ defmodule Claudex.Tool.Dispatch do
 
     case missing_required(resolved) do
       [] -> {:ok, values(resolved)}
-      missing -> {:error, {:missing_args, missing}}
+      missing -> {:error, CallError.missing_args(missing)}
     end
   end
 
@@ -83,15 +79,15 @@ defmodule Claudex.Tool.Dispatch do
     # and the caller needs to tell them apart: one is a message for the model,
     # the other is something to fix and to log.
     exception in Claudex.Tool.Error ->
-      {:error, {:tool_refused, Exception.message(exception)}}
+      {:error, CallError.tool_refused(Exception.message(exception))}
 
     exception ->
       # The type is part of the message: a KeyError from a bug in a tool has to
       # be distinguishable from a considered refusal when Claude reads it back.
       {:error,
-       {:tool_raised, "#{inspect(exception.__struct__)}: #{Exception.message(exception)}"}}
+       CallError.tool_raised("#{inspect(exception.__struct__)}: #{Exception.message(exception)}")}
   catch
-    :throw, value -> {:error, {:tool_raised, "tool threw #{inspect(value)}"}}
-    :exit, reason -> {:error, {:tool_raised, "tool exited: #{inspect(reason)}"}}
+    :throw, value -> {:error, CallError.tool_raised("tool threw #{inspect(value)}")}
+    :exit, reason -> {:error, CallError.tool_raised("tool exited: #{inspect(reason)}")}
   end
 end
