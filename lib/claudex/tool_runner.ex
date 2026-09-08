@@ -64,6 +64,7 @@ defmodule Claudex.ToolRunner do
 
   alias Claudex.{Client, Error, Message, Messages, Tool}
   alias Claudex.ContentBlock.ToolUse
+  alias Claudex.Tool.CallError
   alias Claudex.ToolRunner.Turn
 
   @doc """
@@ -199,8 +200,8 @@ defmodule Claudex.ToolRunner do
     end
   end
 
-  defp outcome({:tool_refused, _message}), do: :refused
-  defp outcome(_reason), do: :failed
+  defp outcome(%CallError{type: :tool_refused}), do: :refused
+  defp outcome(%CallError{}), do: :failed
 
   defp encode(value) when is_binary(value), do: value
 
@@ -213,20 +214,14 @@ defmodule Claudex.ToolRunner do
     Protocol.UndefinedError -> inspect(value)
   end
 
-  # A refusal is the tool talking to Claude, so its message goes back as
-  # written. Anything else is a bug worth seeing in the logs, and worth
-  # labelling so Claude doesn't read it as a considered decision.
-  defp describe(_tool_use, {:tool_refused, message}), do: message
-
-  defp describe(tool_use, {:tool_raised, message}) do
+  # A bug is worth seeing in the logs, and worth labelling so Claude doesn't
+  # read it as a considered decision. Everything else — a refusal above all —
+  # goes back as the error wrote it.
+  defp describe(tool_use, %CallError{type: :tool_raised, message: message}) do
     Logger.warning("Claudex tool #{tool_use.name} failed: #{message}")
 
     "the tool failed: #{message}"
   end
 
-  defp describe(_tool_use, {:missing_args, names}) do
-    "missing required arguments: #{Enum.join(names, ", ")}"
-  end
-
-  defp describe(_tool_use, {:unknown_tool, name}), do: "no tool named #{name}"
+  defp describe(_tool_use, %CallError{message: message}), do: message
 end
