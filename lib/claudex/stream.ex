@@ -46,9 +46,8 @@ defmodule Claudex.Stream do
   @doc """
   Stops a stream started with `Claudex.Messages.stream_to/3`.
 
-  The stream stops at its next event and sends `{:claudex, ref, :cancelled}`,
-  so a stalled stream keeps waiting until the next byte arrives or the
-  request times out.
+  The request is closed straight away, without waiting for the next event, and
+  `{:claudex, ref, :cancelled}` follows.
   """
   @spec cancel(Handle.t()) :: :ok
   def cancel(%Handle{ref: ref, pid: pid}) do

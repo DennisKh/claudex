@@ -35,6 +35,32 @@ defmodule Claudex.Stream.ForwarderTest do
     end
   end
 
+  defmodule StallingTransport do
+    @moduledoc """
+    Delivers one complete event, then stalls the way the API does while the
+    model is thinking. A cancel that waits for the next chunk cannot land
+    before the stall ends.
+    """
+
+    @first_event """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    """
+
+    @stall :timer.seconds(5)
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @first_event}, {request, Req.Response.new(status: 200)})
+
+      Process.sleep(@stall)
+
+      acc
+    end
+  end
+
   defp client do
     Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: StubTransport])
   end
@@ -61,5 +87,26 @@ defmodule Claudex.Stream.ForwarderTest do
   test "there is no child_spec: a stream cannot be restarted" do
     refute function_exported?(Forwarder, :child_spec, 1)
     refute function_exported?(Forwarder, :start_link, 1)
+  end
+
+  test "cancel/1 stops a stream stalled mid-think, without waiting for the next event" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: StallingTransport]
+      )
+
+    {:ok, %Handle{ref: ref} = handle} = Forwarder.start(client, @params, [])
+
+    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 1_000
+
+    Claudex.Stream.cancel(handle)
+
+    # The transport is five seconds into a stall. Anything that only notices a
+    # cancel when the next chunk arrives cannot report inside this window.
+    assert_receive {:claudex, ^ref, :cancelled}, 500
+
+    refute_receive {:claudex, ^ref, :done}, 100
   end
 end

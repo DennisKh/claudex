@@ -15,11 +15,16 @@ defmodule Claudex.ChunkStream do
   owning process dying.
   """
   @spec stream(Client.t(), keyword()) :: Enumerable.t()
-  def stream(%Client{} = client, request_options) do
-    Stream.resource(fn -> connect(client, request_options) end, &next/1, &disconnect/1)
+  @spec stream(Client.t(), keyword(), reference()) :: Enumerable.t()
+  def stream(%Client{} = client, request_options, cancel_ref \\ make_ref()) do
+    Stream.resource(
+      fn -> connect(client, request_options, cancel_ref) end,
+      &next/1,
+      &disconnect/1
+    )
   end
 
-  defp connect(client, request_options) do
+  defp connect(client, request_options, cancel_ref) do
     consumer = self()
     ref = make_ref()
 
@@ -52,6 +57,7 @@ defmodule Claudex.ChunkStream do
       ref: ref,
       done?: false,
       metadata: metadata,
+      cancel_ref: cancel_ref,
       chunks: 0,
       bytes: 0,
       response: %{status: nil, request_id: nil},
@@ -61,8 +67,15 @@ defmodule Claudex.ChunkStream do
 
   defp next(%{done?: true} = state), do: {:halt, state}
 
-  defp next(%{ref: ref, monitor: monitor} = state) do
+  defp next(%{ref: ref, monitor: monitor, cancel_ref: cancel_ref} = state) do
     receive do
+      # Halting will run disconnect/1, which kills the producer and closes the socket.
+      {:claudex_cancel, ^cancel_ref} = cancel ->
+        # The caller reads the same message to tell a cancelled stream from a
+        # finished one, and this receive runs in the caller's own process.
+        send(self(), cancel)
+        {:halt, state}
+
       {^ref, :chunk, data} ->
         send(state.producer, {ref, :demand})
         {[data], %{state | chunks: state.chunks + 1, bytes: state.bytes + byte_size(data)}}
