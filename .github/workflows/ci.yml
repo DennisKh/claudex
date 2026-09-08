@@ -27,7 +27,7 @@ jobs:
           elixir-version: "1.19.5"
 
       - name: Cache deps and build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -60,7 +60,7 @@ jobs:
           elixir-version: "1.19.5"
 
       - name: Cache deps and build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -68,7 +68,7 @@ jobs:
           key: ${{ runner.os }}-dialyzer-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
 
       - name: Cache PLT
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
