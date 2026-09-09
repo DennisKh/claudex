@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/DennisKh/claudex/compare/v0.6.1...v0.7.0) (2026-09-09)
+
+
+### Features
+
+* **stream:** make usage merging, tool_uses and streamed text public ([#33](https://github.com/DennisKh/claudex/issues/33)) ([f50cd06](https://github.com/DennisKh/claudex/commit/f50cd06aca6a3bc237c65e08e4685eed679b26d0))
+* **tool_runner:** gate tool calls with a before_call hook ([#32](https://github.com/DennisKh/claudex/issues/32)) ([080ad6d](https://github.com/DennisKh/claudex/commit/080ad6d130affa3e1d7d9de3d4d93d810bffdb66))
+* **tool:** describe tool arguments without giving up schema inference ([#31](https://github.com/DennisKh/claudex/issues/31)) ([a44e250](https://github.com/DennisKh/claudex/commit/a44e2502ef8ec4077606c7d3359d6cc3a57e1d36))
+
+
+### Bug Fixes
+
+* **tool:** return a uniform error struct from Tool.call/3 ([#29](https://github.com/DennisKh/claudex/issues/29)) ([79aa940](https://github.com/DennisKh/claudex/commit/79aa940b597a2b72f1d3563c96630f43c76c8b59))
+
 ## [0.6.1](https://github.com/DennisKh/claudex/compare/v0.6.0...v0.6.1) (2026-09-07)
 
 
