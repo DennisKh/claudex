@@ -81,7 +81,7 @@ defmodule Claudex.Stream.Accumulator do
         stop_sequence: event.stop_sequence,
         stop_details: event.stop_details || accumulator.message.stop_details,
         container: event.container || accumulator.message.container,
-        usage: merge_usage(accumulator.message.usage, event.usage)
+        usage: Usage.merge(accumulator.message.usage, event.usage)
     }
 
     %{accumulator | message: message}
@@ -103,6 +103,22 @@ defmodule Claudex.Stream.Accumulator do
       |> Enum.map(fn {_index, block} -> block end)
 
     %{message | content: content}
+  end
+
+  @doc """
+  The text of the message built so far, or `""` if the stream hasn't started
+  one yet.
+
+  Use it to render a reply as it arrives, without keeping a text buffer
+  alongside the accumulator. It joins the message's text blocks on every call,
+  so ask once per UI update rather than once per delta.
+  """
+  @spec text(t()) :: String.t()
+  def text(%__MODULE__{} = accumulator) do
+    case message(accumulator) do
+      nil -> ""
+      message -> Message.text(message)
+    end
   end
 
   defp apply_delta(accumulator, index, {:input_json, chunk}) do
@@ -153,16 +169,5 @@ defmodule Claudex.Stream.Accumulator do
     else
       _incomplete_or_not_a_tool_call -> blocks
     end
-  end
-
-  defp merge_usage(usage, nil), do: usage
-
-  defp merge_usage(usage, %Usage{} = delta) do
-    delta
-    |> Map.from_struct()
-    |> Enum.reduce(usage, fn
-      {_field, nil}, usage -> usage
-      {field, value}, usage -> Map.put(usage, field, value)
-    end)
   end
 end

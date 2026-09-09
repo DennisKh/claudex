@@ -166,7 +166,7 @@ defmodule Claudex.ToolRunner do
   defp next_turn(config, messages, index) do
     message = request!(config, messages)
     messages = Message.append(messages, message)
-    tool_uses = tool_uses(message)
+    tool_uses = Message.tool_uses(message)
 
     turn = %Turn{message: message, index: index, tool_uses: tool_uses, messages: messages}
 
@@ -200,10 +200,6 @@ defmodule Claudex.ToolRunner do
       {:ok, message} -> message
       {:error, error} -> raise error
     end
-  end
-
-  defp tool_uses(%Message{content: content}) do
-    Enum.filter(content, &match?(%ToolUse{}, &1))
   end
 
   defp run_tool(%ToolUse{} = tool_use, config) do
