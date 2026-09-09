@@ -10,17 +10,23 @@ defmodule Claudex.Tool do
       defmodule MyApp.Tools do
         use Claudex.Tool
 
-        @doc "Adds two numbers."
+        @doc "Adds two numbers and returns the sum. Use it for arithmetic rather than working it out."
         @tool true
         @spec add(number(), number()) :: number()
         def add(a, b), do: a + b
       end
 
       Claudex.Tool.list(MyApp.Tools)
-      #=> [%{name: "add", description: "Adds two numbers.", input_schema: %{...}}]
+      #=> [%{name: "add", description: "Adds two numbers and returns...", input_schema: %{...}}]
 
   `Claudex.Messages.create/2` takes the module directly as `tools:` and
   expands it for you.
+
+  Your `@doc` and `@spec` are prompt text, not developer notes. They are the
+  whole of what Claude knows about the tool: the `@doc` decides whether it
+  reaches for the tool at all, and the argument descriptions decide what it
+  passes. Write them for the model, and expect a terse one-liner to produce a
+  tool that gets called at the wrong moment or with the wrong values.
 
   Pass a map instead of `true` for options:
 
@@ -221,6 +227,22 @@ defmodule Claudex.Tool do
   just write `tools: MyApp.Tools` — this is public mainly for building a
   tools list ahead of time, or for something other than
   `Messages.create/2` (Batches, a hand-rolled request).
+
+  The maps use atom keys, while the property names inside `input_schema` are
+  strings, since those come from the function's parameters:
+
+      [
+        %{
+          name: "add",
+          description: "Adds two numbers and returns the sum. ...",
+          input_schema: %{
+            type: "object",
+            properties: %{"a" => %{type: "number"}, "b" => %{type: "number"}},
+            required: ["a", "b"],
+            additionalProperties: false
+          }
+        }
+      ]
   """
 
   @spec list(nil | module() | [module() | map()]) :: [map()]

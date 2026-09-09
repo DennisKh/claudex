@@ -108,12 +108,18 @@ Tag a function with `@tool` and Claudex builds the JSON schema from its `@spec` 
 defmodule MyApp.Tools do
   use Claudex.Tool
 
-  @doc "Adds two numbers."
+  @doc """
+  Adds two numbers and returns the sum. Use it for any arithmetic rather than
+  working the answer out, so the result is always exact.
+  """
   @tool true
   @spec add(number(), number()) :: number()
   def add(a, b), do: a + b
 
-  @doc "Read a UTF-8 text file and return its contents."
+  @doc """
+  Reads a UTF-8 text file and returns its contents. Use it before answering
+  anything about a file's contents; it fails if the file does not exist.
+  """
   @tool %{args: [path: "Absolute path, or relative to the project directory."]}
   @spec read_file(String.t()) :: String.t()
   def read_file(path), do: File.read!(path)
@@ -202,6 +208,46 @@ A denial sends the reason back as an error result and the conversation carries o
 If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
 
 A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture.
+
+## Rebuilding a conversation from your own storage
+
+`Claudex.Message.append/2` suits a script that keeps the whole conversation in
+memory. An app that persists each turn rebuilds the request from its own rows
+instead, and there are helpers for every block it has to put back:
+
+```elixir
+def to_request(rows) do
+  Enum.map(rows, fn
+    %{role: "user", text: text} ->
+      Claudex.Message.user(text)
+
+    %{role: "assistant", text: text, tool_calls: calls} ->
+      Claudex.Message.assistant(
+        [%Claudex.ContentBlock.Text{text: text}] ++
+          Enum.map(calls, fn call ->
+            %Claudex.ContentBlock.ToolUse{id: call.id, name: call.name, input: call.input}
+          end)
+      )
+
+    %{role: "tool_results", results: results} ->
+      Claudex.Message.tool_results(
+        Enum.map(results, &Claudex.Tool.result(&1.call_id, &1.output, is_error: &1.failed?))
+      )
+  end)
+end
+```
+
+`Claudex.Tool.result/3` builds a `tool_result` block, and `Message.tool_results/1`
+wraps them in the `role: "user"` message the API expects. Build
+`Claudex.ContentBlock` structs rather than hand-writing `%{type: "tool_use", ...}`
+maps. `Claudex.Messages.create/2` turns a struct into the map the API expects on
+the way out, and `Claudex.ContentBlock.to_param/1` does the same for one block if
+you need it before then.
+
+Two things to store alongside the text. A `tool_use` block needs its `id`, since
+the matching `tool_result` refers to it. A `thinking` block needs its
+`signature`, because continuing a thinking conversation on the same model means
+sending prior thinking blocks back intact.
 
 ## Telemetry and logging
 
