@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Claudex">
+  <title>Claudex</title>
+  <path d="M70 18 C70 18 108 60 108 84 a38 38 0 0 1-76 0 C32 60 70 18 70 18 Z"
+        fill="#DE7356" />
+  <path d="M58 12 C58 12 98 56 98 82 a40 40 0 0 1-80 0 C18 56 58 12 58 12 Z"
+        fill="#6B47C8" />
+  <g stroke="#FFFFFF" stroke-width="8" stroke-linecap="round">
+    <path d="M42 62 H62" />
+    <path d="M42 80 H80" />
+    <path d="M42 98 H70" />
+  </g>
+</svg>

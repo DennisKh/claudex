@@ -1,5 +1,10 @@
 # Claudex
 
+[![Hex version](https://img.shields.io/hexpm/v/claudex.svg)](https://hex.pm/packages/claudex)
+[![Documentation](https://img.shields.io/badge/hexdocs-claudex-purple.svg)](https://hexdocs.pm/claudex)
+[![CI](https://github.com/DennisKh/claudex/actions/workflows/ci.yml/badge.svg)](https://github.com/DennisKh/claudex/actions/workflows/ci.yml)
+[![License](https://img.shields.io/hexpm/l/claudex.svg)](https://github.com/DennisKh/claudex/blob/main/LICENSE)
+
 An Elixir SDK for the [Claude API](https://platform.claude.com/docs/en/api/overview): messages, streaming, tools, files and batches.
 
 ## Installation
@@ -9,7 +14,7 @@ Add `:claudex` to your dependencies:
 ```elixir
 def deps do
   [
-    {:claudex, "~> 0.6"}
+    {:claudex, "~> 0.7"}
   ]
 end
 ```

@@ -49,6 +49,8 @@ defmodule Claudex.MixProject do
   defp docs do
     [
       main: "readme",
+      logo: "assets/logo.svg",
+      favicon: "assets/logo.svg",
       extras: ["README.md", "CHANGELOG.md", "LICENSE"],
       source_url: @source_url,
       source_ref: "v" <> @version,
