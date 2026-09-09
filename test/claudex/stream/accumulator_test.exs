@@ -170,4 +170,23 @@ defmodule Claudex.Stream.AccumulatorTest do
 
     assert %Message{id: "msg_1"} = Accumulator.message(accumulator)
   end
+
+  test "text/1 renders the reply so far, and an empty string before it starts" do
+    assert Accumulator.text(Accumulator.new()) == ""
+
+    accumulator =
+      fold([
+        message_start(),
+        block_start(0, %{"type" => "text", "text" => ""}),
+        delta(0, %{"type" => "text_delta", "text" => "Hel"})
+      ])
+
+    assert Accumulator.text(accumulator) == "Hel"
+
+    accumulator =
+      Accumulator.add(accumulator, delta(0, %{"type" => "text_delta", "text" => "lo"}))
+
+    assert Accumulator.text(accumulator) == "Hello"
+    assert Message.text(Accumulator.message(accumulator)) == "Hello"
+  end
 end

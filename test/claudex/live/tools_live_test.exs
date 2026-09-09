@@ -6,7 +6,7 @@ defmodule Claudex.Live.ToolsTest do
 
   use Claudex.TestSupport.LiveCase, async: false
 
-  alias Claudex.{ContentBlock, Message, Messages, Tool}
+  alias Claudex.{Message, Messages, Tool}
 
   defmodule WeatherTool do
     @moduledoc false
@@ -36,8 +36,7 @@ defmodule Claudex.Live.ToolsTest do
 
     assert first.stop_reason == "tool_use"
 
-    tool_use = Enum.find(first.content, &match?(%ContentBlock.ToolUse{}, &1))
-    assert tool_use
+    [tool_use] = Message.tool_uses(first)
     assert tool_use.name == "get_temperature"
     assert is_map(tool_use.input)
 
@@ -69,7 +68,7 @@ defmodule Claudex.Live.ToolsTest do
     {:ok, first} =
       Messages.create(client, %{model: @model, max_tokens: 512, tools: tools, messages: messages})
 
-    tool_uses = Enum.filter(first.content, &match?(%ContentBlock.ToolUse{}, &1))
+    tool_uses = Message.tool_uses(first)
     assert tool_uses != []
 
     results =

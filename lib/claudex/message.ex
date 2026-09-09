@@ -157,4 +157,24 @@ defmodule Claudex.Message do
     |> Enum.filter(&match?(%ContentBlock.Text{}, &1))
     |> Enum.map_join("", & &1.text)
   end
+
+  @doc """
+  The tool calls in a message, in the order Claude made them.
+
+      iex> message = %Claudex.Message{
+      ...>   content: [
+      ...>     %Claudex.ContentBlock.Text{text: "Let me add those."},
+      ...>     %Claudex.ContentBlock.ToolUse{id: "toolu_1", name: "add", input: %{"a" => 1}}
+      ...>   ]
+      ...> }
+      iex> Claudex.Message.tool_uses(message)
+      [%Claudex.ContentBlock.ToolUse{id: "toolu_1", name: "add", input: %{"a" => 1}}]
+
+  Empty when Claude asked for nothing, which is how a reply that ends the
+  conversation reads.
+  """
+  @spec tool_uses(t()) :: [ContentBlock.ToolUse.t()]
+  def tool_uses(%__MODULE__{content: blocks}) do
+    Enum.filter(blocks, &match?(%ContentBlock.ToolUse{}, &1))
+  end
 end

@@ -72,4 +72,37 @@ defmodule Claudex.Live.StreamingTest do
       _event -> ""
     end)
   end
+
+  test "usage merges to the API's running totals, not a sum of them", %{client: client} do
+    events =
+      client
+      |> Messages.stream!(%{
+        model: @model,
+        max_tokens: 256,
+        messages: [%{role: "user", content: "Count from 1 to 30, numbers only."}]
+      })
+      |> Enum.to_list()
+
+    [%Event.MessageStart{message: %{usage: opening}} | _rest] = events
+
+    reported =
+      events
+      |> Enum.filter(&match?(%Event.MessageDelta{}, &1))
+      |> Enum.map(& &1.usage)
+
+    assert [_at_least_one | _] = reported
+    final_report = List.last(reported)
+
+    assert final_report.output_tokens > opening.output_tokens
+
+    {:ok, message} = Stream.final_message(events)
+
+    assert message.usage.output_tokens == final_report.output_tokens
+
+    refute message.usage.output_tokens ==
+             opening.output_tokens + Enum.sum(Enum.map(reported, & &1.output_tokens))
+
+    assert message.usage.input_tokens > 0
+    assert message.usage.input_tokens == opening.input_tokens
+  end
 end

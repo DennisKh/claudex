@@ -115,7 +115,7 @@ defmodule Claudex.ReplayTest do
     assert {:ok, message} = Messages.create(client(), @params)
     assert message.stop_reason == "tool_use"
 
-    tool_use = Enum.find(message.content, &match?(%ContentBlock.ToolUse{}, &1))
+    [tool_use] = Message.tool_uses(message)
 
     assert tool_use.id =~ "toolu_"
     assert tool_use.name == "get_temperature"
