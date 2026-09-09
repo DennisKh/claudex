@@ -2,6 +2,7 @@ defmodule Claudex.TelemetryTest do
   use ExUnit.Case, async: false
 
   alias Claudex.{Client, Message, Messages, Telemetry, ToolRunner}
+  alias Claudex.TestSupport.MessageStream
 
   defmodule Calculator do
     use Claudex.Tool
@@ -66,6 +67,15 @@ defmodule Claudex.TelemetryTest do
   end
 
   defp respond_with(replies) do
+    reply_with(replies, &Req.Test.json/2)
+  end
+
+  # The runner streams every request, so its replies go back as SSE.
+  defp stream_with(replies) do
+    reply_with(replies, &MessageStream.respond/2)
+  end
+
+  defp reply_with(replies, respond) do
     {:ok, counter} = Agent.start_link(fn -> replies end)
 
     Req.Test.stub(__MODULE__, fn conn ->
@@ -73,7 +83,7 @@ defmodule Claudex.TelemetryTest do
 
       conn
       |> Plug.Conn.put_resp_header("request-id", "req_test_1")
-      |> Req.Test.json(reply)
+      |> respond.(reply)
     end)
   end
 
@@ -120,7 +130,7 @@ defmodule Claudex.TelemetryTest do
   end
 
   test "a tool span reports the outcome of each call" do
-    respond_with([
+    stream_with([
       message(
         [
           %{
@@ -144,7 +154,7 @@ defmodule Claudex.TelemetryTest do
   end
 
   test "a refused tool is reported apart from a working one" do
-    respond_with([
+    stream_with([
       message(
         [%{"type" => "tool_use", "id" => "toolu_1", "name" => "refuse", "input" => %{}}],
         "tool_use"
@@ -158,7 +168,7 @@ defmodule Claudex.TelemetryTest do
   end
 
   test "the runner reports each turn and why the loop ended" do
-    respond_with([
+    stream_with([
       message(
         [
           %{
@@ -194,7 +204,7 @@ defmodule Claudex.TelemetryTest do
         "tool_use"
       )
 
-    respond_with(List.duplicate(tool_call, 2))
+    stream_with(List.duplicate(tool_call, 2))
 
     assert {:ok, _turn} = ToolRunner.run(client(), @params, max_turns: 2)
 

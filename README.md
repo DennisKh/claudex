@@ -205,6 +205,41 @@ Claudex.ToolRunner.run(client, params,
 
 A denial sends the reason back as an error result and the conversation carries on, so Claude can explain itself or try another way; the tool is never called. Each call in a parallel batch is offered separately, so a batch can be partly approved. The function runs in the process enumerating the stream, so it can block — waiting on a `GenServer.call` while a LiveView shows an approve button, say.
 
+### Showing the reply as it arrives
+
+Every request the runner makes is a streaming one, so `:on_event` sees each `Claudex.Stream.Event` as it lands, on every turn:
+
+```elixir
+Claudex.ToolRunner.run(client, params,
+  on_event: fn
+    %Claudex.Stream.Event.ContentBlockDelta{delta: {:text, chunk}} -> IO.write(chunk)
+    _event -> :ok
+  end
+)
+```
+
+It runs in the process driving the loop, one event at a time, and the next event is only read once it returns. A callback that forwards deltas to a web page streams tokens there, but the turn still ends if the process driving the loop stops.
+
+The loop blocks the process it runs in, so a LiveView or a GenServer runs it in a task and lets `:on_event` send the deltas back, tagged with a ref:
+
+```elixir
+ref = make_ref()
+parent = self()
+
+Task.Supervisor.async_nolink(MyApp.TaskSupervisor, fn ->
+  Claudex.ToolRunner.run(client, params, on_event: &send(parent, {:reply, ref, &1}))
+end)
+```
+
+Matching that ref where the messages arrive keeps a reply from a conversation the user has left out of the one on screen:
+
+```elixir
+def handle_info({:reply, ref, event}, %{assigns: %{ref: ref}} = socket)
+def handle_info({:reply, _stale, _event}, socket), do: {:noreply, socket}
+```
+
+The conversation ends with the task, so `:before_call` fits a decision the user makes now. One that arrives in a later request needs storing, and the loop re-entered from there.
+
 If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
 
 A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture.

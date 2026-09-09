@@ -28,8 +28,8 @@ defmodule Claudex.ToolRunner do
 
   ## Tools decide what they will and won't do
 
-  There's no approval callback here, because the tool is the right place for
-  that. A tool that refuses raises `Claudex.Tool.Error`, and Claude sees the
+  A tool is the first place to decide that, ahead of any `:before_call` gate.
+  A tool that refuses raises `Claudex.Tool.Error`, and Claude sees the
   reason as an error result and adapts — it's an ordinary `@tool` function that
   happens to guard itself:
 
@@ -60,6 +60,8 @@ defmodule Claudex.ToolRunner do
       to #{@default_max_turns}. The last turn then carries `stop: :max_turns`.
     * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
       before the tool does, returning `:ok` or `{:deny, reason}`
+    * `:on_event` - a function run on each `Claudex.Stream.Event` as it
+      arrives, for showing a reply while it is still being written
 
   ## Approving a tool call
 
@@ -82,12 +84,55 @@ defmodule Claudex.ToolRunner do
 
   The function is called in the process enumerating the stream, so it can block
   — waiting on a `GenServer.call` for a decision from a UI, say.
+
+  ## Watching a reply arrive
+
+  Every request the loop makes is a streaming one, so `:on_event` sees each
+  `Claudex.Stream.Event` as it lands, on every turn:
+
+      Claudex.ToolRunner.run(client, params,
+        on_event: fn
+          %Claudex.Stream.Event.ContentBlockDelta{delta: {:text, chunk}} ->
+            IO.write(chunk)
+
+          _event ->
+            :ok
+        end
+      )
+
+  It runs in the process driving the loop, one event at a time, and the next
+  event is only read once it returns. A callback that forwards deltas to a web
+  page streams tokens there, but the turn still ends if the process driving the
+  loop stops.
+
+  ## Running the loop somewhere else
+
+  The loop blocks the process it runs in, so a LiveView or a GenServer runs it
+  in a task and lets `:on_event` send the deltas back:
+
+      ref = make_ref()
+      parent = self()
+
+      Task.Supervisor.async_nolink(MyApp.TaskSupervisor, fn ->
+        Claudex.ToolRunner.run(client, params, on_event: &send(parent, {:reply, ref, &1}))
+      end)
+
+  Matching that `ref` where the messages arrive keeps a reply from a
+  conversation the user has left out of the one on screen:
+
+      def handle_info({:reply, ref, event}, %{assigns: %{ref: ref}} = socket)
+      def handle_info({:reply, _stale, _event}, socket), do: {:noreply, socket}
+
+  The conversation ends with the task, so `:before_call` fits a decision the
+  user makes now. One that arrives in a later request needs storing, and the
+  loop re-entered from there.
   """
 
   require Logger
 
   alias Claudex.{Client, Error, Message, Messages, Tool}
   alias Claudex.ContentBlock.ToolUse
+  alias Claudex.Stream.Accumulator
   alias Claudex.Tool.CallError
   alias Claudex.ToolRunner.Turn
 
@@ -139,7 +184,8 @@ defmodule Claudex.ToolRunner do
       params: params,
       registry: Tool.registry(params[:tools]),
       max_turns: Keyword.get(opts, :max_turns, @default_max_turns),
-      before_call: Keyword.get(opts, :before_call)
+      before_call: Keyword.get(opts, :before_call),
+      on_event: Keyword.get(opts, :on_event, &ignore/1)
     }
 
     Stream.unfold({Message.append([], params[:messages] || []), 1}, fn
@@ -196,11 +242,20 @@ defmodule Claudex.ToolRunner do
   end
 
   defp request!(config, messages) do
-    case Messages.create(config.client, Map.put(config.params, :messages, messages)) do
-      {:ok, message} -> message
-      {:error, error} -> raise error
+    config.client
+    |> Messages.stream!(Map.put(config.params, :messages, messages))
+    |> Enum.reduce(Accumulator.new(), fn event, accumulator ->
+      config.on_event.(event)
+      Accumulator.add(accumulator, event)
+    end)
+    |> Accumulator.message()
+    |> case do
+      nil -> raise Error.stream_error("the stream ended without starting a message")
+      message -> message
     end
   end
+
+  defp ignore(_event), do: :ok
 
   defp run_tool(%ToolUse{} = tool_use, config) do
     :telemetry.span([:claudex, :tool], %{tool: tool_use.name}, fn ->
