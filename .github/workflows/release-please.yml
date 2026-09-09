@@ -12,5 +12,74 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
 
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+
     steps:
       - uses: googleapis/release-please-action@v5
+        id: release
+
+  # Publishing lives here rather than in a workflow of its own: a release
+  # created with the default GITHUB_TOKEN does not start new workflow runs, so
+  # an `on: release` trigger would never fire.
+  verify:
+    name: Verify the tagged commit
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.19.5"
+
+      - run: mix deps.get
+
+      - run: mix format --check-formatted
+
+      - run: mix compile --warnings-as-errors
+
+      - run: mix credo --strict
+
+      - run: mix test
+
+  publish:
+    name: Publish to Hex
+    needs: [release-please, verify]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.19.5"
+
+      - run: mix deps.get
+
+      # A tag whose mix.exs says something else would publish the wrong
+      # version under the right name, and a Hex release cannot be replaced.
+      - name: Check mix.exs matches the tag
+        run: |
+          tag="${{ needs.release-please.outputs.tag }}"
+          version=$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])')
+          if [ "v$version" != "$tag" ]; then
+            echo "tag $tag does not match mix.exs version $version"
+            exit 1
+          fi
+
+      - name: Publish package and docs
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes
