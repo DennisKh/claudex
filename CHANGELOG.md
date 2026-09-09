@@ -12,6 +12,8 @@
 
 ### Bug Fixes
 
+* **streaming:** cancel a stream immediately instead of at the next event ([#28](https://github.com/DennisKh/claudex/issues/28)) ([eadf02b](https://github.com/DennisKh/claudex/commit/eadf02bd730dfc0bdcac4fb0cff8bb0272317f9d))
+* **telemetry:** report the request span for streaming requests too ([#27](https://github.com/DennisKh/claudex/issues/27)) ([129b002](https://github.com/DennisKh/claudex/commit/129b0028ae99b619c5d1ed1feea5b0703044081d))
 * **tool:** return a uniform error struct from Tool.call/3 ([#29](https://github.com/DennisKh/claudex/issues/29)) ([79aa940](https://github.com/DennisKh/claudex/commit/79aa940b597a2b72f1d3563c96630f43c76c8b59))
 
 ## [0.6.1](https://github.com/DennisKh/claudex/compare/v0.6.0...v0.6.1) (2026-09-07)
