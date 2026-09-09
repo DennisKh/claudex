@@ -2,6 +2,8 @@ defmodule Claudex.ToolRunnerTest do
   use ExUnit.Case, async: true
 
   alias Claudex.{Client, ContentBlock, Error, Message, ToolRunner}
+  alias Claudex.Stream.Event
+  alias Claudex.TestSupport.MessageStream
   alias Claudex.ToolRunner.Turn
 
   defmodule Calculator do
@@ -69,14 +71,16 @@ defmodule Claudex.ToolRunnerTest do
 
   defp respond_with(replies) do
     {:ok, counter} = Agent.start_link(fn -> replies end)
+    test_pid = self()
 
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
-      send(self(), {:sent, Jason.decode!(raw_body)})
+      # The request runs in a process the test never sees, so report home.
+      send(test_pid, {:sent, Jason.decode!(raw_body)})
 
       reply = Agent.get_and_update(counter, fn [head | tail] -> {head, tail} end)
 
-      Req.Test.json(conn, reply)
+      MessageStream.respond(conn, reply)
     end)
   end
 
@@ -336,6 +340,45 @@ defmodule Claudex.ToolRunnerTest do
         |> ToolRunner.stream(@params, before_call: fn _call -> :maybe end)
         |> Enum.to_list()
       end
+    end
+  end
+
+  describe ":on_event" do
+    test "every turn reports its events to the callback, in the process driving the loop" do
+      test_pid = self()
+
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42.")], "end_turn")
+      ])
+
+      watch = fn event -> send(test_pid, {:event, self(), event}) end
+
+      assert {:ok, %Turn{stop: :completed}} = ToolRunner.run(client(), @params, on_event: watch)
+
+      # The arguments of the first turn's tool call, and the text of the second:
+      # both turns stream, not just the last one.
+      assert_received {:event, ^test_pid, %Event.ContentBlockDelta{delta: {:input_json, _}}}
+      assert_received {:event, ^test_pid, %Event.ContentBlockDelta{delta: {:text, "42."}}}
+      assert_received {:event, ^test_pid, %Event.MessageStop{}}
+    end
+
+    test "the deltas spell out the reply the turn carries" do
+      respond_with([message([text("12 plus 30 is 42.")], "end_turn")])
+
+      {:ok, chunks} = Agent.start_link(fn -> [] end)
+
+      watch = fn
+        %Event.ContentBlockDelta{delta: {:text, chunk}} ->
+          Agent.update(chunks, &[chunk | &1])
+
+        _event ->
+          :ok
+      end
+
+      assert {:ok, turn} = ToolRunner.run(client(), @params, on_event: watch)
+
+      assert chunks |> Agent.get(&Enum.reverse/1) |> Enum.join() == Message.text(turn.message)
     end
   end
 end
