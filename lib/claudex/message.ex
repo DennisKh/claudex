@@ -128,8 +128,11 @@ defmodule Claudex.Message do
       Claudex.Message.tool_results([Claudex.Tool.result(tool_use.id, "42")])
 
   Results go back with `role: "user"`, because they're input to Claude, not
-  something it said. Put every result for one reply in a single message —
-  splitting them teaches Claude to stop making parallel tool calls.
+  something it said. One message answers one reply: if the reply asked for
+  three tools, this list holds three results, and it has to be the message
+  straight after that reply. Answering only some of them is a 400 naming the
+  call you left out, so a reply whose tools finish at different times sends
+  nothing until the last one is in.
 
   `Claudex.ToolRunner` does this for you; reach for it when you're driving the
   loop yourself.
