@@ -31,9 +31,9 @@ defmodule Claudex.OutputFormat do
   | `non_neg_integer()`, `pos_integer()`           | `integer`, the minimum in `description`  |
   | `Date.t()`, `Time.t()`, `DateTime.t()`         | `string` with `format`                   |
   | `:urgent`                                      | `const: "urgent"`                        |
-  | `:low \| :medium \| :high`                     | `string` with `enum`                     |
-  | `1 \| 2 \| 3`                                  | `integer` with `enum`                    |
-  | `String.t() \| nil`                            | `anyOf` with `null`, and not required    |
+  | a union of atom literals                       | `string` with `enum`                     |
+  | a union of number literals                     | `integer` with `enum`                    |
+  | a union with `nil`                             | `anyOf` with `null`, and not required    |
   | `list(String.t())`, `[String.t()]`             | `array` of `string`                      |
   | `nonempty_list(String.t())`                    | the same, with `minItems: 1`             |
   | `list()`                                       | `array`, elements unconstrained          |
@@ -41,6 +41,14 @@ defmodule Claudex.OutputFormat do
   | `Reporter.t()`                                 | the struct's own object, nested          |
   | `map()`, `keyword()`, `%{String.t() => t()}`   | an object with no keys: only `{}` fits   |
   | `any()`, `term()`, `{String.t(), integer()}`   | raises `Claudex.Tool.SchemaError`        |
+
+  The unions, written out:
+
+      @type t :: %__MODULE__{
+              priority: :low | :medium | :high,
+              attempts: 1 | 2 | 3,
+              due: Date.t() | nil
+            }
 
   A required field is one whose type doesn't include `nil`. An Ecto schema is
   read through its own reflection instead, and Ecto doesn't say which fields
