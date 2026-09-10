@@ -5,8 +5,7 @@ defmodule Claudex.Error do
   `:type` mirrors the error types the API documents — `:billing` for 402,
   `:timeout` for a 504 as well as for a client-side timeout, and so on.
   `:error_type` is the API's own string (`"invalid_request_error"`), finer
-  grained than the status and extensible by the API, so reach for it when
-  `:type` isn't specific enough. Match on it to handle specific cases:
+  grained than the status and extensible by the API:
 
       case Claudex.Messages.create(client, params) do
         {:ok, message} -> message

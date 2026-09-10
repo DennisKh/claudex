@@ -109,9 +109,9 @@ defmodule Claudex.Stream.Accumulator do
   The text of the message built so far, or `""` if the stream hasn't started
   one yet.
 
-  Use it to render a reply as it arrives, without keeping a text buffer
-  alongside the accumulator. It joins the message's text blocks on every call,
-  so ask once per UI update rather than once per delta.
+  Renders a reply as it arrives, without a text buffer alongside the
+  accumulator, and joins the message's text blocks on every call rather than
+  keeping a running one.
   """
   @spec text(t()) :: String.t()
   def text(%__MODULE__{} = accumulator) do

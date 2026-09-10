@@ -134,8 +134,8 @@ defmodule Claudex.Message do
   call you left out, so a reply whose tools finish at different times sends
   nothing until the last one is in.
 
-  `Claudex.ToolRunner` does this for you; reach for it when you're driving the
-  loop yourself.
+  `Claudex.ToolRunner` builds this message itself; this function is for a loop
+  you drive.
   """
   @spec tool_results([map()]) :: map()
   def tool_results(results) when is_list(results), do: user(results)
