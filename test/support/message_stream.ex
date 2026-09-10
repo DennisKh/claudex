@@ -5,8 +5,9 @@ defmodule Claudex.TestSupport.MessageStream do
 
   The event shapes follow `test/fixtures/message_stream.sse` and
   `test/fixtures/thinking_stream.sse`: `content` is empty in `message_start`,
-  the stop reason arrives in `message_delta`, and a tool call's arguments
-  arrive as JSON fragments that are only parseable once joined.
+  the stop reason arrives in `message_delta`, and the arguments of a call,
+  client-side or server-side, arrive as JSON fragments that are only parseable
+  once joined.
   """
 
   @doc "Streams `message` to the connection as `text/event-stream`."
@@ -50,7 +51,7 @@ defmodule Claudex.TestSupport.MessageStream do
     ]
   end
 
-  defp block({%{"type" => "tool_use", "input" => input} = tool_use, index}) do
+  defp block({%{"input" => input} = tool_use, index}) do
     json = JSON.encode!(input)
     {head, tail} = String.split_at(json, div(String.length(json), 2))
 

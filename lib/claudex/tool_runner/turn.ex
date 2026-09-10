@@ -12,9 +12,9 @@ defmodule Claudex.ToolRunner.Turn do
 
     * `:completed` - Claude answered without asking for another tool.
     * `:refusal` - Claude declined. Its tool calls, if any, were not run.
-    * `:max_turns` - the runner's turn limit ran out. The tools for this turn
-      did run and their results are in `messages`, so the conversation can be
-      picked up again by passing that history back.
+    * `:max_turns` - the runner's turn limit ran out. Whatever this turn
+      produced is in `messages`, tool results included, so the conversation can
+      be picked up again by passing that history back.
   """
 
   alias Claudex.ContentBlock.ToolUse
