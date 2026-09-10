@@ -4,6 +4,9 @@ defmodule Claudex.ContentBlock do
   these — usually just text, sometimes thinking or a tool call mixed in.
   `decode/1` reads a block's `"type"` field and returns the matching
   struct.
+
+  Each block type is a module implementing this behaviour: `decode/1` reads
+  the API's map, `to_param/1` writes it back.
   """
 
   alias Claudex.ContentBlock.{
@@ -25,22 +28,36 @@ defmodule Claudex.ContentBlock do
           | ServerToolResult.t()
           | Unknown.t()
 
+  @doc "Reads one block of the API's JSON into this module's struct."
+  @callback decode(map()) :: t()
+
+  @doc "Writes the struct back into the map the API expects in a request."
+  @callback to_param(t()) :: map()
+
+  # The API's name for a block, and the module that handles it. Every tool the
+  # API runs itself lands on one module: those blocks differ only in what
+  # `content` holds, which the struct keeps as the API sent it.
+  @blocks Map.merge(
+            %{
+              "text" => Text,
+              "thinking" => Thinking,
+              "redacted_thinking" => RedactedThinking,
+              "tool_use" => ToolUse,
+              "server_tool_use" => ServerToolUse
+            },
+            Map.new(ServerToolResult.types(), &{&1, ServerToolResult})
+          )
+
+  @modules [Unknown | Map.values(@blocks)] |> Enum.uniq()
+
   @doc """
   Decodes one content block. Falls back to `Claudex.ContentBlock.Unknown`
   for a block type not modeled yet, so a new block type from the API never
   breaks decoding — it just arrives un-typed.
   """
   @spec decode(map()) :: t()
-  def decode(%{"type" => "text"} = json), do: Text.decode(json)
-  def decode(%{"type" => "thinking"} = json), do: Thinking.decode(json)
-  def decode(%{"type" => "redacted_thinking"} = json), do: RedactedThinking.decode(json)
-  def decode(%{"type" => "tool_use"} = json), do: ToolUse.decode(json)
-  def decode(%{"type" => "server_tool_use"} = json), do: ServerToolUse.decode(json)
-
-  # One clause per tool the API runs itself. They differ only in what `content`
-  # holds, which the struct keeps as the API sent it.
-  for type <- ServerToolResult.types() do
-    def decode(%{"type" => unquote(type)} = json), do: ServerToolResult.decode(json)
+  for {type, module} <- @blocks do
+    def decode(%{"type" => unquote(type)} = json), do: unquote(module).decode(json)
   end
 
   def decode(json), do: Unknown.decode(json)
@@ -52,12 +69,6 @@ defmodule Claudex.ContentBlock do
   A map is passed through untouched, so hand-written blocks keep working.
   """
   @spec to_param(t() | map()) :: map()
-  def to_param(%Text{} = block), do: Text.to_param(block)
-  def to_param(%Thinking{} = block), do: Thinking.to_param(block)
-  def to_param(%RedactedThinking{} = block), do: RedactedThinking.to_param(block)
-  def to_param(%ToolUse{} = block), do: ToolUse.to_param(block)
-  def to_param(%ServerToolUse{} = block), do: ServerToolUse.to_param(block)
-  def to_param(%ServerToolResult{} = block), do: ServerToolResult.to_param(block)
-  def to_param(%Unknown{} = block), do: Unknown.to_param(block)
+  def to_param(%module{} = block) when module in @modules, do: module.to_param(block)
   def to_param(%{} = block), do: block
 end

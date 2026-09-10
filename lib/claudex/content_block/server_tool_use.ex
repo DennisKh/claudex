@@ -7,6 +7,8 @@ defmodule Claudex.ContentBlock.ServerToolUse do
   the next request, so the reply goes back into `messages` as it came.
   """
 
+  @behaviour Claudex.ContentBlock
+
   defstruct [:id, :name, :input, :raw]
 
   @type t :: %__MODULE__{
@@ -22,10 +24,12 @@ defmodule Claudex.ContentBlock.ServerToolUse do
   Fields like `caller` have no struct of their own, and a call Claude has yet
   to make has to go back untouched, so the raw map is what gets replayed.
   """
+  @impl true
   @spec to_param(t()) :: map()
   def to_param(%__MODULE__{raw: raw}), do: raw
 
   @doc false
+  @impl true
   @spec decode(map()) :: t()
   def decode(json) do
     %__MODULE__{id: json["id"], name: json["name"], input: json["input"] || %{}, raw: json}

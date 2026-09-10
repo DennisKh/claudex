@@ -18,6 +18,8 @@ defmodule Claudex.ContentBlock.ServerToolResult do
   cases don't look alike.
   """
 
+  @behaviour Claudex.ContentBlock
+
   @tools %{
     "web_search_tool_result" => :web_search,
     "web_fetch_tool_result" => :web_fetch,
@@ -55,10 +57,12 @@ defmodule Claudex.ContentBlock.ServerToolResult do
   A search result's `encrypted_content` has to reach the next request byte for
   byte or the API rejects it, so the raw map is what gets replayed.
   """
+  @impl true
   @spec to_param(t()) :: map()
   def to_param(%__MODULE__{raw: raw}), do: raw
 
   @doc false
+  @impl true
   @spec decode(map()) :: t()
   def decode(json) do
     content = json["content"]
