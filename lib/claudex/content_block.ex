@@ -6,9 +6,24 @@ defmodule Claudex.ContentBlock do
   struct.
   """
 
-  alias Claudex.ContentBlock.{RedactedThinking, Text, Thinking, ToolUse, Unknown}
+  alias Claudex.ContentBlock.{
+    RedactedThinking,
+    ServerToolResult,
+    ServerToolUse,
+    Text,
+    Thinking,
+    ToolUse,
+    Unknown
+  }
 
-  @type t :: Text.t() | Thinking.t() | RedactedThinking.t() | ToolUse.t() | Unknown.t()
+  @type t ::
+          Text.t()
+          | Thinking.t()
+          | RedactedThinking.t()
+          | ToolUse.t()
+          | ServerToolUse.t()
+          | ServerToolResult.t()
+          | Unknown.t()
 
   @doc """
   Decodes one content block. Falls back to `Claudex.ContentBlock.Unknown`
@@ -20,6 +35,14 @@ defmodule Claudex.ContentBlock do
   def decode(%{"type" => "thinking"} = json), do: Thinking.decode(json)
   def decode(%{"type" => "redacted_thinking"} = json), do: RedactedThinking.decode(json)
   def decode(%{"type" => "tool_use"} = json), do: ToolUse.decode(json)
+  def decode(%{"type" => "server_tool_use"} = json), do: ServerToolUse.decode(json)
+
+  # One clause per tool the API runs itself. They differ only in what `content`
+  # holds, which the struct keeps as the API sent it.
+  for type <- ServerToolResult.types() do
+    def decode(%{"type" => unquote(type)} = json), do: ServerToolResult.decode(json)
+  end
+
   def decode(json), do: Unknown.decode(json)
 
   @doc """
@@ -33,6 +56,8 @@ defmodule Claudex.ContentBlock do
   def to_param(%Thinking{} = block), do: Thinking.to_param(block)
   def to_param(%RedactedThinking{} = block), do: RedactedThinking.to_param(block)
   def to_param(%ToolUse{} = block), do: ToolUse.to_param(block)
+  def to_param(%ServerToolUse{} = block), do: ServerToolUse.to_param(block)
+  def to_param(%ServerToolResult{} = block), do: ServerToolResult.to_param(block)
   def to_param(%Unknown{} = block), do: Unknown.to_param(block)
   def to_param(%{} = block), do: block
 end

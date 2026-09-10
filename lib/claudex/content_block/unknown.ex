@@ -1,8 +1,8 @@
 defmodule Claudex.ContentBlock.Unknown do
   @moduledoc """
   A content block type this version of Claudex doesn't have a struct for
-  yet — a server tool result, for example. Nothing is lost: `raw` holds the
-  full decoded JSON, and `type` is its `"type"` field.
+  yet, an MCP tool call for example. Nothing is lost: `raw` holds the full
+  decoded JSON, and `type` is its `"type"` field.
   """
 
   defstruct [:type, :raw]

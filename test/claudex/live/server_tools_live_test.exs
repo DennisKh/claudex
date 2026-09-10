@@ -16,6 +16,7 @@ defmodule Claudex.Live.ServerToolsTest do
   use Claudex.TestSupport.LiveCase, async: false
 
   alias Claudex.{ContentBlock, Message, Messages, ToolRunner}
+  alias Claudex.ContentBlock.{ServerToolResult, ServerToolUse}
 
   @moduletag timeout: 180_000
 
@@ -78,38 +79,31 @@ defmodule Claudex.Live.ServerToolsTest do
         messages: [Message.user("Search the web: what is the population of Kyiv?")]
       })
 
-    types = Enum.map(message.content, &block_type/1)
+    call = find(message, ServerToolUse)
+    result = find(message, ServerToolResult)
 
-    assert "server_tool_use" in types
-    assert "web_search_tool_result" in types
-
+    assert call.name == "web_search"
+    assert result.tool == :web_search
+    assert result.tool_use_id == call.id
     assert message.usage.server_tool_use["web_search_requests"] >= 1
 
-    # The shape a typed struct would have to decode: a list of results, or an
-    # error object in the same field.
-    result =
-      Enum.find(
-        message.content,
-        &match?(%ContentBlock.Unknown{type: "web_search_tool_result"}, &1)
-      )
+    refute result.error_code, "the search failed: #{result.error_code}"
 
-    assert %{"tool_use_id" => _id, "content" => content} = result.raw
+    assert Enum.all?(
+             result.content,
+             &match?(%{"type" => "web_search_result", "url" => _, "encrypted_content" => _}, &1)
+           )
 
-    case content do
-      results when is_list(results) ->
-        assert Enum.all?(
-                 results,
-                 &match?(
-                   %{"type" => "web_search_result", "url" => _, "encrypted_content" => _},
-                   &1
-                 )
-               )
-
-      %{"type" => "web_search_tool_result_error"} = error ->
-        flunk("the search failed: #{error["error_code"]}")
-    end
+    # Replaying has to hand back what the API sent: a changed or missing
+    # encrypted_content is a 400 on the next turn.
+    assert ContentBlock.to_param(result) == result.raw
   end
 
-  defp block_type(%ContentBlock.Unknown{type: type}), do: type
-  defp block_type(block), do: block |> ContentBlock.to_param() |> Map.fetch!(:type)
+  defp find(message, struct) do
+    block = Enum.find(message.content, &(is_struct(&1) and &1.__struct__ == struct))
+
+    assert block, "no #{inspect(struct)} block in #{inspect(Enum.map(message.content, & &1))}"
+
+    block
+  end
 end
