@@ -5,8 +5,7 @@ defmodule Claudex.Error do
   `:type` mirrors the error types the API documents — `:billing` for 402,
   `:timeout` for a 504 as well as for a client-side timeout, and so on.
   `:error_type` is the API's own string (`"invalid_request_error"`), finer
-  grained than the status and extensible by the API, so reach for it when
-  `:type` isn't specific enough. Match on it to handle specific cases:
+  grained than the status and extensible by the API:
 
       case Claudex.Messages.create(client, params) do
         {:ok, message} -> message
@@ -23,6 +22,7 @@ defmodule Claudex.Error do
     404 => :not_found,
     409 => :conflict,
     413 => :request_too_large,
+    # Not in the errors reference; the official SDKs raise on it
     422 => :unprocessable_entity,
     429 => :rate_limit,
     504 => :timeout,
@@ -35,6 +35,8 @@ defmodule Claudex.Error do
     "billing_error" => :billing,
     "permission_error" => :permission_denied,
     "not_found_error" => :not_found,
+    "conflict_error" => :conflict,
+    "request_too_large" => :request_too_large,
     "rate_limit_error" => :rate_limit,
     "timeout_error" => :timeout,
     "overloaded_error" => :overloaded,
@@ -70,12 +72,14 @@ defmodule Claudex.Error do
         }
 
   @doc """
-  Builds an error from an HTTP response: a status code and its body. The body
-  may be a decoded map or the raw bytes; either way the API's own message and
-  error type end up on the struct.
+  Builds an error from an HTTP response: a status code, its body, and the
+  `request-id` header. The body may be a decoded map or the raw bytes; either
+  way the API's own message and error type end up on the struct. The header is
+  what carries the request id when the body isn't JSON.
   """
   @spec from_response(pos_integer(), map() | binary() | nil) :: t()
-  def from_response(status, body) do
+  @spec from_response(pos_integer(), map() | binary() | nil, String.t() | nil) :: t()
+  def from_response(status, body, request_id \\ nil) do
     body = decode_body(body)
     error_type = error_type_from_body(body)
 
@@ -84,7 +88,7 @@ defmodule Claudex.Error do
       error_type: error_type,
       message: message_from_body(body, status),
       status: status,
-      request_id: request_id_from_body(body),
+      request_id: request_id_from_body(body) || request_id,
       body: body
     }
   end

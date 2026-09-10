@@ -8,10 +8,8 @@ defmodule Claudex.Telemetry do
 
       Claudex.Telemetry.attach_default_logger()
 
-  That's it — no config, no compile flags. Turn it off with
-  `detach_default_logger/0`. For anything beyond development, attach your own
-  handler with `:telemetry.attach_many/4` and send the events wherever they
-  belong.
+  `detach_default_logger/0` turns it off again. Anything beyond development
+  attaches its own handler with `:telemetry.attach_many/4`.
 
   ## What's in an event, and what isn't
 
@@ -28,16 +26,14 @@ defmodule Claudex.Telemetry do
   A span around one HTTP request. Metadata has `:method` and `:path`
   throughout, `:model` when the request names one, and on `:stop` also
   `:status`, `:request_id`, and — when the response carries usage —
-  `:input_tokens` and `:output_tokens`. The request id is worth capturing: it's
-  what Anthropic support asks for, and Claudex otherwise keeps it only on
-  errors.
+  `:input_tokens`, `:output_tokens`, and the cache counters
+  `:cache_creation_input_tokens` and `:cache_read_input_tokens` when caching
+  was in play. `:request_id` is the id Anthropic support asks for.
 
   ### `[:claudex, :retry, :declined]`
 
-  A retry that Claudex refused because part of the response had already reached
-  the caller — retrying would replay output and bill twice. Req logs the
-  retries it makes; without this, the ones we decline look like nothing
-  happened.
+  A retry Claudex refused because part of the response had already reached the
+  caller - retrying would replay output and bill twice. Metadata has `:reason`.
 
   ### `[:claudex, :tool, :start | :stop | :exception]`
 
@@ -69,7 +65,6 @@ defmodule Claudex.Telemetry do
     @events ++
       [
         [:claudex, :request, :start],
-        [:claudex, :stream, :start],
         [:claudex, :tool, :start],
         [:claudex, :tool, :exception]
       ]

@@ -25,6 +25,45 @@ defmodule Claudex.ErrorTest do
     end
   end
 
+  test "from_response/3 classifies every error type string the API documents" do
+    mapping = %{
+      "invalid_request_error" => :bad_request,
+      "authentication_error" => :authentication,
+      "billing_error" => :billing,
+      "permission_error" => :permission_denied,
+      "not_found_error" => :not_found,
+      "conflict_error" => :conflict,
+      "request_too_large" => :request_too_large,
+      "rate_limit_error" => :rate_limit,
+      "timeout_error" => :timeout,
+      "overloaded_error" => :overloaded,
+      "api_error" => :internal_server
+    }
+
+    # Status 418 so the type can only come from the body: a string the map
+    # misses would fall through to :api_status.
+    for {error_type, type} <- mapping do
+      body = %{"error" => %{"type" => error_type, "message" => "nope"}}
+
+      assert %Error{type: ^type} = Error.from_response(418, body)
+    end
+  end
+
+  test "from_response/3 takes the request id from the header when the body has none" do
+    error = Error.from_response(500, "<html>gateway</html>", "req_from_header")
+
+    assert error.request_id == "req_from_header"
+  end
+
+  test "from_response/3 prefers the body's request id over the header" do
+    body = %{
+      "error" => %{"type" => "not_found_error", "message" => "nope"},
+      "request_id" => "req_body"
+    }
+
+    assert %Error{request_id: "req_body"} = Error.from_response(404, body, "req_header")
+  end
+
   test "from_response/2 falls back to :api_status for an unmapped status" do
     assert %Error{type: :api_status} = Error.from_response(418, nil)
   end

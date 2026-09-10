@@ -6,15 +6,19 @@ defmodule Claudex.ContentBlock.RedactedThinking do
   assistant message you echo back is a 400.
   """
 
+  @behaviour Claudex.ContentBlock
+
   defstruct [:data]
 
   @type t :: %__MODULE__{data: String.t()}
 
   @doc "Turns the block back into the map the API expects in a request."
+  @impl true
   @spec to_param(t()) :: map()
   def to_param(%__MODULE__{} = block), do: %{type: "redacted_thinking", data: block.data}
 
   @doc false
+  @impl true
   @spec decode(map()) :: t()
   def decode(json) do
     %__MODULE__{data: json["data"]}

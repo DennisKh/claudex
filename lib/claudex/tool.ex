@@ -38,9 +38,10 @@ defmodule Claudex.Tool do
       Claudex can't map (see below), or when you need something a
       typespec can't express (an `enum`, say)
 
-  Claude picks arguments from their descriptions, so `:args` is worth writing
-  for anything whose name doesn't say it all. It merges into the inferred
-  schema rather than replacing it, so the types still come from the `@spec`:
+  Claude picks arguments from their descriptions, so an argument named
+  `path` tells it less than one described as an absolute path. `:args` merges
+  into the inferred schema rather than replacing it, so the types still come
+  from the `@spec`:
 
       @doc "Read a UTF-8 text file and return its contents."
       @tool %{args: [path: "Absolute path, or relative to the project directory."]}

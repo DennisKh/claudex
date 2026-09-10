@@ -106,6 +106,35 @@ defmodule Claudex.TelemetryTest do
     assert metadata.output_tokens == 7
   end
 
+  test "a cached request reports what the cache did" do
+    cached =
+      message([%{"type" => "text", "text" => "hello"}])
+      |> put_in(["usage"], %{
+        "input_tokens" => 11,
+        "output_tokens" => 7,
+        "cache_creation_input_tokens" => 4096,
+        "cache_read_input_tokens" => 0
+      })
+
+    respond_with([cached])
+
+    assert {:ok, _message} = Messages.create(client(), @params)
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, metadata}
+    assert metadata.cache_creation_input_tokens == 4096
+    assert metadata.cache_read_input_tokens == 0
+  end
+
+  test "a request without caching reports no cache counters" do
+    respond_with([message([%{"type" => "text", "text" => "hello"}])])
+
+    assert {:ok, _message} = Messages.create(client(), @params)
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, metadata}
+    refute Map.has_key?(metadata, :cache_creation_input_tokens)
+    refute Map.has_key?(metadata, :cache_read_input_tokens)
+  end
+
   test "request metadata never carries the conversation or the client" do
     respond_with([message([%{"type" => "text", "text" => "a secret answer"}])])
 

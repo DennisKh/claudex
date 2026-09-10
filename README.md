@@ -278,6 +278,19 @@ def handle_info({:reply, _stale, _event}, socket), do: {:noreply, socket}
 
 The conversation ends with the task, so `:before_call` fits a decision the user makes now. One that arrives in a later request needs storing, and the loop re-entered from there.
 
+### Tools the API runs
+
+A server tool such as `web_search` runs on Anthropic's side. Claude's call arrives as `Claudex.ContentBlock.ServerToolUse` and its answer as `Claudex.ContentBlock.ServerToolResult`, paired by `tool_use_id`, with nothing to dispatch:
+
+```elixir
+case block do
+  %ServerToolResult{error_code: nil, content: results} -> render(results)
+  %ServerToolResult{error_code: code} -> log(code)
+end
+```
+
+A failed call is still a 200, with an error object in `content` and its code lifted onto `error_code`. `content` is otherwise the tool's own payload: search results, a fetched document, a map of `stdout`, `stderr` and `return_code`. `Claudex.ToolRunner` resumes a turn the API pauses part-way through one of these loops.
+
 If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
 
 A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture.
