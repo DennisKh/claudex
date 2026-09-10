@@ -69,6 +69,10 @@ defmodule Claudex.ToolRunnerTest do
 
   defp text(text), do: %{"type" => "text", "text" => text}
 
+  defp server_tool_use(name, input) do
+    %{"type" => "server_tool_use", "id" => "srvtoolu_1", "name" => name, "input" => input}
+  end
+
   defp respond_with(replies) do
     {:ok, counter} = Agent.start_link(fn -> replies end)
     test_pid = self()
@@ -379,6 +383,39 @@ defmodule Claudex.ToolRunnerTest do
       assert {:ok, turn} = ToolRunner.run(client(), @params, on_event: watch)
 
       assert chunks |> Agent.get(&Enum.reverse/1) |> Enum.join() == Message.text(turn.message)
+    end
+  end
+
+  describe "a paused turn" do
+    test "resumes on the history as it stands, adding nothing to it" do
+      respond_with([
+        message([server_tool_use("web_search", %{"query" => "kyiv weather"})], "pause_turn"),
+        message([text("It is 18°C in Kyiv.")], "end_turn")
+      ])
+
+      assert [first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+
+      assert first.stop == nil
+      assert first.message.stop_reason == "pause_turn"
+      assert first.tool_results == []
+      assert second.stop == :completed
+
+      assert_received {:sent, _first}
+      assert_received {:sent, %{"messages" => messages}}
+
+      # The paused reply goes back as it came, with no message of ours between
+      # it and the request that resumes it.
+      assert [%{"role" => "user"}, %{"role" => "assistant"}] = messages
+    end
+
+    test "still stops at the turn limit if the pauses keep coming" do
+      paused = message([server_tool_use("web_search", %{"query" => "kyiv"})], "pause_turn")
+
+      respond_with(List.duplicate(paused, 2))
+
+      turns = client() |> ToolRunner.stream(@params, max_turns: 2) |> Enum.to_list()
+
+      assert [%Turn{stop: nil}, %Turn{stop: :max_turns}] = turns
     end
   end
 end

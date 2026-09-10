@@ -1,5 +1,5 @@
 defmodule Claudex.ToolRunner do
-  @default_max_turns 10
+  @default_max_turns 20
 
   @moduledoc """
   Runs a tool conversation: send, run whatever Claude asks for, send the
@@ -16,6 +16,11 @@ defmodule Claudex.ToolRunner do
       Claudex.Message.text(turn.message)  # the final reply
       turn.messages                       # the whole conversation
       turn.stop                           # :completed | :refusal | :max_turns
+
+  A turn the API pauses part-way through a server-side tool loop
+  (`stop_reason: "pause_turn"`) resumes on its own. The history goes back
+  unchanged and the conversation carries on, so a pause costs a turn but does
+  not end anything.
 
   `stream/3` hands you one turn at a time instead, so you can watch the
   conversation, log it, or stop it:
@@ -56,8 +61,9 @@ defmodule Claudex.ToolRunner do
 
   ## Options
 
-    * `:max_turns` - how many times to go around before giving up, defaulting
-      to #{@default_max_turns}. The last turn then carries `stop: :max_turns`.
+    * `:max_turns` - how many requests the conversation may make before giving
+      up, defaulting to #{@default_max_turns}. Tool rounds and resumed pauses
+      both count. The last turn then carries `stop: :max_turns`.
     * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
       before the tool does, returning `:ok` or `{:deny, reason}`
     * `:on_event` - a function run on each `Claudex.Stream.Event` as it
@@ -144,10 +150,14 @@ defmodule Claudex.ToolRunner do
         Claudex.ToolRunner.run(client, params)
 
   It returns a `Claudex.ToolRunner.Turn`, the same thing `stream/3` yields.
-  `message` is the final reply, `messages` the whole conversation,
-  and `stop` says why it ended: `:completed`, `:refusal`, or `:max_turns`.
-  Match on `stop` rather than assuming Claude finished; hitting the turn limit
-  is not an error, and looks identical without it.
+  `message` is the last reply, `messages` the whole conversation, and `stop`
+  says why it ended: `:completed`, `:refusal`, or `:max_turns`. A conversation
+  that ran out of turns is `{:ok, turn}` like any other, and reads as a
+  finished one everywhere except `stop`.
+
+  A conversation that ran tools or paused says part of what it has to say
+  before each of those, so `message` carries the last stretch of the reply
+  rather than all of it. `messages` holds the rest.
 
   Returns `{:error, %Claudex.Error{}}` if a request fails.
   """
@@ -220,8 +230,9 @@ defmodule Claudex.ToolRunner do
       # A refusal ends the conversation. Running its tool calls would fire side
       # effects Claude never confirmed, and the results couldn't be replayed.
       message.stop_reason == "refusal" -> {%{turn | stop: :refusal}, :done}
-      tool_uses == [] -> {%{turn | stop: :completed}, :done}
-      true -> continue(config, turn, messages, index)
+      tool_uses != [] -> continue(config, turn, messages, index)
+      message.stop_reason == "pause_turn" -> resume(config, turn, messages, index)
+      true -> {%{turn | stop: :completed}, :done}
     end
   end
 
@@ -229,11 +240,15 @@ defmodule Claudex.ToolRunner do
     results = Enum.map(turn.tool_uses, &run_tool(&1, config))
 
     messages = Message.append(messages, Message.tool_results(results))
-    turn = %{turn | tool_results: results, messages: messages}
 
-    # The limit is checked here rather than before the next request so the last
-    # turn carries the reason. The tool results are already in the history, so
-    # the conversation can be resumed by passing it back.
+    advance(config, %{turn | tool_results: results, messages: messages}, messages, index)
+  end
+
+  # The API picks a paused turn up from the trailing server tool block, so it
+  # resumes on the history as it stands.
+  defp resume(config, turn, messages, index), do: advance(config, turn, messages, index)
+
+  defp advance(config, turn, messages, index) do
     if index >= config.max_turns do
       {%{turn | stop: :max_turns}, :done}
     else
