@@ -17,7 +17,9 @@ defmodule Claudex do
       Claudex.Message.text(message)
 
   A client is a plain struct, so you can hold several at once and pass them
-  around freely. Nothing here runs as a process or reads global state.
+  around freely. There is no supervision tree to start: streaming spawns a
+  process per request and cleans it up when the stream ends. `new/1` falls back
+  to application config and then `ANTHROPIC_API_KEY` when given no `:api_key`.
 
   ## What's here
 

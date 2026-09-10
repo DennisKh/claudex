@@ -105,16 +105,21 @@ defmodule Claudex.API do
 
   defp usage(%{"usage" => %{} = usage}) do
     %{input_tokens: usage["input_tokens"], output_tokens: usage["output_tokens"]}
+    |> put_present(:cache_creation_input_tokens, usage["cache_creation_input_tokens"])
+    |> put_present(:cache_read_input_tokens, usage["cache_read_input_tokens"])
   end
 
   defp usage(_body), do: %{}
+
+  defp put_present(metadata, _key, nil), do: metadata
+  defp put_present(metadata, key, value), do: Map.put(metadata, key, value)
 
   defp handle({:ok, %Req.Response{status: status, body: body}}) when status in 200..299 do
     {:ok, body}
   end
 
-  defp handle({:ok, %Req.Response{status: status, body: body}}) do
-    {:error, Error.from_response(status, body)}
+  defp handle({:ok, %Req.Response{status: status, body: body} = response}) do
+    {:error, Error.from_response(status, body, request_id(response))}
   end
 
   defp handle({:error, exception}), do: {:error, Error.from_transport(exception)}

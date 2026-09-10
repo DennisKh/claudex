@@ -174,8 +174,8 @@ defmodule Claudex.ChunkStream do
   defp outcome({:ok, %Req.Response{status: status} = response}) when status in 200..299,
     do: {:done, %{status: status, request_id: API.request_id(response)}}
 
-  defp outcome({:ok, %Req.Response{status: status, body: body}}) do
-    {:error, Error.from_response(status, body)}
+  defp outcome({:ok, %Req.Response{status: status, body: body} = response}) do
+    {:error, Error.from_response(status, body, API.request_id(response))}
   end
 
   defp outcome({:error, exception}), do: {:error, Error.from_transport(exception)}
