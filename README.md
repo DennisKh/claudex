@@ -289,6 +289,24 @@ the matching `tool_result` refers to it. A `thinking` block needs its
 `signature`, because continuing a thinking conversation on the same model means
 sending prior thinking blocks back intact.
 
+Results for one reply go back together. If a reply asked for two tools, the
+next message has to answer both:
+
+```elixir
+[call_a, call_b] = Claudex.Message.tool_uses(turn.message)
+
+Claudex.Message.tool_results([
+  Claudex.Tool.result(call_a.id, "42"),
+  Claudex.Tool.result(call_b.id, "7")
+])
+```
+
+Answering only `call_a` is a 400, and it names the call you left out.
+"Immediately after" is literal: the results have to be the very next message,
+not a later one. An app that waits on a human to approve one of the calls
+therefore holds them all until the last one resolves, rather than sending the
+results it has so far.
+
 ## Telemetry and logging
 
 Claudex writes nothing to your logs on its own. It emits `:telemetry` events, and ships a logger you can turn on in one line while debugging:
