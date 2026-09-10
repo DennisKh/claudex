@@ -41,6 +41,39 @@ Claudex.Message.text(message)
 
 A failed request returns `{:error, %Claudex.Error{}}` rather than raising — see `Claudex.Error` for the full set of error types.
 
+### API parameters
+
+Claudex checks that `:model`, `:messages` and `:max_tokens` are there and
+converts `:messages` and `:tools` for you. Every other key goes to the API
+untouched, so any parameter the Messages API accepts works here, whether or not
+Claudex knows about it:
+
+```elixir
+Claudex.Messages.create(client, %{
+  model: "claude-opus-5",
+  max_tokens: 1024,
+  system: [%{type: "text", text: handbook, cache_control: %{type: "ephemeral"}}],
+  tools: MyApp.Tools,
+  tool_choice: %{type: "tool", name: "get_weather"},
+  thinking: %{type: "adaptive"},
+  messages: [Claudex.Message.user("What should I wear in New York City today?")]
+})
+```
+
+Which values each one takes, and which models accept them, is Anthropic's to
+say. The thinking config in particular has two shapes, and the one a model
+wants depends on the model:
+
+* [Messages API reference](https://platform.claude.com/docs/en/api/messages) for every parameter
+* [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) for `cache_control`
+* [Tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview) for `tool_choice`
+* [Extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) for `thinking`
+
+Beta features are a header rather than a parameter, so they belong to the
+client: `Claudex.new(beta: ["context-management-2025-06-27"])` sends them as
+one `anthropic-beta` header on every request, and `:beta` can sit in config
+with the rest.
+
 ### Configuration
 
 Connection settings can live in application config, so an app names them once:
@@ -53,7 +86,7 @@ config :claudex,
   max_retries: 2,
   receive_timeout: :timer.minutes(10),
   connect_timeout: :timer.seconds(5),
-  beta: ["files-api-2025-04-14"],
+  beta: ["context-management-2025-06-27"],
   req_options: [finch: MyApp.Finch]
 
 client = Claudex.new()                    # picks all of that up
