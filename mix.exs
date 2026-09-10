@@ -59,6 +59,7 @@ defmodule Claudex.MixProject do
         Messages: [
           Claudex.Messages,
           Claudex.Message,
+          Claudex.OutputFormat,
           Claudex.ContentBlock,
           ~r/^Claudex\.ContentBlock\./,
           Claudex.Usage

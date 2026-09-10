@@ -7,7 +7,7 @@ defmodule Claudex.Messages do
   instead, for a GenServer or LiveView that can't block.
   """
 
-  alias Claudex.{API, Client, Error, Message, Tool}
+  alias Claudex.{API, Client, Error, Message, OutputFormat, Tool}
   alias Claudex.Stream.{Connection, Forwarder, Handle}
 
   @required_params [:model, :messages, :max_tokens]
@@ -24,6 +24,10 @@ defmodule Claudex.Messages do
 
   `:tools` takes a module that `use`s `Claudex.Tool`, a list of them, plain
   tool maps, or any mix of the two — see `Claudex.Tool.list/1`.
+
+  `:output_config`'s `format` takes a struct module the same way, and Claude
+  answers with JSON in that struct's shape — see `Claudex.OutputFormat`. A
+  module whose types can't become a schema raises `Claudex.Tool.SchemaError`.
 
   Every other key in `params` goes into the JSON request body verbatim.
 
@@ -141,7 +145,8 @@ defmodule Claudex.Messages do
   end
 
   defp build_body(params, required \\ @required_params) do
-    body = params |> Map.new() |> normalize_tools() |> normalize_messages()
+    body =
+      params |> Map.new() |> normalize_tools() |> normalize_messages() |> normalize_format()
 
     with :ok <- validate_required(body, required), do: {:ok, body}
   end
@@ -154,6 +159,13 @@ defmodule Claudex.Messages do
   end
 
   defp normalize_messages(body), do: body
+
+  defp normalize_format(%{output_config: %{format: module} = config} = body)
+       when is_atom(module) and not is_nil(module) do
+    %{body | output_config: %{config | format: OutputFormat.json_schema(module)}}
+  end
+
+  defp normalize_format(body), do: body
 
   defp validate_not_streaming(%{stream: true}) do
     {:error,
