@@ -52,13 +52,26 @@ Claudex knows about it:
 Claudex.Messages.create(client, %{
   model: "claude-opus-5",
   max_tokens: 1024,
-  system: [%{type: "text", text: handbook, cache_control: %{type: "ephemeral"}}],
+  # one breakpoint, on the last cacheable block, moving forward as the
+  # conversation grows
+  cache_control: %{type: "ephemeral", ttl: "1h"},
+  system: handbook,
   tools: MyApp.Tools,
   tool_choice: %{type: "tool", name: "get_weather"},
   thinking: %{type: "adaptive"},
   messages: [Claudex.Message.user("What should I wear in New York City today?")]
 })
 ```
+
+`cache_control` at the top of the request caches automatically; on a content block it pins a breakpoint there, which is what a long `system` prompt wants:
+
+```elixir
+system: [%{type: "text", text: handbook, cache_control: %{type: "ephemeral", ttl: "1h"}}]
+```
+
+A breakpoint goes on any block: a `system` block, a message block from either role, or a tool definition. Four per request is the ceiling, and a fifth is a 400. Each one caches everything before it, so they go on the parts that don't change, and the request-level form exists because pinning one to the newest message every turn spends all four within a few turns.
+
+`ttl` belongs to the `cache_control` object wherever it sits, and takes `"5m"`, the default, or `"1h"`, which costs more to write and keeps the prefix alive between turns that are minutes apart. `Claudex.Usage` reports what happened: `cache_creation_input_tokens` for what was written, `cache_read_input_tokens` for what was read back, and `cache_creation` for the split between the two lifetimes.
 
 Which values each one takes, and which models accept them, is Anthropic's to
 say. The thinking config in particular has two shapes, and the one a model
