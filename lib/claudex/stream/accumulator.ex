@@ -15,7 +15,7 @@ defmodule Claudex.Stream.Accumulator do
   only parseable together.
   """
 
-  alias Claudex.ContentBlock.{Text, Thinking, ToolUse}
+  alias Claudex.ContentBlock.{ServerToolUse, Text, Thinking, ToolUse}
   alias Claudex.{Message, Usage}
 
   alias Claudex.Stream.Event.{
@@ -163,7 +163,8 @@ defmodule Claudex.Stream.Accumulator do
   end
 
   defp put_tool_input(blocks, index, json) do
-    with {:ok, %ToolUse{} = block} <- Map.fetch(blocks, index),
+    with {:ok, block} when is_struct(block, ToolUse) or is_struct(block, ServerToolUse) <-
+           Map.fetch(blocks, index),
          {:ok, input} when is_map(input) <- JSON.decode(json) do
       Map.put(blocks, index, %{block | input: input})
     else

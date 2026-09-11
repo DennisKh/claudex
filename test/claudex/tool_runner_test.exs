@@ -419,6 +419,31 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
+  test "a paused turn resumes carrying the server tool's arguments" do
+    # The search the API is part-way through is what makes the paused reply
+    # resumable; a history that replays it with an empty input starts it again.
+    search = %{
+      "type" => "server_tool_use",
+      "id" => "srvtoolu_1",
+      "name" => "web_search",
+      "input" => %{"query" => "kyiv population"}
+    }
+
+    respond_with([
+      message([search], "pause_turn"),
+      message([text("Around 3 million.")], "end_turn")
+    ])
+
+    assert [_first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+
+    assert second.stop == :completed
+
+    assert_received {:sent, _first}
+    assert_received {:sent, %{"messages" => [_user, %{"content" => [replayed]}]}}
+
+    assert replayed["input"] == %{"query" => "kyiv population"}
+  end
+
   describe "a reply that ran out of room" do
     test "stops the loop rather than reading as finished" do
       respond_with([message([text("The answer is")], "max_tokens")])
