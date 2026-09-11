@@ -162,8 +162,6 @@ defmodule Claudex.Stream.Accumulator do
     end
   end
 
-  # A server tool streams its arguments exactly as a client tool does, so both
-  # blocks are filled in here.
   defp put_tool_input(blocks, index, json) do
     with {:ok, block} when is_struct(block, ToolUse) or is_struct(block, ServerToolUse) <-
            Map.fetch(blocks, index),
