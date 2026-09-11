@@ -111,6 +111,27 @@ defmodule Claudex.Messages.Batches do
   end
 
   @doc """
+  Every batch, as one lazy stream.
+
+      client
+      |> Claudex.Messages.Batches.stream!()
+      |> Stream.reject(&Claudex.Messages.Batch.ended?/1)
+      |> Enum.take(3)
+
+  That stops requesting pages once it has three, which is why this yields
+  batches rather than pages.
+
+  Pages are fetched as you consume them, so taking the first few costs one
+  request. Takes the same options as `list/2`, minus the cursor it threads
+  itself. Enumerating raises `Claudex.Error` if a request fails.
+  """
+  @spec stream!(Client.t()) :: Enumerable.t()
+  @spec stream!(Client.t(), keyword()) :: Enumerable.t()
+  def stream!(%Client{} = client, opts \\ []) do
+    Page.stream!(opts, &list(client, &1))
+  end
+
+  @doc """
   Asks for a batch to be canceled.
 
   Cancellation isn't immediate: the batch moves to `"canceling"`, and requests

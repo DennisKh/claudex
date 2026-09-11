@@ -81,6 +81,25 @@ defmodule Claudex.Files do
     end
   end
 
+  @doc """
+  Every file in your workspace, as one lazy stream, however many pages that
+  spans.
+
+      client
+      |> Claudex.Files.stream!()
+      |> Enum.filter(&(DateTime.diff(DateTime.utc_now(), &1.created_at, :day) > 7))
+      |> Enum.each(&Claudex.Files.delete(client, &1.id))
+
+  Pages are fetched as you consume them, so taking the first few costs one
+  request. Takes the same options as `list/2`, minus the cursor it threads
+  itself. Enumerating raises `Claudex.Error` if a request fails.
+  """
+  @spec stream!(Client.t()) :: Enumerable.t()
+  @spec stream!(Client.t(), keyword()) :: Enumerable.t()
+  def stream!(%Client{} = client, opts \\ []) do
+    Page.stream!(opts, &list(client, &1))
+  end
+
   @doc "Looks up one file's metadata."
   @spec retrieve(Client.t(), String.t()) :: {:ok, FileMetadata.t()} | {:error, Error.t()}
   def retrieve(%Client{} = client, file_id) do

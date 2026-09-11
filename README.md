@@ -5,7 +5,7 @@
 [![CI](https://github.com/DennisKh/claudex/actions/workflows/ci.yml/badge.svg)](https://github.com/DennisKh/claudex/actions/workflows/ci.yml)
 [![License](https://img.shields.io/hexpm/l/claudex.svg)](https://github.com/DennisKh/claudex/blob/main/LICENSE)
 
-An Elixir SDK for the [Claude API](https://platform.claude.com/docs/en/api/overview): messages, streaming, tools, files and batches.
+An Elixir SDK for the [Claude API](https://platform.claude.com/docs/en/api/overview) that runs the whole tool conversation, streams with backpressure, and derives JSON schemas from your typespecs. Messages, tools, structured outputs, files and batches.
 
 ## Installation
 
@@ -14,7 +14,7 @@ Add `:claudex` to your dependencies:
 ```elixir
 def deps do
   [
-    {:claudex, "~> 0.7"}
+    {:claudex, "~> 0.8"}
   ]
 end
 ```
@@ -434,7 +434,17 @@ model.id           #=> "claude-opus-5"
 model.max_tokens   #=> 128000
 ```
 
-`list/2` returns one `Claudex.Page`, holding `Claudex.Model` structs. If `page.has_more` is true, pass `after_id: page.last_id` for the next one.
+`list/2` returns one `Claudex.Page`, holding `Claudex.Model` structs. If `page.has_more` is true, pass `after_id: page.last_id` for the next one, or let `stream!/2` walk the pages for you:
+
+```elixir
+client
+|> Claudex.Models.stream!()
+|> Enum.filter(&get_in(&1.capabilities, ["code_execution", "supported"]))
+|> Enum.map(& &1.id)
+#=> ["claude-opus-5", "claude-sonnet-5", ...]
+```
+
+Pages are fetched as they're consumed, so `Enum.take(5)` costs one request. `Claudex.Files` and `Claudex.Messages.Batches` have the same function, and each threads whichever cursor its endpoint uses.
 
 To find out what a request will cost before sending it:
 
@@ -473,7 +483,7 @@ Images and PDFs don't *need* this — inline base64 and URL sources work today, 
 
 `download/2` is the other direction, and the part with no inline equivalent — it retrieves files Claude *created* through skills or the code execution tool. Files you uploaded have `downloadable: false` and downloading one returns a 400.
 
-`list/2` pages by cursor rather than by id: pass `page: page.next_page` until it comes back nil. Each entry is a `Claudex.FileMetadata`; see `Claudex.Files` for the rest.
+`list/2` pages by cursor rather than by id: pass `page: page.next_page` until it comes back nil, or use `Claudex.Files.stream!/2`, which threads whichever cursor the endpoint uses. Each entry is a `Claudex.FileMetadata`; see `Claudex.Files` for the rest.
 
 ## Message batches
 
