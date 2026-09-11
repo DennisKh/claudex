@@ -11,13 +11,15 @@ An Elixir SDK for the [Claude API](https://platform.claude.com/docs/en/api/overv
 
 Add `:claudex` to your dependencies:
 
+<!-- x-release-please-start-version -->
 ```elixir
 def deps do
   [
-    {:claudex, "~> 0.8"}
+    {:claudex, "~> 0.8.0"}
   ]
 end
 ```
+<!-- x-release-please-end -->
 
 Documentation is on [HexDocs](https://hexdocs.pm/claudex).
 
