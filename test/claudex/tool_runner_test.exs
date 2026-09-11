@@ -418,4 +418,34 @@ defmodule Claudex.ToolRunnerTest do
       assert [%Turn{stop: nil}, %Turn{stop: :max_turns}] = turns
     end
   end
+
+  describe "a reply that ran out of room" do
+    test "stops the loop rather than reading as finished" do
+      respond_with([message([text("The answer is")], "max_tokens")])
+
+      assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+
+      assert turn.stop == :truncated
+      assert turn.message.stop_reason == "max_tokens"
+    end
+
+    test "the model's own context window counts too" do
+      respond_with([message([text("...")], "model_context_window_exceeded")])
+
+      assert [%Turn{stop: :truncated}] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    end
+
+    test "leaves the tool calls it was part-way through asking for unrun" do
+      respond_with([message([tool_use("add", %{"a" => 12, "b" => 30})], "max_tokens")])
+
+      assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+
+      assert turn.stop == :truncated
+      assert turn.tool_results == []
+
+      # One request went out: the loop never sent results for a half-asked call.
+      assert_received {:sent, _first}
+      refute_received {:sent, _second}
+    end
+  end
 end

@@ -44,7 +44,7 @@ defmodule Claudex.Telemetry do
   ### `[:claudex, :tool_runner, :turn]` and `[:claudex, :tool_runner, :stop]`
 
   One event per reply in a tool conversation, and one when the loop ends
-  carrying `:stop` — `:completed`, `:refusal`, or `:max_turns`.
+  carrying `:stop`, which is one of the reasons on `Claudex.ToolRunner.Turn`.
   """
 
   require Logger
