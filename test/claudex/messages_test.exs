@@ -2,6 +2,7 @@ defmodule Claudex.MessagesTest do
   use ExUnit.Case, async: true
 
   alias Claudex.{Client, Error, Message, Messages}
+  alias Claudex.TestSupport.Ticket
 
   defmodule Tools do
     use Claudex.Tool
@@ -195,5 +196,76 @@ defmodule Claudex.MessagesTest do
 
     assert {:error, %Error{type: :bad_request, message: "max_tokens is not allowed"}} =
              Messages.count_tokens(client(), params)
+  end
+
+  describe "output_config" do
+    defp echo_body do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:body, Jason.decode!(raw_body)})
+
+        Req.Test.json(conn, %{"input_tokens" => 1})
+      end)
+    end
+
+    test "a struct module becomes the schema the API expects" do
+      echo_body()
+
+      params = %{
+        model: "claude-opus-5",
+        messages: [Message.user("hi")],
+        output_config: %{format: Ticket}
+      }
+
+      assert {:ok, 1} = Messages.count_tokens(client(), params)
+
+      assert_received {:body, body}
+
+      assert %{"type" => "json_schema", "schema" => schema} = body["output_config"]["format"]
+      assert schema["type"] == "object"
+      assert schema["properties"]["title"] == %{"type" => "string"}
+    end
+
+    test "format: nil is the absence of a format, not a module" do
+      echo_body()
+
+      params = %{
+        model: "claude-opus-5",
+        messages: [Message.user("hi")],
+        output_config: %{effort: "high", format: nil}
+      }
+
+      assert {:ok, 1} = Messages.count_tokens(client(), params)
+
+      assert_received {:body, body}
+      assert body["output_config"] == %{"effort" => "high", "format" => nil}
+    end
+
+    test "a schema written by hand goes as it is" do
+      echo_body()
+
+      format = %{type: "json_schema", schema: %{type: "object", properties: %{}}}
+
+      params = %{
+        model: "claude-opus-5",
+        messages: [Message.user("hi")],
+        output_config: %{format: format, effort: "high"}
+      }
+
+      assert {:ok, 1} = Messages.count_tokens(client(), params)
+
+      assert_received {:body, body}
+
+      # Untouched: no additionalProperties added, effort still alongside it.
+      assert body["output_config"] == %{
+               "format" => %{
+                 "type" => "json_schema",
+                 "schema" => %{"type" => "object", "properties" => %{}}
+               },
+               "effort" => "high"
+             }
+    end
   end
 end

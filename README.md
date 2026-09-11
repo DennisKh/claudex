@@ -295,6 +295,39 @@ If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and
 
 A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture.
 
+## Structured outputs
+
+`output_config.format` makes Claude answer with JSON, and Claudex derives the schema from a struct's `@type t`, the same way `:tools` reads a function's `@spec`:
+
+```elixir
+defmodule MyApp.Ticket do
+  defstruct [:id, :title, :priority, :tags]
+
+  @type t :: %__MODULE__{
+          id: non_neg_integer(),
+          title: String.t(),
+          priority: :low | :high,
+          tags: nonempty_list(String.t())
+        }
+end
+
+{:ok, message} =
+  Claudex.Messages.create(client, %{
+    model: "claude-opus-5",
+    max_tokens: 1024,
+    output_config: %{format: MyApp.Ticket},
+    messages: [Claudex.Message.user("File a ticket for this thread: ...")]
+  })
+
+{:ok, ticket} = message |> Claudex.Message.text() |> JSON.decode()
+```
+
+`stop_reason` decides whether there is anything to decode: a reply cut short by `max_tokens`, or a refusal, is not the promised shape.
+
+The API takes a subset of JSON Schema, and Claudex fits the struct's schema to it. Every object is closed with `additionalProperties: false`, and a constraint the subset rejects, such as the `minimum: 0` a `non_neg_integer()` field implies, moves into that property's description where the model still reads it. A field typed `map()` becomes an object with no declared keys, since the API needs an object's keys named; give it a struct type to describe it. A field typed `any()`, and a struct that refers to itself, raise `Claudex.Tool.SchemaError`.
+
+A schema written by hand goes through untouched, so `output_config: %{format: %{type: "json_schema", schema: schema}}` is yours to shape. `Claudex.OutputFormat.json_schema/1` returns what a module expands to, for checking it before you send it.
+
 ## Rebuilding a conversation from your own storage
 
 `Claudex.Message.append/2` suits a script that keeps the whole conversation in

@@ -1,8 +1,9 @@
 defmodule Claudex.Tool.Schema.StructExpansionTest do
   use ExUnit.Case, async: true
 
-  alias Claudex.TestSupport.Schemas.{EctoTicket, Node, Ticket, Untyped}
+  alias Claudex.TestSupport.Schemas.{EctoTicket, Node, Reflected, Ticket, Untyped}
   alias Claudex.Tool.Schema.StructExpansion
+  alias Claudex.Tool.SchemaError
 
   defp ctx, do: %{visited: [], env: __ENV__, current_module: __MODULE__}
 
@@ -102,6 +103,36 @@ defmodule Claudex.Tool.Schema.StructExpansionTest do
     test "disallows additional properties on the schema and its embeds", %{schema: schema} do
       assert schema.additionalProperties == false
       assert schema.properties["address"].additionalProperties == false
+    end
+  end
+
+  describe "an Ecto field Claudex can't map" do
+    defp hatched, do: Map.put(ctx(), :escape_hatch, "Do this instead")
+
+    test "a custom type with no type/0 callback" do
+      assert_raise SchemaError, ~r/doesn't implement Ecto.Type's type\/0.*Do this instead/s, fn ->
+        StructExpansion.expand(Reflected.CustomType, hatched())
+      end
+    end
+
+    test "a field type Claudex doesn't recognise" do
+      assert_raise SchemaError, ~r/`\{:parameterized.*Do this instead/s, fn ->
+        StructExpansion.expand(Reflected.UnknownType, hatched())
+      end
+    end
+
+    test "an embed that isn't a schema" do
+      assert_raise SchemaError,
+                   ~r/embedded schema.*isn't a loaded Ecto schema. Do this instead/s,
+                   fn ->
+                     StructExpansion.expand(Reflected.BadEmbed, hatched())
+                   end
+    end
+
+    test "falls back to the @tool advice when the context names none" do
+      assert_raise SchemaError, ~r/args_schema: in the @tool options/, fn ->
+        StructExpansion.expand(Reflected.CustomType, ctx())
+      end
     end
   end
 end

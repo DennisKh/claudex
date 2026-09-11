@@ -32,10 +32,20 @@ defmodule Claudex.Tool.Schema do
     * `current_module` — which module a *bare* `t()` (no module prefix)
       refers to right now. A struct's own `@type t` can reference itself
       as plain `t()`, not `Mod.t()` — this is how that resolves
+    * `escape_hatch` — the sentence a `Claudex.Tool.SchemaError` ends with,
+      naming the way out of an unmappable type. It differs per caller, so it
+      travels with the context; `escape_hatch/1` has the two in use here
   """
-  @type context :: %{visited: [module()], env: Macro.Env.t(), current_module: module()}
+  @type context :: %{
+          :visited => [module()],
+          :env => Macro.Env.t(),
+          :current_module => module(),
+          optional(:escape_hatch) => String.t()
+        }
 
   @unspecified :__claudex_unspecified_type__
+
+  @tool_escape_hatch "Pass args_schema: in the @tool options to describe it explicitly"
 
   # Elixir's zero-arity built-in types and the JSON schema each becomes. The
   # clauses matching them are generated below, so adding a type is one line.
@@ -154,6 +164,11 @@ defmodule Claudex.Tool.Schema do
 
   def type_to_schema([inner], ctx), do: %{type: "array", items: type_to_schema(inner, ctx)}
 
+  def type_to_schema({:nonempty_list, _meta, [inner]}, ctx), do: nonempty_list(inner, ctx)
+
+  # How a compiled typespec renders `nonempty_list(inner)`.
+  def type_to_schema([inner, {:..., _meta, _context}], ctx), do: nonempty_list(inner, ctx)
+
   def type_to_schema({:|, _, _} = union, ctx) do
     members = flatten_union(union)
 
@@ -163,11 +178,11 @@ defmodule Claudex.Tool.Schema do
     end
   end
 
-  def type_to_schema(unknown, _ctx) do
+  def type_to_schema(unknown, ctx) do
     raise SchemaError,
       message:
-        "can't build a JSON schema for type `#{Macro.to_string(unknown)}` — " <>
-          "pass args_schema: in the @tool options to describe it explicitly"
+        "can't build a JSON schema for type `#{Macro.to_string(unknown)}`. " <>
+          escape_hatch(ctx)
   end
 
   # Flattens a right-associated `|` union AST into its member list — `a | b
@@ -205,7 +220,13 @@ defmodule Claudex.Tool.Schema do
 
   defp pad(list, size), do: list ++ List.duplicate(@unspecified, max(size - length(list), 0))
 
-  defp new_context(env), do: %{visited: [], env: env, current_module: env.module}
+  defp nonempty_list(inner, ctx) do
+    %{type: "array", items: type_to_schema(inner, ctx), minItems: 1}
+  end
+
+  defp new_context(env) do
+    %{visited: [], env: env, current_module: env.module, escape_hatch: @tool_escape_hatch}
+  end
 
   defp module_ref({:__aliases__, _, _} = alias_ast, env), do: Macro.expand(alias_ast, env)
 
@@ -219,16 +240,55 @@ defmodule Claudex.Tool.Schema do
     case StructExpansion.expand(module, ctx) do
       :cycle -> %{}
       {:ok, schema} -> schema
-      :unsupported -> raise_unsupported_module!(module)
+      :unsupported -> raise_unsupported_module!(module, ctx)
     end
   end
 
-  defp raise_unsupported_module!(module) do
+  defp raise_unsupported_module!(module, ctx) do
     raise SchemaError,
       message:
-        "can't build a JSON schema for `#{inspect(module)}.t()` — it isn't a loaded struct " <>
-          "or an Ecto schema. Pass args_schema: in the @tool options to describe it explicitly"
+        "can't build a JSON schema for `#{inspect(module)}.t()`: it isn't a loaded struct " <>
+          "or an Ecto schema. " <> escape_hatch(ctx)
   end
+
+  @doc """
+  The sentence a `Claudex.Tool.SchemaError` ends with, taken from the context.
+
+  A type Claudex can't map is a dead end, and what to do about it depends on
+  who asked. `Claudex.Tool` tells you to describe the tool's arguments
+  yourself:
+
+      iex> Claudex.Tool.Schema.escape_hatch(%{})
+      "Pass args_schema: in the @tool options to describe it explicitly"
+
+  `Claudex.OutputFormat` says something else, because `args_schema:` is a
+  `@tool` option and means nothing to a struct being turned into an output
+  format:
+
+      iex> hatch = "Give the field a type the API can be told about, or pass output_config.format yourself"
+      iex> Claudex.Tool.Schema.escape_hatch(%{escape_hatch: hatch})
+      "Give the field a type the API can be told about, or pass output_config.format yourself"
+
+  Set it on the context you build, and every raise underneath picks it up,
+  including the ones inside `Claudex.Tool.Schema.StructExpansion`:
+
+      context = %{
+        visited: [],
+        env: __ENV__,
+        current_module: MyApp.Ticket,
+        escape_hatch: "Describe the field with a struct, or hand me the schema"
+      }
+
+      Claudex.Tool.Schema.type_to_schema(quote(do: {String.t(), integer()}), context)
+      ** (Claudex.Tool.SchemaError) can't build a JSON schema for type
+         `{String.t(), integer()}`. Describe the field with a struct, or hand
+         me the schema
+
+  Leaving it out is the `@tool` wording, since that is where most of these
+  are raised.
+  """
+  @spec escape_hatch(context()) :: String.t()
+  def escape_hatch(ctx), do: Map.get(ctx, :escape_hatch, @tool_escape_hatch)
 
   defp enum_of(members) do
     values = Enum.map(members, &literal_value/1)

@@ -4,6 +4,8 @@ defmodule Claudex.Tool.SchemaTest do
   alias Claudex.TestSupport.Schemas.Ticket
   alias Claudex.Tool.{Schema, SchemaError}
 
+  doctest Claudex.Tool.Schema
+
   defp var(name), do: Macro.var(name, nil)
   defp defaulted(name, default), do: {:\\, [], [var(name), default]}
 
@@ -73,12 +75,24 @@ defmodule Claudex.Tool.SchemaTest do
     end
   end
 
-  test "raises for a typespec construct Claudex doesn't map" do
+  test "raises for a typespec construct Claudex doesn't map, pointing at args_schema" do
     specs = [spec(:f, [quote(do: pid())])]
 
-    assert_raise SchemaError, ~r/can't build a JSON schema for type `pid\(\)`/, fn ->
-      build(:f, [var(:a)], specs)
-    end
+    assert_raise SchemaError,
+                 ~r/can't build a JSON schema for type `pid\(\)`.*args_schema: in the @tool/s,
+                 fn -> build(:f, [var(:a)], specs) end
+  end
+
+  test "maps a non-empty list, however the typespec spells it" do
+    specs = [
+      spec(:f, [quote(do: nonempty_list(String.t())), quote(do: [String.t(), ...])])
+    ]
+
+    built = build(:f, [var(:a), var(:b)], specs)
+
+    array = %{type: "array", items: %{type: "string"}, minItems: 1}
+
+    assert built.properties == %{"a" => array, "b" => array}
   end
 
   test "expands a struct's Mod.t() into a nested object, resolving an aliased reference" do

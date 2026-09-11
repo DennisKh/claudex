@@ -132,30 +132,30 @@ defmodule Claudex.Tool.Schema.StructExpansion do
       raise SchemaError,
         message:
           "can't build a JSON schema for the Ecto type `#{inspect(custom_type)}` — it doesn't " <>
-            "implement Ecto.Type's type/0 callback. Pass args_schema: in the @tool options to describe it explicitly"
+            "implement Ecto.Type's type/0 callback. " <> Schema.escape_hatch(ctx)
     end
   end
 
-  defp ecto_type_schema(unrecognized, _ctx) do
+  defp ecto_type_schema(unrecognized, ctx) do
     raise SchemaError,
       message:
         "can't build a JSON schema for the Ecto type `#{inspect(unrecognized)}` — " <>
-          "pass args_schema: in the @tool options to describe it explicitly"
+          Schema.escape_hatch(ctx)
   end
 
   defp expand_embed!(module, ctx) do
     case expand(module, ctx) do
       :cycle -> %{type: "object"}
       {:ok, schema} -> schema
-      :unsupported -> raise_unsupported_embed!(module)
+      :unsupported -> raise_unsupported_embed!(module, ctx)
     end
   end
 
-  defp raise_unsupported_embed!(module) do
+  defp raise_unsupported_embed!(module, ctx) do
     raise SchemaError,
       message:
         "can't build a JSON schema for the embedded schema `#{inspect(module)}` — it isn't a " <>
-          "loaded Ecto schema. Pass args_schema: in the @tool options to describe it explicitly"
+          "loaded Ecto schema. " <> Schema.escape_hatch(ctx)
   end
 
   defp struct_object(module, ctx) do

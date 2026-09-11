@@ -17,6 +17,15 @@ defmodule Claudex.Live.ToolsTest do
     @spec get_temperature(String.t()) :: String.t()
     def get_temperature("Tokyo"), do: "24"
     def get_temperature(_city), do: "18"
+
+    @doc "Returns the average of the temperatures given, in Celsius."
+    @tool true
+    @spec average([String.t(), ...]) :: String.t()
+    def average(temperatures) do
+      temperatures
+      |> Enum.map(&String.to_integer/1)
+      |> then(&"#{div(Enum.sum(&1), length(&1))}")
+    end
   end
 
   test "round-trips a tool call: request, dispatch, and follow-up", %{client: client} do
@@ -83,5 +92,25 @@ defmodule Claudex.Live.ToolsTest do
       Messages.create(client, %{model: @model, max_tokens: 256, tools: tools, messages: follow_up})
 
     assert Message.text(second) != ""
+  end
+
+  test "a non-empty list argument is a schema the API accepts", %{client: client} do
+    [_temperature, average] = Tool.list(WeatherTool)
+
+    assert average.input_schema.properties["temperatures"] == %{
+             type: "array",
+             items: %{type: "string"},
+             minItems: 1
+           }
+
+    # Free: count_tokens validates a tool's schema the way create/2 would.
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: WeatherTool,
+               messages: [Message.user("hi")]
+             })
+
+    assert tokens > 0
   end
 end
