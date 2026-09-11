@@ -72,7 +72,8 @@ wants depends on the model:
 Beta features are a header rather than a parameter, so they belong to the
 client: `Claudex.new(beta: ["context-management-2025-06-27"])` sends them as
 one `anthropic-beta` header on every request, and `:beta` can sit in config
-with the rest.
+with the rest. See [Beta features](#beta-features) for the ones checked against
+the API, and the parameter each one takes.
 
 ### Configuration
 
@@ -327,6 +328,38 @@ end
 The API takes a subset of JSON Schema, and Claudex fits the struct's schema to it. Every object is closed with `additionalProperties: false`, and a constraint the subset rejects, such as the `minimum: 0` a `non_neg_integer()` field implies, moves into that property's description where the model still reads it. A field typed `map()` becomes an object with no declared keys, since the API needs an object's keys named; give it a struct type to describe it. A field typed `any()`, and a struct that refers to itself, raise `Claudex.Tool.SchemaError`.
 
 A schema written by hand goes through untouched, so `output_config: %{format: %{type: "json_schema", schema: schema}}` is yours to shape. `Claudex.OutputFormat.json_schema/1` returns what a module expands to, for checking it before you send it.
+
+## Beta features
+
+A beta feature needs two things: the `anthropic-beta` header, which `Claudex.new(beta: ...)` sets on every request, and its parameter, which passes through like any other. No separate client and no separate endpoint.
+
+```elixir
+client = Claudex.new(beta: ["context-management-2025-06-27", "fast-mode-2026-02-01"])
+
+Claudex.Messages.create(client, %{
+  model: "claude-opus-5",
+  max_tokens: 1024,
+  speed: "fast",
+  context_management: %{edits: [%{type: "clear_tool_uses_20250919"}]},
+  messages: history
+})
+```
+
+These were checked against the API with `Claudex.Messages.count_tokens/2`, which validates a request for free:
+
+| Feature | Parameter | Beta header |
+|---|---|---|
+| Effort | `output_config: %{effort: "xhigh"}` | none, this is GA |
+| Adaptive thinking | `thinking: %{type: "adaptive", display: "omitted"}` | none, this is GA |
+| Context editing | `context_management: %{edits: [%{type: "clear_tool_uses_20250919"}]}` | `context-management-2025-06-27` |
+| Clearing thinking | `context_management: %{edits: [%{type: "clear_thinking_20251015"}]}` | `context-management-2025-06-27` |
+| Compaction | `context_management: %{edits: [%{type: "compact_20260112"}]}` | `compact-2026-01-12` |
+| Fast mode | `speed: "fast"` | `fast-mode-2026-02-01` |
+| Task budgets | `output_config: %{task_budget: %{type: "tokens", total: 200_000}}` | `task-budgets-2026-03-13` |
+
+Anything else the Messages API accepts works the same way, since unknown keys reach the API untouched. [Anthropic's beta headers page](https://platform.claude.com/docs/en/api/beta-headers) lists what is available to your organisation, and some features have to be enabled for an account before the parameter is recognised.
+
+Compaction is worth one note. It replaces earlier turns with a summary block, and an app that appends only the reply *text* to its history drops that block and loses the compaction. Claudex keeps every block a reply contains, including types it doesn't model, so `Claudex.Message.append/2` carries a compaction block back into the next request untouched.
 
 ## Rebuilding a conversation from your own storage
 

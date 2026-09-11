@@ -54,7 +54,8 @@ defmodule Claudex.Client do
       milliseconds, defaults to 5 seconds — a slow or unreachable host
       fails fast instead of hanging for the full `:receive_timeout`.
     * `:beta` - beta features to opt into, as a string or a list of them.
-      They become one `anthropic-beta` header.
+      They become one `anthropic-beta` header, which is all a beta parameter
+      needs: it then passes through `Claudex.Messages.create/2` like any other.
     * `:req_options` - extra options merged into the underlying `Req.new/1`
       call, for anything not covered above (a custom `:adapter` for tests,
       a `:finch` pool, ...).
