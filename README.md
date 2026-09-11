@@ -192,7 +192,7 @@ The `@doc` becomes the tool's description and the `@spec` becomes its schema, so
 
 Claudex.Message.text(turn.message)  # the final reply
 turn.messages                       # the whole conversation
-turn.stop                           # :completed | :refusal | :max_turns
+turn.stop                           # :completed | :truncated | :refusal | :max_turns
 ```
 
 It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. Match on `turn.stop` rather than assuming Claude finished: hitting the turn limit looks identical without it.

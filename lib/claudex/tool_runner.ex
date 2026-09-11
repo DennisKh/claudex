@@ -15,7 +15,7 @@ defmodule Claudex.ToolRunner do
 
       Claudex.Message.text(turn.message)  # the final reply
       turn.messages                       # the whole conversation
-      turn.stop                           # :completed | :refusal | :max_turns
+      turn.stop                           # :completed | :truncated | :refusal | :max_turns
 
   A turn the API pauses part-way through a server-side tool loop
   (`stop_reason: "pause_turn"`) resumes on its own. The history goes back
@@ -136,6 +136,10 @@ defmodule Claudex.ToolRunner do
 
   require Logger
 
+  # The reply is cut off: `max_tokens` is the budget this request asked for,
+  # `model_context_window_exceeded` the model's own limit.
+  @truncated ["max_tokens", "model_context_window_exceeded"]
+
   alias Claudex.{Client, Error, Message, Messages, Tool}
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Stream.Accumulator
@@ -151,7 +155,8 @@ defmodule Claudex.ToolRunner do
 
   It returns a `Claudex.ToolRunner.Turn`, the same thing `stream/3` yields.
   `message` is the last reply, `messages` the whole conversation, and `stop`
-  says why it ended: `:completed`, `:refusal`, or `:max_turns`. A conversation
+  says why it ended: `:completed`, `:truncated`, `:refusal`, or `:max_turns`.
+  A conversation
   that ran out of turns is `{:ok, turn}` like any other, and reads as a
   finished one everywhere except `stop`.
 
@@ -230,6 +235,9 @@ defmodule Claudex.ToolRunner do
       # A refusal ends the conversation. Running its tool calls would fire side
       # effects Claude never confirmed, and the results couldn't be replayed.
       message.stop_reason == "refusal" -> {%{turn | stop: :refusal}, :done}
+      # A reply that ran out of room stops for the same reason: whatever it was
+      # part-way through saying, or asking for, is unfinished.
+      message.stop_reason in @truncated -> {%{turn | stop: :truncated}, :done}
       tool_uses != [] -> continue(config, turn, messages, index)
       message.stop_reason == "pause_turn" -> resume(config, turn, messages, index)
       true -> {%{turn | stop: :completed}, :done}

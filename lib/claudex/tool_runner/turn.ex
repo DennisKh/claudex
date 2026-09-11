@@ -13,6 +13,10 @@ defmodule Claudex.ToolRunner.Turn do
 
     * `:completed` - Claude answered without asking for another tool.
     * `:refusal` - Claude declined. Its tool calls, if any, were not run.
+    * `:truncated` - the reply ran out of room, hitting the `max_tokens` this
+      request asked for or the model's own context window. What it was
+      part-way through saying, or asking for, is unfinished, so its tool calls
+      were not run either.
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can
       be picked up again by passing that history back.
@@ -23,7 +27,7 @@ defmodule Claudex.ToolRunner.Turn do
 
   defstruct [:message, :index, :stop, tool_uses: [], tool_results: [], messages: []]
 
-  @type stop :: :completed | :refusal | :max_turns
+  @type stop :: :completed | :truncated | :refusal | :max_turns
 
   @type t :: %__MODULE__{
           message: Message.t(),
