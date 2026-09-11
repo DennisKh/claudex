@@ -11,6 +11,16 @@ defmodule Claudex.Message do
 
   alias Claudex.{ContentBlock, Usage}
 
+  @stops %{
+    "end_turn" => :completed,
+    "stop_sequence" => :completed,
+    "tool_use" => :tool_use,
+    "pause_turn" => :paused,
+    "max_tokens" => :truncated,
+    "model_context_window_exceeded" => :truncated,
+    "refusal" => :refusal
+  }
+
   @derive {Inspect, except: [:raw]}
   defstruct [
     :raw,
@@ -25,6 +35,9 @@ defmodule Claudex.Message do
     :container,
     :usage
   ]
+
+  @typedoc "How a reply ended, from `stop/1`."
+  @type stop :: :completed | :tool_use | :paused | :truncated | :refusal | :unknown
 
   @type t :: %__MODULE__{
           raw: map(),
@@ -182,4 +195,41 @@ defmodule Claudex.Message do
   def tool_uses(%__MODULE__{content: blocks}) do
     Enum.filter(blocks, &match?(%ContentBlock.ToolUse{}, &1))
   end
+
+  @doc """
+  How a reply ended, as one of six answers rather than the seven strings the
+  API sends.
+
+      iex> Claudex.Message.stop(%Claudex.Message{stop_reason: "max_tokens"})
+      :truncated
+
+      iex> Claudex.Message.stop("pause_turn")
+      :paused
+
+    * `:completed` - Claude finished, either on its own or at a stop sequence.
+    * `:tool_use` - it called one of your tools and is waiting for the results.
+    * `:paused` - it is part-way through a server-side tool loop. Send the
+      reply back unchanged to let it carry on.
+    * `:truncated` - it ran out of room, hitting this request's `max_tokens`
+      or the model's context window.
+    * `:refusal` - it declined.
+    * `:unknown` - a reason this version doesn't model, or none at all, which
+      is how a reply reads while it is still streaming or if it was cancelled.
+
+  A `:refusal` or `:truncated` reply may carry tool calls, and they must not be
+  run: what Claude was part-way through asking for is as unfinished as the
+  sentence before it, and results for a call it never confirmed cannot be
+  replayed. `Claudex.ToolRunner` stops on both for that reason.
+
+  Takes the reason on its own as readily as a message, since an app that
+  persists its turns asks this of a database column rather than a struct.
+  """
+  @spec stop(t() | String.t() | nil) :: stop()
+  def stop(%__MODULE__{stop_reason: reason}), do: stop(reason)
+
+  for {reason, stop} <- @stops do
+    def stop(unquote(reason)), do: unquote(stop)
+  end
+
+  def stop(_unrecognised), do: :unknown
 end
