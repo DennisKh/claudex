@@ -44,3 +44,54 @@ defmodule Claudex.TestSupport.Schemas.EctoTicket do
     has_many(:comments, EctoComment)
   end
 end
+
+defmodule Claudex.TestSupport.Schemas.Reflected do
+  @moduledoc """
+  The three Ecto field types Claudex can't map, reachable only through the
+  reflection it reads.
+
+  Written by hand rather than with `Ecto.Schema`, which rejects all three at
+  compile time. The schemas above are real, and cover the shapes that work.
+  """
+
+  defmodule NotAnEctoType do
+    @moduledoc false
+  end
+
+  defmodule NotASchema do
+    @moduledoc false
+  end
+
+  defmodule CustomType do
+    @moduledoc false
+
+    defstruct [:custom]
+
+    @doc false
+    def __schema__(:fields), do: [:custom]
+    def __schema__(:type, :custom), do: NotAnEctoType
+  end
+
+  defmodule UnknownType do
+    @moduledoc false
+
+    defstruct [:mystery]
+
+    @doc false
+    def __schema__(:fields), do: [:mystery]
+    def __schema__(:type, :mystery), do: {:parameterized, {SomethingElse, %{}}}
+  end
+
+  defmodule BadEmbed do
+    @moduledoc false
+
+    defstruct [:embedded]
+
+    @doc false
+    def __schema__(:fields), do: [:embedded]
+
+    def __schema__(:type, :embedded) do
+      {:parameterized, {Ecto.Embedded, %{cardinality: :one, related: NotASchema}}}
+    end
+  end
+end

@@ -131,9 +131,6 @@ defmodule Claudex.OutputFormat do
     end
   end
 
-  # Each clause returns what the API accepts and the keys it used. Whatever it
-  # didn't use is unsupported, and goes into the description rather than the
-  # request, where the model can still act on it.
   defp strict(schema, path) do
     {kept, used} = supported(schema, path)
     kept = Map.merge(kept, Map.take(schema, @carried))
