@@ -1,6 +1,7 @@
 defmodule Claudex.Tool.CallError do
   @moduledoc """
-  Why a tool call produced no result.
+  Why a tool call produced no result. `Claudex.Tool.call/3` returns one, and
+  `Claudex.ToolRunner` turns it into a `tool_result` with `is_error: true`.
 
   `message` is always a complete sentence you can show or send back to Claude,
   whatever went wrong. `details` carries the same information in a form you can

@@ -1,6 +1,8 @@
 defmodule Claudex.Stream.SSE do
   @moduledoc """
-  Decodes a Server-Sent Events byte stream into events.
+  Decodes a Server-Sent Events byte stream into `Claudex.Stream.SSE.Event`
+  structs. `Claudex.Stream.Event` is what those become once the data is
+  decoded as one of Claude's events.
 
   Incremental and network-free: feed it whatever bytes arrived, get back the
   events those bytes completed plus a decoder holding the leftover tail.

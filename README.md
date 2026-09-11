@@ -37,7 +37,7 @@ Claudex.Message.text(message)
 #=> "Hello! How can I help you today?"
 ```
 
-`Claudex.Message.user/1`, `assistant/1` and `tool_results/1` build the message maps, so you don't have to remember which role a tool result goes back under (it's `user`), and `append/2` adds them to a history. The system prompt is the `:system` request parameter rather than a message — the API rejects a `role: "system"` entry at the start of `messages`.
+`Claudex.Message`'s `user/1`, `assistant/1` and `tool_results/1` build the message maps, so you don't have to remember which role a tool result goes back under (it's `user`), and `append/2` adds them to a history. The system prompt is the `:system` request parameter rather than a message — the API rejects a `role: "system"` entry at the start of `messages`.
 
 A failed request returns `{:error, %Claudex.Error{}}` rather than raising — see `Claudex.Error` for the full set of error types.
 
@@ -97,7 +97,7 @@ Anything passed to `Claudex.new/1` wins over config. `:api_key` has one more fal
 
 ## Streaming
 
-`stream!/2` returns a lazy stream of events. Nothing is sent until you enumerate it, and the process that enumerates owns the request — it only reads more of the response when you ask for the next event, so a slow consumer slows the download rather than filling a mailbox.
+`Claudex.Messages.stream!/2` returns a lazy stream of `Claudex.Stream.Event` structs. Nothing is sent until you enumerate it, and the process that enumerates owns the request: it only reads more of the response when you ask for the next event, so a slow consumer slows the download rather than filling a mailbox.
 
 ```elixir
 alias Claudex.Stream.Event
@@ -140,7 +140,7 @@ The forwarding process is linked to the caller, so it goes away with your LiveVi
 
 ## Tool use
 
-Tag a function with `@tool` and Claudex builds the JSON schema from its `@spec` and `@doc`:
+Tag a function with `@tool` and `Claudex.Tool` builds the JSON schema from its `@spec` and `@doc`:
 
 ```elixir
 defmodule MyApp.Tools do
@@ -293,7 +293,7 @@ A failed call is still a 200, with an error object in `content` and its code lif
 
 If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
 
-A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture.
+A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture, and `Claudex.OutputFormat` for the same mapping listed type by type.
 
 ## Structured outputs
 
@@ -434,7 +434,7 @@ model.id           #=> "claude-opus-5"
 model.max_tokens   #=> 128000
 ```
 
-`list/2` returns one `%Claudex.Page{}`. If `page.has_more` is true, pass `after_id: page.last_id` for the next one.
+`list/2` returns one `Claudex.Page`, holding `Claudex.Model` structs. If `page.has_more` is true, pass `after_id: page.last_id` for the next one.
 
 To find out what a request will cost before sending it:
 
@@ -446,7 +446,7 @@ To find out what a request will cost before sending it:
   })
 ```
 
-This endpoint takes `:model` and `:messages` — no `:max_tokens` — and counts the input only: your messages, system prompt, and tools. `:tools` accepts a module here too.
+This endpoint takes `:model` and `:messages`, not `:max_tokens`, and counts the input only: your messages, system prompt, and tools. `:tools` accepts a module here too. See `Claudex.Models` and `Claudex.Messages.count_tokens/2`.
 
 ## Files
 
@@ -469,7 +469,7 @@ Images and PDFs don't *need* this — inline base64 and URL sources work today, 
 
 `download/2` is the other direction, and the part with no inline equivalent — it retrieves files Claude *created* through skills or the code execution tool. Files you uploaded have `downloadable: false` and downloading one returns a 400.
 
-`list/2` pages by cursor rather than by id: pass `page: page.next_page` until it comes back nil.
+`list/2` pages by cursor rather than by id: pass `page: page.next_page` until it comes back nil. Each entry is a `Claudex.FileMetadata`; see `Claudex.Files` for the rest.
 
 ## Message batches
 
@@ -498,7 +498,7 @@ end
 
 Claudex doesn't poll for you. A batch has 24 hours to finish, so check on it from your app's job runner with the batch id persisted.
 
-`results/2` returns a lazy stream that reads the `.jsonl` as it goes, so a 100,000-request batch doesn't have to fit in memory. Results arrive in completion order, not request order — match them by `custom_id`.
+`results/2` returns a lazy stream that reads the `.jsonl` as it goes, so a 100,000-request batch doesn't have to fit in memory. Results arrive in completion order rather than request order, so match them by `custom_id`. Each is a `Claudex.Messages.BatchResult`; see `Claudex.Messages.Batches` for create, cancel and delete.
 
 ## Development
 

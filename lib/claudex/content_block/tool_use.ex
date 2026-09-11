@@ -1,8 +1,11 @@
 defmodule Claudex.ContentBlock.ToolUse do
   @moduledoc """
   A request from Claude to call one of the tools you provided. Run it with
-  `input`, then send the result back as a `tool_result` block on your next
-  message, matched to this block's `id`.
+  `Claudex.Tool.call/3`, build the answer with `Claudex.Tool.result/3`, and
+  send it back on your next message, matched to this block's `id`.
+  `Claudex.ToolRunner` does all of that. `Claudex.Message.tool_uses/1` picks
+  these out of a reply, and a tool the API runs itself arrives as a
+  `Claudex.ContentBlock.ServerToolUse` instead.
   """
 
   @behaviour Claudex.ContentBlock

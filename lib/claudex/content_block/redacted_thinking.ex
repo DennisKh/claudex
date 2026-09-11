@@ -1,9 +1,10 @@
 defmodule Claudex.ContentBlock.RedactedThinking do
   @moduledoc """
-  A thinking step Claude redacted for safety. `data` is opaque and
-  encrypted — there's nothing to read here. Pass it back to the API
-  unchanged when continuing the conversation: dropping one of these from an
-  assistant message you echo back is a 400.
+  A thinking step Claude redacted for safety. `data` is opaque and encrypted,
+  so there's nothing to read here. Pass it back to the API unchanged when
+  continuing the conversation: dropping one of these from an assistant message
+  you echo back is a 400, and the same goes for
+  `Claudex.ContentBlock.Thinking`.
   """
 
   @behaviour Claudex.ContentBlock

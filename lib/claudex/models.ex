@@ -4,7 +4,8 @@ defmodule Claudex.Models do
   supports.
 
   Useful for resolving an alias like `"claude-opus-latest"` to the model id it
-  currently points at.
+  currently points at. Each entry is a `Claudex.Model`, and `list/2` returns a
+  `Claudex.Page` of them.
   """
 
   alias Claudex.{API, Client, Error, Model, Page}

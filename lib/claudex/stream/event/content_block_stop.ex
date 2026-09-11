@@ -1,5 +1,8 @@
 defmodule Claudex.Stream.Event.ContentBlockStop do
-  @moduledoc "The content block at `index` is complete."
+  @moduledoc """
+  The content block at `index` is complete. A tool call's arguments are only
+  parseable now, which is where `Claudex.Stream.Accumulator` decodes them.
+  """
 
   defstruct [:index]
 

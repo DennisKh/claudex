@@ -1,5 +1,8 @@
 defmodule Claudex.ContentBlock.Text do
-  @moduledoc "A block of text Claude generated, with any citations it attached."
+  @moduledoc """
+  A block of text Claude generated, with any citations it attached.
+  `Claudex.Message.text/1` joins every one of these in a reply into a string.
+  """
 
   @behaviour Claudex.ContentBlock
 

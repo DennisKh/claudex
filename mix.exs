@@ -56,46 +56,61 @@ defmodule Claudex.MixProject do
       source_url: @source_url,
       source_ref: "v" <> @version,
       groups_for_modules: [
-        Messages: [
-          Claudex.Messages,
-          Claudex.Message,
-          Claudex.OutputFormat,
-          Claudex.ContentBlock,
-          ~r/^Claudex\.ContentBlock\./,
-          Claudex.Usage
-        ],
-        Streaming: [
-          Claudex.Stream,
-          Claudex.Stream.Accumulator,
-          Claudex.Stream.Event,
-          ~r/^Claudex\.Stream\.Event\./,
-          Claudex.Stream.Forwarder,
-          Claudex.Stream.Handle,
-          Claudex.Stream.SSE,
-          Claudex.Stream.SSE.Event
-        ],
-        Tools: [
-          Claudex.Tool,
-          Claudex.ToolRunner,
-          Claudex.ToolRunner.Turn,
-          ~r/^Claudex\.Tool\./
-        ],
-        "Other endpoints": [
-          Claudex.Models,
-          Claudex.Model,
-          Claudex.Files,
-          Claudex.FileMetadata,
-          Claudex.Messages.Batches,
-          Claudex.Messages.Batch,
-          Claudex.Messages.Batch.RequestCounts,
-          Claudex.Messages.BatchResult,
-          Claudex.JSONL
-        ],
         Core: [
           Claudex.Client,
           Claudex.Error,
           Claudex.Page,
           Claudex.Telemetry
+        ],
+        Messages: [
+          Claudex.Messages,
+          Claudex.Message,
+          Claudex.OutputFormat,
+          Claudex.Usage
+        ],
+        "Content blocks": [
+          Claudex.ContentBlock,
+          ~r/^Claudex\.ContentBlock\./
+        ],
+        Streaming: [
+          Claudex.Stream,
+          Claudex.Stream.Accumulator,
+          Claudex.Stream.Handle
+        ],
+        "Stream events": [
+          Claudex.Stream.Event,
+          ~r/^Claudex\.Stream\.Event\./
+        ],
+        Tools: [
+          Claudex.Tool,
+          Claudex.ToolRunner,
+          Claudex.ToolRunner.Turn,
+          Claudex.Tool.Error,
+          Claudex.Tool.CallError,
+          Claudex.Tool.SchemaError
+        ],
+        Files: [
+          Claudex.Files,
+          Claudex.FileMetadata
+        ],
+        "Message batches": [
+          Claudex.Messages.Batches,
+          Claudex.Messages.Batch,
+          Claudex.Messages.Batch.RequestCounts,
+          Claudex.Messages.BatchResult
+        ],
+        Models: [
+          Claudex.Models,
+          Claudex.Model
+        ],
+        Internals: [
+          Claudex.Tool.Schema,
+          Claudex.Tool.Schema.StructExpansion,
+          Claudex.Tool.Dispatch,
+          Claudex.Stream.SSE,
+          Claudex.Stream.SSE.Event,
+          Claudex.Stream.Forwarder,
+          Claudex.JSONL
         ]
       ]
     ]

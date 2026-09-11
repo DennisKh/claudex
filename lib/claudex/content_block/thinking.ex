@@ -2,7 +2,10 @@ defmodule Claudex.ContentBlock.Thinking do
   @moduledoc """
   One step of Claude's extended thinking. If you're continuing a
   conversation that used tools, pass this block back to the API exactly as
-  received, `signature` included — don't edit or regenerate it.
+  received, `signature` included: editing or regenerating it is a 400.
+
+  It streams as `Claudex.Stream.Event.ContentBlockDelta` deltas tagged
+  `:thinking` and `:signature`.
   """
 
   @behaviour Claudex.ContentBlock

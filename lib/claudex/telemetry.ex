@@ -3,7 +3,8 @@ defmodule Claudex.Telemetry do
   Events Claudex emits, and a ready-made logger for them.
 
   Claudex writes nothing to your logs on its own. It emits `:telemetry` events,
-  and you decide what happens to them. To see what the SDK is doing while
+  and you decide what happens to them. Retries and timeouts, which two of these
+  events report on, are configured on `Claudex.Client`. To see what the SDK is doing while
   you're debugging, attach the logger that ships with it:
 
       Claudex.Telemetry.attach_default_logger()

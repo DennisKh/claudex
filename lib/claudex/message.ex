@@ -1,6 +1,8 @@
 defmodule Claudex.Message do
   @moduledoc """
-  A completed message returned by the Messages API.
+  A completed message returned by the Messages API. `content` is a list of
+  `Claudex.ContentBlock` structs, `usage` a `Claudex.Usage`, and the builders
+  here turn either into the maps `Claudex.Messages.create/2` takes back.
 
   `raw` holds the response exactly as it arrived, so a field the API adds
   before Claudex models it is still readable. It's hidden from `inspect/1` to

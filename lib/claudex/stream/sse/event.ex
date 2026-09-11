@@ -3,8 +3,9 @@ defmodule Claudex.Stream.SSE.Event do
   One raw Server-Sent Event: its name, its data, and the two reconnection
   fields the SSE spec defines.
 
-  This is the wire shape, before anything Claude-specific happens to it —
-  `data` is still the undecoded string the server sent.
+  This is the wire shape, before anything Claude-specific happens to it:
+  `data` is still the undecoded string the server sent, which
+  `Claudex.Stream.Event.decode/1` turns into a typed event.
   """
 
   defstruct [:name, :id, :retry, data: ""]

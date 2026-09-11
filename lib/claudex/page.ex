@@ -1,6 +1,7 @@
 defmodule Claudex.Page do
   @moduledoc """
-  One page of results from a list endpoint.
+  One page of results from a list endpoint: `Claudex.Models.list/2`,
+  `Claudex.Files.list/2` and `Claudex.Messages.Batches.list/2` all return one.
 
   `data` holds the items. The API has two cursor styles and this struct
   carries both, so the fields the endpoint doesn't use are nil:

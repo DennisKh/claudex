@@ -1,17 +1,25 @@
 defmodule Claudex.Stream.Event do
   @moduledoc """
-  The events the Messages API sends while it streams a reply.
+  The events the Messages API sends while it streams a reply, in the order they
+  arrive:
 
-  A stream always runs `message_start`, then one `content_block_start` /
-  `content_block_delta`... / `content_block_stop` group per block, then
-  `message_delta` and `message_stop`. Match on the struct to handle the one
-  you care about:
+    * `Claudex.Stream.Event.MessageStart`: the message shell, once
+    * `Claudex.Stream.Event.ContentBlockStart`: a block begins, one group per
+      block
+    * `Claudex.Stream.Event.ContentBlockDelta`: its text, thinking, or tool
+      input, repeatedly
+    * `Claudex.Stream.Event.ContentBlockStop`: that block is complete
+    * `Claudex.Stream.Event.MessageDelta`: the stop reason and the final usage
+    * `Claudex.Stream.Event.MessageStop`: the end
+    * `Claudex.Stream.Event.Unknown`: an event type this version doesn't model
+
+  Match on the struct to handle the one you care about:
 
       %Event.ContentBlockDelta{delta: {:text, chunk}} -> IO.write(chunk)
 
   `from_sse/1` turns a raw `Claudex.Stream.SSE.Event` into one of these.
   Keep-alive `ping` events are dropped, and an `error` event the API sends
-  mid-stream comes back as a `Claudex.Error` — the reply ends there.
+  mid-stream comes back as a `Claudex.Error`, ending the reply there.
   """
 
   alias Claudex.Error
@@ -37,7 +45,7 @@ defmodule Claudex.Stream.Event do
           | Unknown.t()
 
   @doc """
-  Turns one raw SSE event into a typed event.
+  Turns one raw event from `Claudex.Stream.SSE` into a typed event.
 
   Returns `:ignore` for a `ping`, and `{:error, %Claudex.Error{}}` both for
   an `error` event from the API and for data that isn't a JSON object.

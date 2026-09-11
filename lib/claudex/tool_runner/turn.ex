@@ -1,7 +1,8 @@
 defmodule Claudex.ToolRunner.Turn do
   @moduledoc """
   One exchange in a tool conversation: what Claude said, what it asked to run,
-  and what running it produced.
+  and what running it produced. `Claudex.ToolRunner.stream/3` yields one of
+  these per reply and `run/3` returns the last.
 
   `messages` carries the whole conversation up to and including this turn, so
   you can stop consuming at any point and still have the complete history from
