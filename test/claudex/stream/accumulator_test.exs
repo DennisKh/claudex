@@ -85,6 +85,32 @@ defmodule Claudex.Stream.AccumulatorTest do
     assert tool_use.input == %{"a" => 1, "b" => 2}
   end
 
+  test "add/2 parses a server tool's arguments the same way" do
+    # A server tool streams its arguments as fragments exactly as a client tool
+    # does: an empty input on the start event, the real one in the deltas.
+    events = [
+      message_start(),
+      block_start(0, %{
+        "type" => "server_tool_use",
+        "id" => "srvtoolu_1",
+        "name" => "web_search",
+        "input" => %{}
+      }),
+      delta(0, %{"type" => "input_json_delta", "partial_json" => ~s({"query": )}),
+      delta(0, %{"type" => "input_json_delta", "partial_json" => ~s("claudex sdk"})}),
+      block_stop(0)
+    ]
+
+    assert %Message{content: [%ContentBlock.ServerToolUse{} = call]} =
+             events |> fold() |> Accumulator.message()
+
+    assert call.input == %{"query" => "claudex sdk"}
+
+    # And the block replays with them: the start event it was decoded from
+    # still says the input is empty.
+    assert ContentBlock.to_param(call)["input"] == %{"query" => "claudex sdk"}
+  end
+
   test "add/2 leaves a tool call's input alone when the arguments are truncated" do
     message =
       [

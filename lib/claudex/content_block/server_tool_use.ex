@@ -26,7 +26,15 @@ defmodule Claudex.ContentBlock.ServerToolUse do
   """
   @impl true
   @spec to_param(t()) :: map()
-  def to_param(%__MODULE__{raw: raw}), do: raw
+  def to_param(%__MODULE__{raw: raw} = block) when is_map(raw) do
+    # `raw` is the `content_block_start` map, where a streamed call's arguments
+    # are still empty: the real ones arrived afterwards, as JSON fragments.
+    Map.put(raw, "input", block.input)
+  end
+
+  def to_param(%__MODULE__{} = block) do
+    %{type: "server_tool_use", id: block.id, name: block.name, input: block.input}
+  end
 
   @doc false
   @impl true

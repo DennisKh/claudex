@@ -66,6 +66,21 @@ defmodule Claudex.Live.ServerToolsTest do
       assert turn.index < last.index,
              "turn #{turn.index} paused and the loop stopped there"
     end
+
+    # The loop runs on the streaming path, where a server tool's arguments
+    # arrive as fragments. A search replayed with an empty input is a search
+    # the API starts over.
+    searches =
+      for turn <- turns,
+          %ServerToolUse{} = call <- turn.message.content,
+          do: call
+
+    assert searches != [], "the prompt produced no web search to check"
+
+    for call <- searches do
+      assert call.input != %{}, "a search went back into the history with no query"
+      assert ContentBlock.to_param(call)["input"] == call.input
+    end
   end
 
   test "web search comes back as server tool blocks", %{client: client} do
