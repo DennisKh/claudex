@@ -12,6 +12,11 @@ defmodule Claudex.Usage do
   of a stream, where `merge/2` folds the two together.
   `Claudex.Messages.count_tokens/2` gives the input count before a request is
   sent.
+
+  Whether prompt caching worked is here: `cache_creation_input_tokens` is what
+  was written, `cache_read_input_tokens` what was read back instead of being
+  charged in full, and `cache_creation` splits the write between the 5-minute
+  and 1-hour lifetimes.
   """
 
   @derive {Inspect, except: [:raw]}
