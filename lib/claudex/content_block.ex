@@ -14,15 +14,19 @@ defmodule Claudex.ContentBlock do
     * `Claudex.ContentBlock.ToolUse`: a call to one of your tools
     * `Claudex.ContentBlock.ServerToolUse` and
       `Claudex.ContentBlock.ServerToolResult`: a call to one the API runs
-      itself, and its answer A type Claudex doesn't model yet
-  becomes a `Claudex.ContentBlock.Unknown`, which keeps the raw map so the
-  block still replays into the next request.
+      itself, and its answer
+    * `Claudex.ContentBlock.Document` and
+      `Claudex.ContentBlock.Image`: a PDF or a picture you send, which Claude
+      never sends back. A type Claudex doesn't model yet becomes a `Claudex.ContentBlock.Unknown`,
+      which keeps the raw map so the block still replays into the next request.
 
   `Claudex.Message` holds them, and `Claudex.Stream.Accumulator` assembles them
   from a stream.
   """
 
   alias Claudex.ContentBlock.{
+    Document,
+    Image,
     RedactedThinking,
     ServerToolResult,
     ServerToolUse,
@@ -39,6 +43,8 @@ defmodule Claudex.ContentBlock do
           | ToolUse.t()
           | ServerToolUse.t()
           | ServerToolResult.t()
+          | Document.t()
+          | Image.t()
           | Unknown.t()
 
   @doc "Reads one block of the API's JSON into this module's struct."
@@ -56,7 +62,9 @@ defmodule Claudex.ContentBlock do
               "thinking" => Thinking,
               "redacted_thinking" => RedactedThinking,
               "tool_use" => ToolUse,
-              "server_tool_use" => ServerToolUse
+              "server_tool_use" => ServerToolUse,
+              "document" => Document,
+              "image" => Image
             },
             Map.new(ServerToolResult.types(), &{&1, ServerToolResult})
           )
