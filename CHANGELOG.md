@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.0](https://github.com/DennisKh/claudex/compare/v0.7.0...v0.8.0) (2026-09-11)
+
+
+### Features
+
+* **content_block:** build the document and image blocks you send ([#44](https://github.com/DennisKh/claudex/issues/44)) ([c89f33b](https://github.com/DennisKh/claudex/commit/c89f33bea6507db040daa45c583639ae5d2e9ffe))
+* **content_block:** decode the blocks server tools send back ([#41](https://github.com/DennisKh/claudex/issues/41)) ([f73af0f](https://github.com/DennisKh/claudex/commit/f73af0f3bbe2c2d98ad0fa5723762dbf119cfce0))
+* **messages:** build output_config.format from a struct ([#42](https://github.com/DennisKh/claudex/issues/42)) ([38e69bd](https://github.com/DennisKh/claudex/commit/38e69bdb39865a27eff41cf1927cdb0250ae5103))
+* **page:** walk every page, whichever cursor the endpoint uses ([#45](https://github.com/DennisKh/claudex/issues/45)) ([c62bb9c](https://github.com/DennisKh/claudex/commit/c62bb9c4543913f6cc02c628f3698999145cb6c6))
+* **tool_runner:** stream each turn and report events to :on_event ([#36](https://github.com/DennisKh/claudex/issues/36)) ([dffb3ca](https://github.com/DennisKh/claudex/commit/dffb3cab39881a168bda5434f14129f837d520bd))
+
+
+### Bug Fixes
+
+* **tool_runner:** report a reply that ran out of room as truncated ([#47](https://github.com/DennisKh/claudex/issues/47)) ([f66dfc0](https://github.com/DennisKh/claudex/commit/f66dfc02fff31fd4bd1c076b977d2b0b9bc1cbb6))
+* **tool_runner:** resume a turn the API paused ([#40](https://github.com/DennisKh/claudex/issues/40)) ([24d40c9](https://github.com/DennisKh/claudex/commit/24d40c97bb451321f029fc8530465eb345c2a4c5))
+
 ## [0.7.0](https://github.com/DennisKh/claudex/compare/v0.6.1...v0.7.0) (2026-09-09)
 
 
