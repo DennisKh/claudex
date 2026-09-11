@@ -31,6 +31,28 @@ defmodule Claudex.Models do
   end
 
   @doc """
+  Every model your key can use, as one lazy stream.
+
+      client
+      |> Claudex.Models.stream!()
+      |> Enum.filter(&get_in(&1.capabilities, ["code_execution", "supported"]))
+      |> Enum.map(& &1.id)
+      #=> ["claude-opus-5", "claude-sonnet-5", ...]
+
+  Picking a model by what it supports keeps working as models come and go,
+  where a hardcoded list goes stale.
+
+  Pages are fetched as you consume them, so taking the first few costs one
+  request. Takes the same options as `list/2`, minus the cursor it threads
+  itself. Enumerating raises `Claudex.Error` if a request fails.
+  """
+  @spec stream!(Client.t()) :: Enumerable.t()
+  @spec stream!(Client.t(), keyword()) :: Enumerable.t()
+  def stream!(%Client{} = client, opts \\ []) do
+    Page.stream!(opts, &list(client, &1))
+  end
+
+  @doc """
   Looks up one model by id or alias.
 
       {:ok, model} = Claudex.Models.retrieve(client, "claude-opus-5")
