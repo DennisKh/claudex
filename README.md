@@ -458,12 +458,16 @@ Upload a file once and reference it by `file_id` instead of re-sending the bytes
 Claudex.Messages.create(client, %{
   model: "claude-opus-5",
   max_tokens: 1024,
-  messages: [%{role: "user", content: [
-    %{type: "document", source: %{type: "file", file_id: file.id}},
-    %{type: "text", text: "Summarise this."}
-  ]}]
+  messages: [
+    Claudex.Message.user([
+      Claudex.ContentBlock.Document.file(file.id, title: "Q3 report"),
+      %{type: "text", text: "Summarise this."}
+    ])
+  ]
 })
 ```
+
+`Claudex.ContentBlock.Document` and `Claudex.ContentBlock.Image` build the block for each source the API takes: `pdf/2` and `text/2` embed the bytes, `url/2` points at a hosted file, and `file/2` references an upload. A document also carries `title:`, `context:` and `citations:`.
 
 Images and PDFs don't *need* this — inline base64 and URL sources work today, because `create/2` passes content blocks through verbatim. Files saves upload time and request size (500 MB per file vs. the 32 MB request limit), not tokens: the content still enters the context window and is still billed.
 
