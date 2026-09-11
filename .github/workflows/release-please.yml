@@ -68,12 +68,16 @@ jobs:
 
       - run: mix deps.get
 
+      # Compile in its own step: a cold checkout prints build progress on
+      # stdout, which the check below would otherwise read as the version.
+      - run: mix compile
+
       # A tag whose mix.exs says something else would publish the wrong
       # version under the right name, and a Hex release cannot be replaced.
       - name: Check mix.exs matches the tag
         run: |
           tag="${{ needs.release-please.outputs.tag }}"
-          version=$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])')
+          version=$(mix run --no-start --no-compile -e 'IO.puts(Mix.Project.config()[:version])' | tail -n1)
           if [ "v$version" != "$tag" ]; then
             echo "tag $tag does not match mix.exs version $version"
             exit 1
