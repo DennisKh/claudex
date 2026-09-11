@@ -10,8 +10,8 @@ defmodule Claudex.Live.AttachmentsTest do
 
   use Claudex.TestSupport.LiveCase, async: false
 
-  alias Claudex.{Message, Messages}
   alias Claudex.ContentBlock.{Document, Image}
+  alias Claudex.{Message, Messages}
 
   # One transparent pixel, the smallest thing the vision endpoint accepts.
   @png "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
