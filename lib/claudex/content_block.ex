@@ -5,8 +5,21 @@ defmodule Claudex.ContentBlock do
   `decode/1` reads a block's `"type"` field and returns the matching
   struct.
 
-  Each block type is a module implementing this behaviour: `decode/1` reads
-  the API's map, `to_param/1` writes it back.
+  Each block type is a module implementing this behaviour, with `decode/1`
+  reading the API's map and `to_param/1` writing it back:
+
+    * `Claudex.ContentBlock.Text`: what Claude wrote, with any citations
+    * `Claudex.ContentBlock.Thinking` and
+      `Claudex.ContentBlock.RedactedThinking`: its extended thinking
+    * `Claudex.ContentBlock.ToolUse`: a call to one of your tools
+    * `Claudex.ContentBlock.ServerToolUse` and
+      `Claudex.ContentBlock.ServerToolResult`: a call to one the API runs
+      itself, and its answer A type Claudex doesn't model yet
+  becomes a `Claudex.ContentBlock.Unknown`, which keeps the raw map so the
+  block still replays into the next request.
+
+  `Claudex.Message` holds them, and `Claudex.Stream.Accumulator` assembles them
+  from a stream.
   """
 
   alias Claudex.ContentBlock.{

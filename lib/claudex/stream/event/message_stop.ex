@@ -1,5 +1,9 @@
 defmodule Claudex.Stream.Event.MessageStop do
-  @moduledoc "The last event of a stream. Nothing follows it."
+  @moduledoc """
+  The last event of a stream. Nothing follows it, and
+  `Claudex.Stream.Accumulator.message/1` holds the finished
+  `Claudex.Message`.
+  """
 
   defstruct []
 

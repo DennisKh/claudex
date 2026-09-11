@@ -7,6 +7,11 @@ defmodule Claudex.Usage do
   `raw` holds the usage object exactly as it arrived, so a counter the API adds
   before Claudex models it is still readable. It's hidden from `inspect/1` to
   keep output readable.
+
+  It arrives on `Claudex.Message`, and on the `Claudex.Stream.Event.MessageDelta`
+  of a stream, where `merge/2` folds the two together.
+  `Claudex.Messages.count_tokens/2` gives the input count before a request is
+  sent.
   """
 
   @derive {Inspect, except: [:raw]}

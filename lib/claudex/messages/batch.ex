@@ -3,8 +3,9 @@ defmodule Claudex.Messages.Batch do
   One Message Batch.
 
   `processing_status` is `"in_progress"`, `"canceling"`, or `"ended"`. Results
-  only exist once it's `"ended"` — that's when `results_url` is filled in and
-  `Claudex.Messages.Batches.results/2` will work.
+  only exist once it's `"ended"`, which is when `results_url` is filled in and
+  `Claudex.Messages.Batches.results/2` will work. `request_counts` is a
+  `Claudex.Messages.Batch.RequestCounts` with the tally so far.
   """
 
   alias Claudex.Messages.Batch.RequestCounts

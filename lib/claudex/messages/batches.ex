@@ -142,8 +142,9 @@ defmodule Claudex.Messages.Batches do
   again later.
 
   The stream reads the results file as it goes rather than pulling it all into
-  memory, so enumerating it lazily (`Stream.filter/2`, `Enum.reduce/3`) keeps
-  a 100,000-request batch manageable. Enumerating raises `Claudex.Error` if
+  memory, decoding one line at a time, so enumerating it lazily
+  (`Stream.filter/2`, `Enum.reduce/3`) keeps a 100,000-request batch
+  manageable. Enumerating raises `Claudex.Error` if
   the download fails part-way.
   """
   @spec results(Client.t(), String.t()) :: {:ok, Enumerable.t()} | {:error, Error.t()}

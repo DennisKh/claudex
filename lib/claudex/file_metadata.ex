@@ -1,7 +1,8 @@
 defmodule Claudex.FileMetadata do
   @moduledoc """
-  The Files API's record of one stored file — its id, filename, MIME type,
-  size, and timestamps.
+  The Files API's record of one stored file: its id, filename, MIME type,
+  size, and timestamps. `Claudex.Files` returns these, one from `upload/3` and
+  a page of them from `list/2`.
 
   `downloadable` is false for anything you uploaded — only files Claude
   creates, through skills or the code execution tool, can be downloaded.

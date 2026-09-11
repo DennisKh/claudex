@@ -1,6 +1,8 @@
 defmodule Claudex.Error do
   @moduledoc """
-  An error from the Claude API, or from trying to reach it.
+  An error from the Claude API, or from trying to reach it. Every function
+  that talks to the API returns one of these as `{:error, error}`, and
+  `Claudex.Client` decides which are retried and how long it waits first.
 
   `:type` mirrors the error types the API documents — `:billing` for 402,
   `:timeout` for a 504 as well as for a client-side timeout, and so on.

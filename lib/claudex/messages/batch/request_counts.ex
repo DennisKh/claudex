@@ -1,7 +1,8 @@
 defmodule Claudex.Messages.Batch.RequestCounts do
   @moduledoc """
   Per-status tallies for one batch: `processing`, plus the four end states a
-  request can reach — `succeeded`, `errored`, `canceled`, `expired`.
+  request can reach, `succeeded`, `errored`, `canceled` and `expired`. It
+  arrives on `Claudex.Messages.Batch`.
   """
 
   defstruct processing: 0, succeeded: 0, errored: 0, canceled: 0, expired: 0

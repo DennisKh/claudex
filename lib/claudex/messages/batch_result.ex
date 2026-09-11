@@ -1,7 +1,9 @@
 defmodule Claudex.Messages.BatchResult do
   @moduledoc """
   One request's outcome in a batch: the `custom_id` it was submitted with
-  and the `result` it ended in.
+  and the `result` it ended in. `Claudex.Messages.Batches.results/2` streams
+  these, a success carrying the same `Claudex.Message` the Messages API would
+  have returned and a failure a `Claudex.Error`.
 
   Match on `result` to handle each outcome:
 

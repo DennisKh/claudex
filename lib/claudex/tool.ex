@@ -109,7 +109,8 @@ defmodule Claudex.Tool do
   construct, or a `Mod.t()` that isn't a loaded struct or Ecto schema —
   raises `Claudex.Tool.SchemaError` at compile time. Fix the spec, or pass
   `:args_schema` to skip inference for that tool entirely. See
-  `Claudex.Tool.Schema.StructExpansion` for exactly what's supported.
+  `Claudex.Tool.Schema.StructExpansion` for exactly what's supported, and
+  `Claudex.OutputFormat` for the same mapping listed type by type.
   """
 
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
@@ -177,8 +178,9 @@ defmodule Claudex.Tool do
   Arguments are matched to the function's parameters by name, so their order in
   the map doesn't matter, and a trailing optional parameter can be left out.
 
-  A tool that fails returns `{:error, %Claudex.Tool.CallError{}}` instead of
-  taking the caller down with it. Its `type` separates a refusal from a bug,
+  Arguments are matched to the function's parameters by name. A tool that
+  fails returns a `Claudex.Tool.CallError` instead of taking the caller down
+  with it. Its `type` separates a refusal from a bug,
   and `message` is a sentence you can show or send back to Claude whatever the
   type is:
 

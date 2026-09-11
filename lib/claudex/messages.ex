@@ -2,9 +2,15 @@ defmodule Claudex.Messages do
   @moduledoc """
   The Messages API — send a conversation to Claude and get its reply.
 
-  `create/2` waits for the whole reply. `stream!/2` gives you a lazy stream of
-  events as they arrive, and `stream_to/3` sends those events to a process
-  instead, for a GenServer or LiveView that can't block.
+  `create/2` waits for the whole reply and answers with a `Claudex.Message`.
+  `stream!/2` gives you a lazy stream of `Claudex.Stream.Event` structs as they
+  arrive, and `stream_to/3` sends those events to a process instead, for a
+  GenServer or LiveView that can't block.
+
+  `Claudex.Message` builds what goes in `:messages`, `Claudex.Tool` what goes
+  in `:tools`, and `Claudex.OutputFormat` what goes in `:output_config`.
+  `Claudex.ToolRunner` drives the whole tool conversation rather than one
+  request at a time.
   """
 
   alias Claudex.{API, Client, Error, Message, OutputFormat, Tool}
@@ -124,7 +130,8 @@ defmodule Claudex.Messages do
 
   `params` takes exactly what `create/2` takes; `stream: true` is set for you.
 
-  Returns `{:ok, %Claudex.Stream.Handle{ref: ref}}` and then sends:
+  Returns `{:ok, handle}`, a `Claudex.Stream.Handle` carrying the `ref` every
+  message is tagged with, and then sends:
 
     * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`
     * `{:claudex, ref, {:error, %Claudex.Error{}}}` if the request fails

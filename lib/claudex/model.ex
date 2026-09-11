@@ -1,6 +1,7 @@
 defmodule Claudex.Model do
   @moduledoc """
   One model your API key can use, as the Models API describes it.
+  `Claudex.Models.list/2` and `retrieve/2` return these.
 
   `capabilities` stays a plain map — it's a deep, fast-moving structure
   (batch, citations, thinking, structured outputs, and so on), so Claudex

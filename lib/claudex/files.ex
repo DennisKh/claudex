@@ -22,6 +22,9 @@ defmodule Claudex.Files do
 
   `download/2` only works on files Claude created through skills or the code
   execution tool; downloading one you uploaded returns a 400.
+
+  Every function here answers with `Claudex.FileMetadata`, and `list/2` wraps
+  them in a `Claudex.Page`.
   """
 
   alias Claudex.{API, Client, Error, FileMetadata, Page}

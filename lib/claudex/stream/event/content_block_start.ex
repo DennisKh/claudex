@@ -1,7 +1,8 @@
 defmodule Claudex.Stream.Event.ContentBlockStart do
   @moduledoc """
-  A new content block is starting at `index`. The block arrives empty — its
-  text, thinking, or tool input comes in the deltas that follow.
+  A new content block is starting at `index`. The block arrives empty and its
+  text, thinking, or tool input comes in the
+  `Claudex.Stream.Event.ContentBlockDelta` events that follow.
   """
 
   alias Claudex.ContentBlock

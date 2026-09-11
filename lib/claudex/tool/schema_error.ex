@@ -1,13 +1,13 @@
 defmodule Claudex.Tool.SchemaError do
   @moduledoc """
-  Raised at compile time when `Claudex.Tool` can't turn a `@spec` argument
-  type into a JSON schema — a typespec construct Claudex doesn't map (a
-  function type, a bare `pid()`, an unrecognized Ecto field type, ...), or
-  a `Mod.t()` reference that isn't a loaded struct or Ecto schema.
+  Raised when a type can't become a JSON schema: a typespec construct Claudex
+  doesn't map (a function type, a bare `pid()`, an unrecognized Ecto field
+  type), or a `Mod.t()` reference that isn't a loaded struct or Ecto schema.
 
-  Fix the `@spec`, or skip type inference for that tool entirely by
-  passing `args_schema:` in the `@tool` options — when it's set, the
-  `@spec` is never even inspected, so nothing here can raise.
+  `Claudex.Tool` raises it at compile time while reading a `@spec`, where
+  `args_schema:` in the `@tool` options skips inference for that tool.
+  `Claudex.OutputFormat` raises it while building a request from a struct's
+  `@type t`, where a hand-written `output_config.format` does the same.
   """
 
   defexception [:message]
