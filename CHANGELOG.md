@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/DennisKh/claudex/compare/v0.8.0...v0.8.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **stream:** keep a server tool's arguments when they stream in ([#51](https://github.com/DennisKh/claudex/issues/51)) ([53f68b0](https://github.com/DennisKh/claudex/commit/53f68b0f64bb8d074d597fd701bce32c05998834))
+
 ## [0.8.0](https://github.com/DennisKh/claudex/compare/v0.7.0...v0.8.0) (2026-09-11)
 
 
