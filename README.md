@@ -426,8 +426,38 @@ you need it before then.
 
 Two things to store alongside the text. A `tool_use` block needs its `id`, since
 the matching `tool_result` refers to it. A `thinking` block needs its
-`signature`, because continuing a thinking conversation on the same model means
-sending prior thinking blocks back intact.
+`signature`, because continuing a thinking conversation means sending prior
+thinking blocks back intact. A block the next model can't read is dropped by the
+API rather than rejected, so there is nothing to filter by hand, and the model
+id a reply carries is a snapshot (`claude-haiku-4-5-20251001`) even when the
+request asked for an alias (`claude-haiku-4-5`), which makes comparing the two
+strings a way to throw away blocks that were fine.
+
+### Store the whole assistant turn when server tools are in play
+
+The example above keeps a column per field, which works while a reply holds
+text and tool calls. A reply that used `web_search` or any other tool the API
+runs itself also holds `Claudex.ContentBlock.ServerToolUse` and
+`Claudex.ContentBlock.ServerToolResult` blocks, and those have to go back
+exactly as they came: a search result's `encrypted_content` is rejected if it
+changes, and a paused turn resumes from the trailing `server_tool_use` block.
+Rebuild a turn without them and the API starts the search over, pauses again,
+and the conversation loops.
+
+The robust shape is to store the assistant turn's blocks as they arrived, in
+order, and replay them:
+
+```elixir
+# storing
+blocks = Enum.map(message.content, &Claudex.ContentBlock.to_param/1)
+
+# replaying
+Claudex.Message.assistant(blocks)
+```
+
+That survives block types this version of Claudex doesn't model yet, because
+`Claudex.ContentBlock.Unknown` keeps the raw map and replays it untouched, so a
+compaction block or an MCP tool call round-trips without an SDK upgrade.
 
 Results for one reply go back together. If a reply asked for two tools, the
 next message has to answer both:
