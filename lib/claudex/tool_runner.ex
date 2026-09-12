@@ -17,6 +17,10 @@ defmodule Claudex.ToolRunner do
       turn.messages                       # the whole conversation
       turn.stop                           # :completed | :truncated | :refusal | :max_turns
 
+  `params` takes exactly what `Claudex.Messages.create/2` takes, so `:system`,
+  `:thinking`, `:tool_choice` and the rest go in the same map. The options
+  below are Claudex's own and go in the keyword list after it.
+
   A turn the API pauses part-way through a server-side tool loop
   (`stop_reason: "pause_turn"`) resumes on its own. The history goes back
   unchanged and the conversation carries on, so a pause costs a turn but does
@@ -149,12 +153,14 @@ defmodule Claudex.ToolRunner do
       {:ok, %Turn{message: message, messages: history, stop: :completed}} =
         Claudex.ToolRunner.run(client, params)
 
+  `params` takes exactly what `Claudex.Messages.create/2` takes; `opts` are
+  the runner's own, listed in `Claudex.ToolRunner`.
+
   It returns a `Claudex.ToolRunner.Turn`, the same thing `stream/3` yields.
   `message` is the last reply, `messages` the whole conversation, and `stop`
   says why it ended: `:completed`, `:truncated`, `:refusal`, or `:max_turns`.
-  A conversation
-  that ran out of turns is `{:ok, turn}` like any other, and reads as a
-  finished one everywhere except `stop`.
+  A conversation that ran out of turns is `{:ok, turn}` like any other, and
+  reads as a finished one everywhere except `stop`.
 
   A conversation that ran tools or paused says part of what it has to say
   before each of those, so `message` carries the last stretch of the reply
@@ -178,6 +184,8 @@ defmodule Claudex.ToolRunner do
 
   @doc """
   Returns a lazy stream of `Claudex.ToolRunner.Turn` structs, one per reply.
+
+  `params` and `opts` are the same as `run/3`'s.
 
   Nothing happens until you enumerate it. Tools for a turn have already run by
   the time you see that turn, so halting stops the conversation rather than

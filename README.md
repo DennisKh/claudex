@@ -57,7 +57,7 @@ Claudex.Messages.create(client, %{
   # one breakpoint, on the last cacheable block, moving forward as the
   # conversation grows
   cache_control: %{type: "ephemeral", ttl: "1h"},
-  system: handbook,
+  system: "You are a wardrobe assistant. Answer in one sentence.",
   tools: MyApp.Tools,
   tool_choice: %{type: "tool", name: "get_weather"},
   thinking: %{type: "adaptive"},
@@ -65,11 +65,16 @@ Claudex.Messages.create(client, %{
 })
 ```
 
-`cache_control` at the top of the request caches automatically; on a content block it pins a breakpoint there, which is what a long `system` prompt wants:
+`system` takes a string, or a list of text blocks when a block needs options of its own:
 
 ```elixir
-system: [%{type: "text", text: handbook, cache_control: %{type: "ephemeral", ttl: "1h"}}]
+system: [
+  %{type: "text", text: "You are a wardrobe assistant."},
+  %{type: "text", text: style_handbook, cache_control: %{type: "ephemeral", ttl: "1h"}}
+]
 ```
+
+`cache_control` at the top of the request caches automatically; on a content block, as above, it pins a breakpoint there, which is what a long `system` prompt wants.
 
 A breakpoint goes on any block: a `system` block, a message block from either role, or a tool definition. Four per request is the ceiling, and a fifth is a 400. Each one caches everything before it, so they go on the parts that don't change, and the request-level form exists because pinning one to the newest message every turn spends all four within a few turns.
 
@@ -190,6 +195,21 @@ end
 
 The `@doc` becomes the tool's description and the `@spec` becomes its schema, so both are prompt material. `:args` adds a description per argument, merged into the inferred schema — worth writing for any argument whose name doesn't say it all, since that description is how Claude decides what to pass.
 
+A tool refuses a call by raising `Claudex.Tool.Error` with the reason:
+
+```elixir
+@doc "Divides one number by another."
+@tool true
+@spec divide(number(), number()) :: float()
+def divide(a, b) do
+  if b == 0, do: raise(Claudex.Tool.Error, "cannot divide by zero")
+
+  a / b
+end
+```
+
+Claude sees the reason and can try something else; [Deciding whether a call runs](#deciding-whether-a-call-runs) covers that and the caller-side gate alongside it.
+
 `tools:` accepts the module directly — `Claudex.Messages.create/2` expands it for you. It also accepts a list mixing modules with plain tool maps.
 
 ## Tool runner
@@ -209,6 +229,8 @@ Claudex.Message.text(turn.message)  # the final reply
 turn.messages                       # the whole conversation
 turn.stop                           # :completed | :truncated | :refusal | :max_turns
 ```
+
+The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options — `:max_turns`, `:before_call`, `:on_event` — go in a keyword list after it.
 
 It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. Match on `turn.stop` rather than assuming Claude finished: hitting the turn limit looks identical without it.
 
