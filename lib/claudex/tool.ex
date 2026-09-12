@@ -28,6 +28,19 @@ defmodule Claudex.Tool do
   passes. Write them for the model, and expect a terse one-liner to produce a
   tool that gets called at the wrong moment or with the wrong values.
 
+  A tool refuses a call by raising `Claudex.Tool.Error` with the reason.
+  `Claudex.ToolRunner` sends the reason back as an error result, so Claude can
+  try something else:
+
+      @doc "Divides one number by another."
+      @tool true
+      @spec divide(number(), number()) :: float()
+      def divide(a, b) do
+        if b == 0, do: raise(Claudex.Tool.Error, "cannot divide by zero")
+
+        a / b
+      end
+
   Pass a map instead of `true` for options:
 
     * `:args` - a description per argument, merged into the inferred schema

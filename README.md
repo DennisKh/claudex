@@ -190,6 +190,21 @@ end
 
 The `@doc` becomes the tool's description and the `@spec` becomes its schema, so both are prompt material. `:args` adds a description per argument, merged into the inferred schema — worth writing for any argument whose name doesn't say it all, since that description is how Claude decides what to pass.
 
+A tool refuses a call by raising `Claudex.Tool.Error` with the reason:
+
+```elixir
+@doc "Divides one number by another."
+@tool true
+@spec divide(number(), number()) :: float()
+def divide(a, b) do
+  if b == 0, do: raise(Claudex.Tool.Error, "cannot divide by zero")
+
+  a / b
+end
+```
+
+Claude sees the reason and can try something else; [Deciding whether a call runs](#deciding-whether-a-call-runs) covers that and the caller-side gate alongside it.
+
 `tools:` accepts the module directly — `Claudex.Messages.create/2` expands it for you. It also accepts a list mixing modules with plain tool maps.
 
 ## Tool runner
