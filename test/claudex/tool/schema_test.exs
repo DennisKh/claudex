@@ -83,6 +83,44 @@ defmodule Claudex.Tool.SchemaTest do
                  fn -> build(:f, [var(:a)], specs) end
   end
 
+  test "maps a named argument the same as a bare one" do
+    specs = [spec(:add, [quote(do: a :: number()), quote(do: b :: integer())])]
+
+    built = build(:add, [var(:a), var(:b)], specs)
+
+    assert built.properties == %{"a" => %{type: "number"}, "b" => %{type: "integer"}}
+  end
+
+  test "maps a spec that names some arguments and not others" do
+    specs = [spec(:add, [quote(do: a :: number()), quote(do: number())])]
+
+    built = build(:add, [var(:a), var(:b)], specs)
+
+    assert built.properties == %{"a" => %{type: "number"}, "b" => %{type: "number"}}
+    assert built.params == [{"a", false}, {"b", false}]
+  end
+
+  test "takes the property name from the function, not the spec" do
+    specs = [spec(:add, [quote(do: left :: number())])]
+
+    built = build(:add, [var(:a)], specs)
+
+    assert built.properties == %{"a" => %{type: "number"}}
+  end
+
+  test "a named argument can carry any type a bare one can" do
+    specs = [
+      spec(:book, [quote(do: city :: String.t()), quote(do: starting :: Date.t())])
+    ]
+
+    built = build(:book, [var(:city), var(:starting)], specs)
+
+    assert built.properties == %{
+             "city" => %{type: "string"},
+             "starting" => %{type: "string", format: "date"}
+           }
+  end
+
   test "maps a non-empty list, however the typespec spells it" do
     specs = [
       spec(:f, [quote(do: nonempty_list(String.t())), quote(do: [String.t(), ...])])

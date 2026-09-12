@@ -1,5 +1,5 @@
 defmodule Claudex.Tool do
-  @moduledoc """
+  @moduledoc ~S"""
   Turns tagged functions into tools Claude can call.
 
   Add `use Claudex.Tool` to a module, then tag a function with `@tool`
@@ -94,6 +94,10 @@ defmodule Claudex.Tool do
   `@spec add(number()) :: number()` alone won't match `def add(a, b \\ 0)`,
   and both properties come out unconstrained. Writing one `@spec` per arity
   is fine — the matching one is picked whichever order they're in.
+
+  Naming the arguments in a `@spec`, `add(a :: number(), b :: number())`, is
+  read the same as leaving them bare. The property names come from the
+  function's own parameters either way.
 
   A struct type in a `@spec` — `Ticket.t()` for a plain `defstruct` with a
   `@type t`, or for an Ecto schema — expands into a nested object schema

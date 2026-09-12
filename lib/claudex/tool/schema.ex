@@ -149,6 +149,10 @@ defmodule Claudex.Tool.Schema do
     def type_to_schema({unquote(name), _meta, []}, _ctx), do: unquote(Macro.escape(schema))
   end
 
+  def type_to_schema({:"::", _meta, [{name, _, _}, type]}, ctx) when is_atom(name) do
+    type_to_schema(type, ctx)
+  end
+
   def type_to_schema({:%{}, _, _}, _ctx), do: %{type: "object"}
 
   def type_to_schema({{:., _, [mod_ref, :t]}, _, _}, ctx) do

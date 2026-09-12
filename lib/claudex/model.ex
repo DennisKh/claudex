@@ -5,7 +5,8 @@ defmodule Claudex.Model do
 
   `capabilities` stays a plain map — it's a deep, fast-moving structure
   (batch, citations, thinking, structured outputs, and so on), so Claudex
-  hands it to you as the API sent it.
+  hands it to you as the API sent it. `supports?/2` answers the usual question
+  about it without reaching in.
   """
 
   alias Claudex.Timestamp
@@ -30,6 +31,30 @@ defmodule Claudex.Model do
           capabilities: map() | nil
         }
 
+  @doc """
+  Checks whether a model supports a specific capability. Takes either a capability
+  name or its full path.
+
+      Claudex.Model.supports?(model, "image_input")
+      Claudex.Model.supports?(model, ["thinking", "types", "adaptive"])
+
+  Every node under `capabilities` carries its own `"supported"` flag, and this
+  reads the one at the end of the path. A path the model doesn't have is
+  `false`, so a capability the API adds later answers for models that lack it
+  without raising.
+  """
+  @spec supports?(t(), String.t() | [String.t()]) :: boolean()
+  def supports?(%__MODULE__{} = model, capability) when is_binary(capability) do
+    supports?(model, [capability])
+  end
+
+  def supports?(%__MODULE__{capabilities: capabilities}, path) when is_list(path) do
+    case walk(capabilities, path) do
+      %{"supported" => true} -> true
+      _unsupported_or_missing -> false
+    end
+  end
+
   @doc false
   @spec decode(map()) :: t()
   def decode(json) do
@@ -43,4 +68,8 @@ defmodule Claudex.Model do
       capabilities: json["capabilities"]
     }
   end
+
+  defp walk(%{} = node, [key | rest]), do: walk(Map.get(node, key), rest)
+  defp walk(node, []), do: node
+  defp walk(_missing, _path), do: nil
 end

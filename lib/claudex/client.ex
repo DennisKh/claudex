@@ -10,6 +10,9 @@ defmodule Claudex.Client do
   """
 
   @default_base_url "https://api.anthropic.com"
+
+  @missing_api_key "no API key given: pass `api_key:` to Claudex.Client.new/1, set it in " <>
+                     "`config :claudex, api_key: ...`, or set ANTHROPIC_API_KEY"
   @default_max_retries 2
   @default_receive_timeout :timer.minutes(10)
   @default_connect_timeout :timer.seconds(5)
@@ -59,11 +62,38 @@ defmodule Claudex.Client do
     * `:req_options` - extra options merged into the underlying `Req.new/1`
       call, for anything not covered above (a custom `:adapter` for tests,
       a `:finch` pool, ...).
+
+  If you need an error tuple to be returned, use `build/1` instead.
   """
   @spec new() :: t()
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
-    api_key = fetch_api_key!(opts)
+    case build(opts) do
+      {:ok, client} -> client
+      {:error, :missing_api_key} -> raise ArgumentError, @missing_api_key
+    end
+  end
+
+  @doc """
+  Builds a client, the same as `new/1`. Returns an error tuple when API key is missing.
+
+      case Claudex.Client.build() do
+        {:ok, client} -> client
+        {:error, :missing_api_key} -> :needs_setup
+      end
+
+  Every other option is applied the same way. For more details, see [new/1 Options](#new/1-options)
+  """
+  @spec build() :: {:ok, t()} | {:error, :missing_api_key}
+  @spec build(keyword()) :: {:ok, t()} | {:error, :missing_api_key}
+  def build(opts \\ []) do
+    case api_key(opts) do
+      nil -> {:error, :missing_api_key}
+      api_key -> {:ok, client(api_key, opts)}
+    end
+  end
+
+  defp client(api_key, opts) do
     base_url = option(opts, :base_url, @default_base_url)
     max_retries = option(opts, :max_retries, @default_max_retries)
     receive_timeout = option(opts, :receive_timeout, @default_receive_timeout)
@@ -160,18 +190,11 @@ defmodule Claudex.Client do
     end
   end
 
-  defp fetch_api_key!(opts) do
+  defp api_key(opts) do
     case Keyword.fetch(opts, :api_key) do
       {:ok, api_key} -> api_key
-      :error -> configured_api_key!()
+      :error -> Application.get_env(:claudex, :api_key) || System.get_env("ANTHROPIC_API_KEY")
     end
-  end
-
-  defp configured_api_key! do
-    Application.get_env(:claudex, :api_key) || System.get_env("ANTHROPIC_API_KEY") ||
-      raise ArgumentError,
-            "no API key given: pass `api_key:` to Claudex.Client.new/1, set it in " <>
-              "`config :claudex, api_key: ...`, or set ANTHROPIC_API_KEY"
   end
 
   defp beta_headers([]), do: []
