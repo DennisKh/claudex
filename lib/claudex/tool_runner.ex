@@ -185,11 +185,43 @@ defmodule Claudex.ToolRunner do
   @doc """
   Returns a lazy stream of `Claudex.ToolRunner.Turn` structs, one per reply.
 
-  `params` and `opts` are the same as `run/3`'s.
+  `params` takes exactly what `Claudex.Messages.create/2` takes; `opts` are the
+  runner's own, listed in `Claudex.ToolRunner`.
 
   Nothing happens until you enumerate it. Tools for a turn have already run by
   the time you see that turn, so halting stops the conversation rather than
   cancelling work — a tool that shouldn't run guards itself instead.
+
+  Each turn carries the usage of its own request, so a run's cost is the sum
+  over the stream:
+
+      client
+      |> Claudex.ToolRunner.stream(params)
+      |> Enum.reduce(%{input: 0, output: 0}, fn turn, total ->
+        %{
+          input: total.input + turn.message.usage.input_tokens,
+          output: total.output + turn.message.usage.output_tokens
+        }
+      end)
+
+  `Claudex.Usage.merge/2` is not that sum. It folds the two halves of one
+  streamed reply and replaces field by field, so reducing turns with it reports
+  the last request's counts as if they were the total.
+
+  `Enum.reduce_while/3` drives a state machine, and stopping the reduce stops
+  the conversation:
+
+      client
+      |> Claudex.ToolRunner.stream(params, before_call: &MyApp.Session.approve/1)
+      |> Enum.reduce_while(MyApp.Session.new(), fn turn, session ->
+        case MyApp.Session.apply_turn(session, turn) do
+          {:continue, session} -> {:cont, session}
+          {:finished, session} -> {:halt, session}
+        end
+      end)
+
+  `run/3` is this reduce keeping only the last turn, so anything a run has to
+  add up belongs here instead.
 
   Enumerating raises `Claudex.Error` if a request fails.
   """

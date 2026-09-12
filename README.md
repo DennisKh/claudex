@@ -54,8 +54,6 @@ Claudex knows about it:
 Claudex.Messages.create(client, %{
   model: "claude-opus-5",
   max_tokens: 1024,
-  # one breakpoint, on the last cacheable block, moving forward as the
-  # conversation grows
   cache_control: %{type: "ephemeral", ttl: "1h"},
   system: "You are a wardrobe assistant. Answer in one sentence.",
   tools: MyApp.Tools,
