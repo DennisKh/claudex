@@ -180,4 +180,29 @@ defmodule Claudex.MessageTest do
   test "to_param/1 leaves a foreign struct alone rather than mangling it" do
     assert Message.to_param(%URI{path: "/x"}) == %URI{path: "/x"}
   end
+
+  describe "stop/1" do
+    test "answers for every reason the API documents" do
+      mapping = %{
+        "end_turn" => :completed,
+        "stop_sequence" => :completed,
+        "tool_use" => :tool_use,
+        "pause_turn" => :paused,
+        "max_tokens" => :truncated,
+        "model_context_window_exceeded" => :truncated,
+        "refusal" => :refusal
+      }
+
+      for {reason, stop} <- mapping do
+        assert Message.stop(reason) == stop
+        assert Message.stop(%Message{stop_reason: reason}) == stop
+      end
+    end
+
+    test "a reason it doesn't model, or none at all, is :unknown" do
+      assert Message.stop(nil) == :unknown
+      assert Message.stop("something_new_2027") == :unknown
+      assert Message.stop(%Message{stop_reason: nil}) == :unknown
+    end
+  end
 end

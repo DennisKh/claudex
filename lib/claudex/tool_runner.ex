@@ -136,10 +136,6 @@ defmodule Claudex.ToolRunner do
 
   require Logger
 
-  # The reply is cut off: `max_tokens` is the budget this request asked for,
-  # `model_context_window_exceeded` the model's own limit.
-  @truncated ["max_tokens", "model_context_window_exceeded"]
-
   alias Claudex.{Client, Error, Message, Messages, Tool}
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Stream.Accumulator
@@ -231,16 +227,18 @@ defmodule Claudex.ToolRunner do
 
     turn = %Turn{message: message, index: index, tool_uses: tool_uses, messages: messages}
 
-    cond do
-      # A refusal ends the conversation. Running its tool calls would fire side
-      # effects Claude never confirmed, and the results couldn't be replayed.
-      message.stop_reason == "refusal" -> {%{turn | stop: :refusal}, :done}
-      # A reply that ran out of room stops for the same reason: whatever it was
-      # part-way through saying, or asking for, is unfinished.
-      message.stop_reason in @truncated -> {%{turn | stop: :truncated}, :done}
-      tool_uses != [] -> continue(config, turn, messages, index)
-      message.stop_reason == "pause_turn" -> resume(config, turn, messages, index)
-      true -> {%{turn | stop: :completed}, :done}
+    case Message.stop(message) do
+      stop when stop in [:refusal, :truncated] ->
+        {%{turn | stop: stop}, :done}
+
+      :paused when tool_uses == [] ->
+        resume(config, turn, messages, index)
+
+      _other when tool_uses != [] ->
+        continue(config, turn, messages, index)
+
+      _other ->
+        {%{turn | stop: :completed}, :done}
     end
   end
 

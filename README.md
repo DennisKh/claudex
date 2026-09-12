@@ -257,6 +257,19 @@ Claudex.ToolRunner.run(client, params,
 )
 ```
 
+`Claudex.Message.stop/1` answers the question the runner asks itself each turn, for a loop you drive rather than one it drives:
+
+```elixir
+case Claudex.Message.stop(message) do
+  :tool_use -> run(Claudex.Message.tool_uses(message))
+  :paused -> resend(history)
+  stop when stop in [:refusal, :truncated] -> stop_here(stop)
+  :completed -> render(message)
+end
+```
+
+It takes the reason on its own as readily as a message, so an app that stores turns can ask it of a column after a reload. A `:refusal` or `:truncated` reply may still carry tool calls, and running them sends results for a call Claude never confirmed.
+
 A denial sends the reason back as an error result and the conversation carries on, so Claude can explain itself or try another way; the tool is never called. Each call in a parallel batch is offered separately, so a batch can be partly approved. The function runs in the process enumerating the stream, so it can block — waiting on a `GenServer.call` while a LiveView shows an approve button, say.
 
 ### Showing the reply as it arrives
