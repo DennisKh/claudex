@@ -278,4 +278,25 @@ defmodule Claudex.ClientConfigTest do
       refute_received :attempt
     end
   end
+
+  describe "build/1" do
+    test "answers with a client when a key is configured" do
+      assert {:ok, %Client{}} = Client.build(api_key: "sk-ant-explicit")
+    end
+
+    test "answers with an error rather than raising when none is" do
+      System.delete_env("ANTHROPIC_API_KEY")
+      Application.delete_env(:claudex, :api_key)
+
+      assert Client.build() == {:error, :missing_api_key}
+    end
+
+    test "reads the same config new/1 does" do
+      Application.put_env(:claudex, :api_key, "sk-ant-from-config")
+
+      assert {:ok, client} = Client.build(base_url: "https://example.test")
+      assert client.api_key == "sk-ant-from-config"
+      assert client.base_url == "https://example.test"
+    end
+  end
 end

@@ -35,7 +35,7 @@ defmodule Claudex.Models do
 
       client
       |> Claudex.Models.stream!()
-      |> Enum.filter(&get_in(&1.capabilities, ["code_execution", "supported"]))
+      |> Enum.filter(&Claudex.Model.supports?(&1, "code_execution"))
       |> Enum.map(& &1.id)
       #=> ["claude-opus-5", "claude-sonnet-5", ...]
 

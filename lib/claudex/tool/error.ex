@@ -6,7 +6,7 @@ defmodule Claudex.Tool.Error do
       @tool true
       @spec read_file(String.t()) :: String.t()
       def read_file(path) do
-        unless allowed?(path), do: raise Claudex.Tool.Error, "path is outside the workspace"
+        unless allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
 
         File.read!(path)
       end

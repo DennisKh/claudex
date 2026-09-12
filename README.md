@@ -234,7 +234,7 @@ defmodule MyApp.Tools do
   @tool true
   @spec read_file(String.t()) :: String.t()
   def read_file(path) do
-    unless allowed?(path), do: raise Claudex.Tool.Error, "path is outside the workspace"
+    unless allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
 
     File.read!(path)
   end
@@ -530,7 +530,7 @@ model.max_tokens   #=> 128000
 ```elixir
 client
 |> Claudex.Models.stream!()
-|> Enum.filter(&get_in(&1.capabilities, ["code_execution", "supported"]))
+|> Enum.filter(&Claudex.Model.supports?(&1, "code_execution"))
 |> Enum.map(& &1.id)
 #=> ["claude-opus-5", "claude-sonnet-5", ...]
 ```

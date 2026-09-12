@@ -26,6 +26,13 @@ defmodule Claudex.Live.ToolsTest do
       |> Enum.map(&String.to_integer/1)
       |> then(&"#{div(Enum.sum(&1), length(&1))}")
     end
+
+    @doc "Converts a temperature from Celsius to Fahrenheit."
+    @tool %{args: [degrees: "The temperature in Celsius.", precision: "Decimal places."]}
+    @spec convert(degrees :: number(), non_neg_integer()) :: String.t()
+    def convert(degrees, precision) do
+      Float.round(degrees * 9 / 5 + 32, precision) |> to_string()
+    end
   end
 
   test "round-trips a tool call: request, dispatch, and follow-up", %{client: client} do
@@ -94,8 +101,32 @@ defmodule Claudex.Live.ToolsTest do
     assert Message.text(second) != ""
   end
 
+  test "arguments named in the @spec reach the API as a schema", %{client: client} do
+    [_temperature, _average, convert] = Tool.list(WeatherTool)
+
+    # One argument named in the spec, one bare: both are read the same, and
+    # each property keeps the name the function gave it.
+    assert convert.input_schema.properties == %{
+             "degrees" => %{type: "number", description: "The temperature in Celsius."},
+             "precision" => %{
+               type: "integer",
+               description: "Decimal places.",
+               minimum: 0
+             }
+           }
+
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: WeatherTool,
+               messages: [Message.user("hi")]
+             })
+
+    assert tokens > 0
+  end
+
   test "a non-empty list argument is a schema the API accepts", %{client: client} do
-    [_temperature, average] = Tool.list(WeatherTool)
+    [_temperature, average, _convert] = Tool.list(WeatherTool)
 
     assert average.input_schema.properties["temperatures"] == %{
              type: "array",
