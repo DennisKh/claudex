@@ -193,7 +193,11 @@ defmodule Claudex.Tool do
 
   @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
   def call(module, name, input) when is_atom(module) and is_map(input) do
-    module.__call_tool__(name, input)
+    :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
+      result = module.__call_tool__(name, input)
+
+      {result, %{tool: name, outcome: outcome(result)}}
+    end)
   end
 
   @doc """
@@ -278,6 +282,11 @@ defmodule Claudex.Tool do
         into: %{},
         do: {tool.name, module}
   end
+
+  defp outcome({:ok, _value}), do: :ok
+  defp outcome({:error, %CallError{type: :tool_refused}}), do: :refused
+  defp outcome({:error, %CallError{type: :unknown_tool}}), do: :unknown_tool
+  defp outcome({:error, %CallError{}}), do: :failed
 
   defp private_tool_message(name, args, kind) do
     "`@tool` can only be attached to a public function, but #{name}/#{length(args)} " <>

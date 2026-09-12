@@ -182,6 +182,27 @@ defmodule Claudex.TelemetryTest do
     assert metadata.outcome == :ok
   end
 
+  test "a tool call driven without the runner is still a span" do
+    assert {:ok, 42} = Claudex.Tool.call(Calculator, "add", %{"a" => 12, "b" => 30})
+
+    assert_receive {:telemetry, [:claudex, :tool, :start], _measurements, %{tool: "add"}}
+    assert_receive {:telemetry, [:claudex, :tool, :stop], measurements, metadata}
+
+    assert is_integer(measurements.duration)
+
+    assert metadata == %{
+             tool: "add",
+             outcome: :ok,
+             telemetry_span_context: metadata[:telemetry_span_context]
+           }
+  end
+
+  test "a tool that refuses says so without the runner too" do
+    assert {:error, _} = Claudex.Tool.call(Calculator, "refuse", %{})
+
+    assert_receive {:telemetry, [:claudex, :tool, :stop], _measurements, %{outcome: :refused}}
+  end
+
   test "a refused tool is reported apart from a working one" do
     stream_with([
       message(
