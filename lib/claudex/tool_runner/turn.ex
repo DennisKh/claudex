@@ -4,6 +4,11 @@ defmodule Claudex.ToolRunner.Turn do
   and what running it produced. `Claudex.ToolRunner.stream/3` yields one of
   these per reply and `run/3` returns the last.
 
+  `tool_uses` and `tool_results` belong to this turn alone: what Claude asked
+  for in this one reply, and what running it produced. A conversation completes
+  by Claude asking for nothing, so both are empty on the turn `run/3` returns.
+  Every call the conversation made is in `messages`.
+
   `messages` carries the whole conversation up to and including this turn, so
   you can stop consuming at any point and still have the complete history from
   the last turn you saw.
