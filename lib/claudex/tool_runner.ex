@@ -279,12 +279,10 @@ defmodule Claudex.ToolRunner do
   defp ignore(_event), do: :ok
 
   defp run_tool(%ToolUse{} = tool_use, config) do
-    :telemetry.span([:claudex, :tool], %{tool: tool_use.name}, fn ->
-      case decide(config.before_call, tool_use) do
-        :ok -> dispatch(tool_use, config.registry)
-        {:deny, reason} -> denied(tool_use, reason)
-      end
-    end)
+    case decide(config.before_call, tool_use) do
+      :ok -> dispatch(tool_use, config.registry)
+      {:deny, reason} -> denied(tool_use, reason)
+    end
   end
 
   defp decide(nil, _tool_use), do: :ok
@@ -304,7 +302,7 @@ defmodule Claudex.ToolRunner do
   end
 
   defp denied(tool_use, reason) do
-    {Tool.result(tool_use.id, reason, is_error: true), %{tool: tool_use.name, outcome: :denied}}
+    report(tool_use, :denied, fn -> Tool.result(tool_use.id, reason, is_error: true) end)
   end
 
   defp dispatch(tool_use, registry) do
@@ -313,24 +311,24 @@ defmodule Claudex.ToolRunner do
         call(module, tool_use)
 
       :error ->
-        {Tool.result(tool_use.id, "no tool named #{tool_use.name}", is_error: true),
-         %{tool: tool_use.name, outcome: :unknown_tool}}
+        report(tool_use, :unknown_tool, fn ->
+          Tool.result(tool_use.id, "no tool named #{tool_use.name}", is_error: true)
+        end)
     end
   end
 
   defp call(module, tool_use) do
     case Tool.call(module, tool_use.name, tool_use.input) do
-      {:ok, value} ->
-        {Tool.result(tool_use.id, encode(value)), %{tool: tool_use.name, outcome: :ok}}
-
-      {:error, reason} ->
-        {Tool.result(tool_use.id, describe(tool_use, reason), is_error: true),
-         %{tool: tool_use.name, outcome: outcome(reason)}}
+      {:ok, value} -> Tool.result(tool_use.id, encode(value))
+      {:error, reason} -> Tool.result(tool_use.id, describe(tool_use, reason), is_error: true)
     end
   end
 
-  defp outcome(%CallError{type: :tool_refused}), do: :refused
-  defp outcome(%CallError{}), do: :failed
+  defp report(tool_use, outcome, build_result) do
+    :telemetry.span([:claudex, :tool], %{tool: tool_use.name}, fn ->
+      {build_result.(), %{tool: tool_use.name, outcome: outcome}}
+    end)
+  end
 
   defp encode(value) when is_binary(value), do: value
 
