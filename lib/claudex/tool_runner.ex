@@ -228,9 +228,6 @@ defmodule Claudex.ToolRunner do
     turn = %Turn{message: message, index: index, tool_uses: tool_uses, messages: messages}
 
     case Message.stop(message) do
-      # Neither reply confirmed the calls it carries, and results for a call
-      # that was declined or cut off can't be replayed. `Claudex.Message.stop/1`
-      # says the same, for a caller driving its own loop.
       stop when stop in [:refusal, :truncated] ->
         {%{turn | stop: stop}, :done}
 
