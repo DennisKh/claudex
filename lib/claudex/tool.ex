@@ -22,6 +22,10 @@ defmodule Claudex.Tool do
   `Claudex.Messages.create/2` takes the module directly as `tools:` and
   expands it for you.
 
+  `mix claudex.gen.tool MyApp.Tools read_file path` writes that module, with
+  every attribute in place and a description slot per argument. See
+  `Mix.Tasks.Claudex.Gen.Tool`.
+
   Your `@doc` and `@spec` are prompt text, not developer notes. They are the
   whole of what Claude knows about the tool: the `@doc` decides whether it
   reaches for the tool at all, and the argument descriptions decide what it

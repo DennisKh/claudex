@@ -193,6 +193,8 @@ end
 
 The `@doc` becomes the tool's description and the `@spec` becomes its schema, so both are prompt material. `:args` adds a description per argument, merged into the inferred schema — worth writing for any argument whose name doesn't say it all, since that description is how Claude decides what to pass.
 
+`mix claudex.gen.tool MyApp.Tools read_file path` writes that module for you, with every attribute in place and a description slot per argument.
+
 A tool refuses a call by raising `Claudex.Tool.Error` with the reason:
 
 ```elixir
