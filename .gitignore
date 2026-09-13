@@ -25,6 +25,11 @@ claudex-*.tar
 # Dialyzer's persistent lookup table cache.
 /priv/plts/
 
+# Examples are standalone Mix projects, built in place.
+examples/*/_build/
+examples/*/deps/
+examples/*/mix.lock
+
 # Local-only working files: never part of the package.
 /scripts/
 .tool-versions

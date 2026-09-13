@@ -21,6 +21,18 @@ defmodule Claudex.ToolRunner do
   `:thinking`, `:tool_choice` and the rest go in the same map. The options
   below are Claudex's own and go in the keyword list after it.
 
+  > #### Tip {: .tip}
+  >
+  > `tool_choice: %{type: "any"}` forces Claude to run at least one tool. This means no `end_turn` will ever occur on its own.
+  > You need to handle this yourself: provide an `exit` tool and catch it to stop execution, the way the
+  > [arithmetix example](https://github.com/DennisKh/claudex/tree/main/examples/arithmetix) does with its `finish` tool.
+  > Yes, you can skip `tool_choice: %{type: "any"}`, but the model will not run all your tools, even if the system prompt says so,
+  > especially weaker models.
+  >
+  > Also, sometimes a model can perform an operation without calling your tool, even if it's valid to do so. So if it's
+  > required that a tool must be used, because, let's say, you log it or important checks must happen for every
+  > action, `tool_choice: %{type: "any"}` is your only option.
+
   A turn the API pauses part-way through a server-side tool loop
   (`stop_reason: "pause_turn"`) resumes on its own. The history goes back
   unchanged and the conversation carries on, so a pause costs a turn but does
