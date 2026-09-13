@@ -651,6 +651,56 @@ defmodule Claudex.ToolRunnerTest do
       refute_received {:claudex, ^ref, _direct}
     end
 
+    test "carries on when the process it delivers to is gone" do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{pid: pid}} = ToolRunner.stream_to(client(), @params, to: dead_pid())
+
+      assert_exits_normally(pid)
+
+      # Only the caller is linked, so a destination that has gone away does not
+      # end the conversation: both requests went out, and the caller decides
+      # what a missing reader means.
+      assert_received {:sent, _first}
+      assert_received {:sent, _second}
+    end
+
+    test "monitor: true stops the conversation when that process is gone" do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      dead = dead_pid()
+
+      assert {:ok, %Handle{pid: pid}} =
+               ToolRunner.stream_to(client(), @params, to: dead, monitor: true)
+
+      assert_exits_normally(pid)
+
+      # The turn already in flight was paid for; the next one never went out.
+      assert_received {:sent, _first}
+      refute_received {:sent, _second}
+    end
+
+    test "monitor: true delivers as usual while that process is alive" do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{ref: ref}} =
+               ToolRunner.stream_to(client(), @params, to: self(), monitor: true)
+
+      # Watching the destination changes nothing while it is there.
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1}}}, 2_000
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 2, stop: :completed}}}, 2_000
+      assert_receive {:claudex, ^ref, :done}, 2_000
+    end
+
     test "runs an :on_event of the caller's own as well as forwarding it" do
       respond_with([message([text("42")], "end_turn")])
 
@@ -739,6 +789,19 @@ defmodule Claudex.ToolRunnerTest do
 
       refute_receive {:tool_ran, _a, _b}, 500
       refute_received {:claudex, ^ref, {:turn, _turn}}
+    end
+
+    defp dead_pid do
+      pid = spawn(fn -> :ok end)
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 1_000
+
+      pid
+    end
+
+    defp assert_exits_normally(pid) do
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
     end
 
     defp relay(parent) do

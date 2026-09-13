@@ -30,7 +30,7 @@ defmodule Claudex.Messages do
   @typedoc """
   An option for `stream_to/3`, described under "Options" there.
   """
-  @type stream_to_option :: {:to, pid()} | {:ref, reference()}
+  @type stream_to_option :: {:to, pid()} | {:ref, reference()} | {:monitor, boolean()}
 
   @doc """
   Sends a request to `POST /v1/messages` and returns the completed message.
@@ -173,7 +173,9 @@ defmodule Claudex.Messages do
     * `{:claudex, ref, :done}` when the reply is complete
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
 
-  The forwarding process is linked to the caller, so it dies with it.
+  The forwarding process is linked to the caller, so it dies with it. The
+  process it delivers to is not, so by default the stream carries on when that
+  one goes away, and the caller decides what a missing reader means.
 
   ## Options
 
@@ -181,6 +183,11 @@ defmodule Claudex.Messages do
     * `:ref` - the reference every message is tagged with, for a caller that
       minted one before starting. One is made for you otherwise, and either
       way it comes back on the handle.
+    * `:monitor` - watch `:to` and stop the stream when it goes away,
+      defaulting to `false`. A reply nobody is left to read still costs tokens
+      to finish. Nothing is sent when it stops, because the process the
+      messages were for is the one that has gone; a caller that needs to know
+      monitors the handle's `pid`.
 
   `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
   way, adding a message per completed turn.

@@ -6,7 +6,7 @@ defmodule Claudex.Stream.ForwarderTest do
 
   use ExUnit.Case, async: true
 
-  alias Claudex.Client
+  alias Claudex.{Client, Messages}
   alias Claudex.Stream.{Event, Forwarder, Handle}
 
   @params %{model: "claude-haiku-4-5", max_tokens: 16, messages: [%{role: "user", content: "Hi"}]}
@@ -116,6 +116,65 @@ defmodule Claudex.Stream.ForwarderTest do
     assert {:ok, %Handle{ref: ref}} = Forwarder.events(client(), @params, [])
 
     assert_receive {:claudex, ^ref, :done}, 2_000
+  end
+
+  test "a destination name nobody holds is reported once, not once per message" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {:ok, %Handle{pid: pid}} =
+          Forwarder.events(client(), @params, to: :claudex_no_such_destination)
+
+        ref = Process.monitor(pid)
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+      end)
+
+    assert log =~ "no process registered as :claudex_no_such_destination"
+
+    # Two events and a :done went undelivered. Reporting each would drown a
+    # real reply in hundreds of identical lines.
+    assert log |> String.split("no process registered as") |> length() == 2
+  end
+
+  test "a destination name nobody holds does not take the caller down" do
+    parent = self()
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      caller =
+        spawn(fn ->
+          {:ok, _handle} = Forwarder.events(client(), @params, to: :claudex_no_such_destination)
+          Process.sleep(300)
+          send(parent, :survived)
+        end)
+
+      monitor = Process.monitor(caller)
+
+      # send/2 to an unregistered name is an ArgumentError, and reporting that
+      # error to the same name raises again. Escaping the forwarder kills the
+      # caller it is linked to.
+      assert_receive :survived, 2_000
+      assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
+    end)
+  end
+
+  test "Messages.stream_to/3 passes monitor: true through, and it stops the stream" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: StallingTransport]
+      )
+
+    dead = spawn(fn -> :ok end)
+    gone = Process.monitor(dead)
+    assert_receive {:DOWN, ^gone, :process, ^dead, _reason}, 1_000
+
+    {:ok, %Handle{pid: pid}} = Messages.stream_to(client, @params, to: dead, monitor: true)
+
+    finished = Process.monitor(pid)
+
+    # The transport is five seconds into a stall. Without the watch reaching
+    # the forwarder, this process sits there for all of it.
+    assert_receive {:DOWN, ^finished, :process, ^pid, :normal}, 1_000
   end
 
   test "there is no child_spec: a stream cannot be restarted" do
