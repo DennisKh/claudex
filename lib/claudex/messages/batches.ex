@@ -43,6 +43,12 @@ defmodule Claudex.Messages.Batches do
   alias Claudex.{API, ChunkStream, Client, Error, JSONL, Message, Page, Tool}
   alias Claudex.Messages.{Batch, BatchResult}
 
+  @typedoc """
+  A paging option for `list/2` and `stream!/2`, the same id cursors
+  `Claudex.Models.list/2` takes.
+  """
+  @type option :: {:limit, pos_integer()} | {:after_id, String.t()} | {:before_id, String.t()}
+
   @doc """
   Submits a batch.
 
@@ -103,7 +109,7 @@ defmodule Claudex.Messages.Batches do
   `Claudex.Models.list/2` uses.
   """
   @spec list(Client.t()) :: {:ok, Page.t(Batch.t())} | {:error, Error.t()}
-  @spec list(Client.t(), keyword()) :: {:ok, Page.t(Batch.t())} | {:error, Error.t()}
+  @spec list(Client.t(), [option()]) :: {:ok, Page.t(Batch.t())} | {:error, Error.t()}
   def list(%Client{} = client, opts \\ []) do
     with {:ok, response} <- API.get(client, "/v1/messages/batches", opts) do
       {:ok, Page.decode(response, &Batch.decode/1)}
@@ -122,11 +128,11 @@ defmodule Claudex.Messages.Batches do
   batches rather than pages.
 
   Pages are fetched as you consume them, so taking the first few costs one
-  request. Takes the same options as `list/2`, minus the cursor it threads
-  itself. Enumerating raises `Claudex.Error` if a request fails.
+  request. Takes the same options as `list/2`; a cursor among them says
+  where to start, and is threaded from there. Enumerating raises `Claudex.Error` if a request fails.
   """
   @spec stream!(Client.t()) :: Enumerable.t()
-  @spec stream!(Client.t(), keyword()) :: Enumerable.t()
+  @spec stream!(Client.t(), [option()]) :: Enumerable.t()
   def stream!(%Client{} = client, opts \\ []) do
     Page.stream!(opts, &list(client, &1))
   end

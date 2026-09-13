@@ -29,6 +29,19 @@ defmodule Claudex.Client do
           max_retries: non_neg_integer()
         }
 
+  @typedoc """
+  An option for `new/1` and `build/1`, each described under "Options" in
+  `new/1`. Every one can also be set in application config.
+  """
+  @type option ::
+          {:api_key, String.t()}
+          | {:base_url, String.t()}
+          | {:max_retries, non_neg_integer()}
+          | {:receive_timeout, timeout()}
+          | {:connect_timeout, timeout()}
+          | {:beta, String.t() | [String.t()]}
+          | {:req_options, keyword()}
+
   @doc """
   Builds a client.
 
@@ -66,7 +79,7 @@ defmodule Claudex.Client do
   If you need an error tuple to be returned, use `build/1` instead.
   """
   @spec new() :: t()
-  @spec new(keyword()) :: t()
+  @spec new([option()]) :: t()
   def new(opts \\ []) do
     case build(opts) do
       {:ok, client} -> client
@@ -85,7 +98,7 @@ defmodule Claudex.Client do
   Every other option is applied the same way. For more details, see [new/1 Options](#new/1-options)
   """
   @spec build() :: {:ok, t()} | {:error, :missing_api_key}
-  @spec build(keyword()) :: {:ok, t()} | {:error, :missing_api_key}
+  @spec build([option()]) :: {:ok, t()} | {:error, :missing_api_key}
   def build(opts \\ []) do
     case api_key(opts) do
       nil -> {:error, :missing_api_key}

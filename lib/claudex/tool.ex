@@ -228,6 +228,9 @@ defmodule Claudex.Tool do
   API — if your tool returns something else, encode it first
   (`JSON.encode!/1` for structured data).
 
+  `:is_error` in `opts` marks the result as a failure Claude should react to
+  rather than an answer, and defaults to `false`.
+
       iex> Claudex.Tool.result("toolu_1", "18")
       %{type: "tool_result", tool_use_id: "toolu_1", content: "18", is_error: false}
 
