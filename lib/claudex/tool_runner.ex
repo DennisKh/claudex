@@ -391,10 +391,7 @@ defmodule Claudex.ToolRunner do
     })
   end
 
-  # A reply carries its stop reason in `message_delta`, so one that has none
-  # never finished: the stream ended part-way, which is what cancelling it
-  # does. Its tool calls are as half-asked-for as a truncated turn's, and are
-  # not run.
+  # canceled stream may carry stop_reason `nil`
   defp resolve_turn(_config, %Turn{message: %Message{stop_reason: nil}} = turn) do
     {%{turn | stop: :truncated}, :done}
   end
