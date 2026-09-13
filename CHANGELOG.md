@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/DennisKh/claudex/compare/v0.8.1...v0.9.0) (2026-09-13)
+
+
+### Features
+
+* **client:** add build/1 and Model.supports?/2, read named spec args ([#57](https://github.com/DennisKh/claudex/issues/57)) ([d5717b8](https://github.com/DennisKh/claudex/commit/d5717b822563c7def224f4e318c45c3fa0478b30))
+* **message:** answer how a reply ended, for a loop you drive yourself ([#53](https://github.com/DennisKh/claudex/issues/53)) ([09f7a6d](https://github.com/DennisKh/claudex/commit/09f7a6d648306c91b706f58bd056a738a1b97ff5))
+* **mix:** add claudex.gen.tool ([#61](https://github.com/DennisKh/claudex/issues/61)) ([b0763b1](https://github.com/DennisKh/claudex/commit/b0763b19d55c40872d885f19dfe6a04c26cae77d))
+* **streaming:** let a stream stop with the process it delivers to ([#63](https://github.com/DennisKh/claudex/issues/63)) ([722753c](https://github.com/DennisKh/claudex/commit/722753cef1dfbedf2b4b9b06d693a7d84844c93e))
+* **tool_runner:** add stream_to/3 ([#62](https://github.com/DennisKh/claudex/issues/62)) ([8ae7366](https://github.com/DennisKh/claudex/commit/8ae736661ecef9c303b74db7d58958f0dfe13d45))
+
+
+### Bug Fixes
+
+* **tool:** report a tool call whoever is driving the loop ([#56](https://github.com/DennisKh/claudex/issues/56)) ([64c6e74](https://github.com/DennisKh/claudex/commit/64c6e74c6855d155fa92e8c200c8084749e79e5d))
+
 ## [0.8.1](https://github.com/DennisKh/claudex/compare/v0.8.0...v0.8.1) (2026-09-11)
 
 
