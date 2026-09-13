@@ -24,7 +24,8 @@ defmodule Claudex.ToolRunner do
   > #### Tip {: .tip}
   >
   > `tool_choice: %{type: "any"}` forces Claude to run at least one tool. This means no `end_turn` will ever occur on its own.
-  > You need to handle this yourself: provide an `exit` tool as shown in this example, and catch it to stop execution.
+  > You need to handle this yourself: provide an `exit` tool and catch it to stop execution, the way the
+  > [arithmetix example](https://github.com/DennisKh/claudex/tree/main/examples/arithmetix) does with its `finish` tool.
   > Yes, you can skip `tool_choice: %{type: "any"}`, but the model will not run all your tools, even if the system prompt says so,
   > especially weaker models.
   >
