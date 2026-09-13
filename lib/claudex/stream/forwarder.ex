@@ -6,28 +6,43 @@ defmodule Claudex.Stream.Forwarder do
 
   It's linked to whoever started it, so it goes away with them. There's no
   `child_spec/1`, so it can't go in a supervision tree.
+
+  The process being delivered to is not linked, so a stream carries on when
+  that one goes away. Starting it with `monitor: true` watches it instead, and
+  the stream stops when it does.
   """
+
+  require Logger
 
   alias Claudex.{Client, Error}
   alias Claudex.Stream.{Connection, Handle}
 
   @typedoc """
-  Consumes a stream, sending each item to `to` tagged with `ref`, and says
-  whether it ran out or was cancelled.
+  Where a forwarded stream delivers: the process, the reference tagging every
+  message, and the monitor watching that process, which is nil unless the
+  stream was started with `monitor: true`.
   """
-  @type consume :: (pid(), reference() -> :running | :cancelled)
+  @type sink :: %{to: pid(), ref: reference(), monitor: reference() | nil}
+
+  @typedoc """
+  Consumes a stream, delivering each item to `sink`, and says how it ended.
+  """
+  @type consume :: (sink() -> :running | :cancelled | :unreachable)
 
   @doc false
   @spec start(keyword(), consume()) :: {:ok, Handle.t()}
-  def start(opts, consume) when is_function(consume, 2) do
+  def start(opts, consume) when is_function(consume, 1) do
     to = Keyword.get(opts, :to, self())
     ref = Keyword.get(opts, :ref, make_ref())
+    monitor? = Keyword.get(opts, :monitor, false)
     callers = [self() | Process.get(:"$callers", [])]
 
     pid =
       spawn_link(fn ->
         Process.put(:"$callers", callers)
-        forward(consume, to, ref)
+        monitor = if monitor?, do: Process.monitor(to)
+
+        forward(consume, %{to: to, ref: ref, monitor: monitor})
       end)
 
     {:ok, %Handle{ref: ref, pid: pid}}
@@ -36,63 +51,96 @@ defmodule Claudex.Stream.Forwarder do
   @doc false
   @spec events(Client.t(), map(), keyword()) :: {:ok, Handle.t()}
   def events(%Client{} = client, body, opts) do
-    start(opts, fn to, ref ->
-      client |> Connection.stream(body, ref) |> forward_each(to, ref, :event)
+    start(opts, fn sink ->
+      client |> Connection.stream(body, sink.ref) |> forward_each(sink, :event)
     end)
   end
 
   @doc false
-  @spec forward_each(Enumerable.t(), pid(), reference(), atom()) :: :running | :cancelled
-  def forward_each(enumerable, to, ref, tag) do
+  @spec forward_each(Enumerable.t(), sink(), atom()) :: :running | :cancelled | :unreachable
+  def forward_each(enumerable, sink, tag) do
     Enum.reduce_while(enumerable, :running, fn item, :running ->
-      if cancelled?(ref) do
-        {:halt, :cancelled}
-      else
-        send(to, {:claudex, ref, {tag, item}})
-        {:cont, :running}
+      case halt_reason(sink) do
+        nil ->
+          deliver(sink, {tag, item})
+          {:cont, :running}
+
+        reason ->
+          {:halt, reason}
       end
     end)
   end
 
-  defp forward(consume, to, ref) do
-    consume.(to, ref) |> outcome(ref) |> finish(to, ref)
+  @doc false
+  @spec deliver(sink(), term()) :: :ok
+  def deliver(%{to: to, ref: ref}, payload) do
+    send(to, {:claudex, ref, payload})
+
+    :ok
   rescue
-    error in Claudex.Error -> fail(error, to, ref)
-    error -> fail(wrap(error), to, ref)
-  catch
-    kind, reason -> fail(Error.stream_error("the stream #{kind}: #{inspect(reason)}"), to, ref)
+    ArgumentError -> warn_unreachable(to)
   end
 
-  # This process is linked to whoever started it, so anything that escapes here
-  # takes their LiveView or GenServer down — the opposite of what stream_to/3
-  # promises.
+  defp warn_unreachable(to) do
+    unless Process.get(:claudex_unreachable_logged) do
+      # once per stream
+      Process.put(:claudex_unreachable_logged, true)
+
+      Logger.warning(
+        "Claudex has no process registered as #{inspect(to)}, so the stream's " <>
+          "messages are being dropped. It keeps running; cancel it if nothing wants it."
+      )
+    end
+
+    :ok
+  end
+
+  defp forward(consume, sink) do
+    consume.(sink) |> outcome(sink) |> finish(sink)
+  rescue
+    error in Claudex.Error -> fail(error, sink)
+    error -> fail(wrap(error), sink)
+  catch
+    kind, reason -> fail(Error.stream_error("the stream #{kind}: #{inspect(reason)}"), sink)
+  end
+
   defp wrap(error) do
     Error.stream_error("#{inspect(error.__struct__)}: #{Exception.message(error)}")
   end
 
   # A cancel lands mid-request, so the stream it interrupts can end by raising
   # rather than by running out. That is the cancel arriving, not a failure.
-  defp fail(error, to, ref) do
-    if cancelled?(ref) do
-      send(to, {:claudex, ref, :cancelled})
-    else
-      send(to, {:claudex, ref, {:error, error}})
+  defp fail(error, sink) do
+    case halt_reason(sink) do
+      :cancelled -> deliver(sink, :cancelled)
+      :unreachable -> :ok
+      nil -> deliver(sink, {:error, error})
     end
   end
 
-  defp finish(:running, to, ref), do: send(to, {:claudex, ref, :done})
-  defp finish(:cancelled, to, ref), do: send(to, {:claudex, ref, :cancelled})
+  defp finish(:running, sink), do: deliver(sink, :done)
+  defp finish(:cancelled, sink), do: deliver(sink, :cancelled)
+  defp finish(:unreachable, _sink), do: :ok
 
   # The transport halts on the cancel message and puts it back, so a stream
   # that was cancelled while the model was thinking still reports as cancelled
-  defp outcome(:running, ref), do: if(cancelled?(ref), do: :cancelled, else: :running)
-  defp outcome(state, _ref), do: state
+  defp outcome(:running, sink), do: halt_reason(sink) || :running
+  defp outcome(state, _sink), do: state
 
-  defp cancelled?(ref) do
+  defp halt_reason(%{ref: ref, monitor: nil}) do
     receive do
-      {:claudex_cancel, ^ref} -> true
+      {:claudex_cancel, ^ref} -> :cancelled
     after
-      0 -> false
+      0 -> nil
+    end
+  end
+
+  defp halt_reason(%{ref: ref, monitor: monitor}) do
+    receive do
+      {:claudex_cancel, ^ref} -> :cancelled
+      {:DOWN, ^monitor, :process, _to, _reason} -> :unreachable
+    after
+      0 -> nil
     end
   end
 end

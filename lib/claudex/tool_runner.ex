@@ -308,6 +308,14 @@ defmodule Claudex.ToolRunner do
       def handle_info({:claudex, ref, {:event, event}}, %{assigns: %{ref: ref}} = socket)
       def handle_info({:claudex, ref, {:turn, turn}}, %{assigns: %{ref: ref}} = socket)
 
+  `:monitor` says whether the conversation belongs to the reader or to you:
+
+      # independent of whoever is reading: a reader that restarts picks it up
+      {:ok, handle} = Claudex.ToolRunner.stream_to(client, params, to: reader)
+
+      # run on the reader's behalf: no reader - nothing to finish
+      {:ok, handle} = Claudex.ToolRunner.stream_to(client, params, to: reader, monitor: true)
+
   `params` takes exactly what `Claudex.Messages.create/2` takes, so `:system`,
   `:thinking` and the rest go in that same map; `opts` are the runner's own,
   listed in `Claudex.ToolRunner`.
@@ -326,16 +334,28 @@ defmodule Claudex.ToolRunner do
   Every failure arrives as an `{:error, error}` message, a missing `:model` or
   `:max_tokens` included, so there is nothing to match on the return.
 
-  `:to` and `:ref` work as they do on `Claudex.Messages.stream_to/3`: where
-  the messages go, and what tags them. Every other option is the runner's own,
-  listed in `Claudex.ToolRunner`, and an `:on_event` of your own still runs
-  with the event forwarded either way.
+  `:to`, `:ref` and `:monitor` work as they do on `Claudex.Messages.stream_to/3`:
+  where the messages go, what tags them, and whether the conversation ends with
+  them. Every other option is the runner's own, listed in `Claudex.ToolRunner`,
+  and an `:on_event` of your own still runs with the event forwarded either way.
 
   The forwarding process is linked to the caller, so it dies with it, and it
   is also where `:before_call` runs. A gate that asks another process for a
   decision blocks the forwarder rather than the caller, which is the point;
   send that process a message and wait for its answer rather than calling into
   one that is waiting on you.
+
+  The process being delivered to is not linked, so the conversation carries on
+  when it goes away, and you decide what that means: keep the handle and call
+  `Claudex.Stream.cancel/1` when the run is no longer wanted. That suits a
+  reader whose disappearance says nothing about the work, a view that
+  reconnects or a consumer its supervisor restarts.
+
+  `monitor: true` stops the conversation as soon as that process goes away, so
+  a run nobody is left to read stops costing tokens. It stops at the next turn
+  boundary, since the turn already in flight has been paid for, and it stops
+  silently: the process the messages were for is the one that has gone. A
+  caller that needs to know monitors the handle's `pid`.
 
   `Claudex.Stream.cancel/1` stops the request in flight, so a reply being
   written stops part-way and the tool calls it had got as far as asking for
@@ -345,23 +365,23 @@ defmodule Claudex.ToolRunner do
   @spec stream_to(Client.t(), map() | keyword()) :: {:ok, Handle.t()}
   @spec stream_to(Client.t(), map() | keyword(), [stream_to_option()]) :: {:ok, Handle.t()}
   def stream_to(%Client{} = client, params, opts \\ []) do
-    {forwarder_opts, runner_opts} = Keyword.split(opts, [:to, :ref])
+    {forwarder_opts, runner_opts} = Keyword.split(opts, [:to, :ref, :monitor])
 
-    Forwarder.start(forwarder_opts, fn to, ref ->
+    Forwarder.start(forwarder_opts, fn sink ->
       client
-      |> stream(params, forwarding(runner_opts, to, ref))
-      |> Forwarder.forward_each(to, ref, :turn)
+      |> stream(params, forwarding(runner_opts, sink))
+      |> Forwarder.forward_each(sink, :turn)
     end)
   end
 
-  defp forwarding(opts, to, ref) do
+  defp forwarding(opts, sink) do
     on_event = Keyword.get(opts, :on_event, &ignore/1)
 
     opts
-    |> Keyword.put(:cancel_ref, ref)
+    |> Keyword.put(:cancel_ref, sink.ref)
     |> Keyword.put(:on_event, fn event ->
       on_event.(event)
-      send(to, {:claudex, ref, {:event, event}})
+      Forwarder.deliver(sink, {:event, event})
     end)
   end
 
