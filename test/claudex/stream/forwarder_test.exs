@@ -99,11 +99,11 @@ defmodule Claudex.Stream.ForwarderTest do
     Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: StubTransport])
   end
 
-  test "start/3 forwards to the process and ref it was given" do
+  test "events/3 forwards to the process and ref it was given" do
     ref = make_ref()
 
     assert {:ok, %Handle{ref: ^ref, pid: pid}} =
-             Forwarder.start(client(), @params, to: self(), ref: ref)
+             Forwarder.events(client(), @params, to: self(), ref: ref)
 
     assert is_pid(pid)
 
@@ -112,8 +112,8 @@ defmodule Claudex.Stream.ForwarderTest do
     assert_receive {:claudex, ^ref, :done}, 2_000
   end
 
-  test "start/3 mints a ref and defaults to the calling process" do
-    assert {:ok, %Handle{ref: ref}} = Forwarder.start(client(), @params, [])
+  test "events/3 mints a ref and defaults to the calling process" do
+    assert {:ok, %Handle{ref: ref}} = Forwarder.events(client(), @params, [])
 
     assert_receive {:claudex, ^ref, :done}, 2_000
   end
@@ -131,7 +131,7 @@ defmodule Claudex.Stream.ForwarderTest do
         req_options: [adapter: StallingTransport]
       )
 
-    {:ok, %Handle{ref: ref} = handle} = Forwarder.start(client, @params, [])
+    {:ok, %Handle{ref: ref} = handle} = Forwarder.events(client, @params, [])
 
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 1_000
 
@@ -152,8 +152,8 @@ defmodule Claudex.Stream.ForwarderTest do
         req_options: [adapter: ResumingTransport]
       )
 
-    {:ok, %Handle{ref: cancelled_ref} = cancelled} = Forwarder.start(client, @params, [])
-    {:ok, %Handle{ref: kept_ref}} = Forwarder.start(client, @params, [])
+    {:ok, %Handle{ref: cancelled_ref} = cancelled} = Forwarder.events(client, @params, [])
+    {:ok, %Handle{ref: kept_ref}} = Forwarder.events(client, @params, [])
 
     assert_receive {:claudex, ^cancelled_ref, {:event, %Event.MessageStart{}}}, 1_000
     assert_receive {:claudex, ^kept_ref, {:event, %Event.MessageStart{}}}, 1_000
@@ -175,7 +175,7 @@ defmodule Claudex.Stream.ForwarderTest do
         req_options: [adapter: ResumingTransport]
       )
 
-    {:ok, %Handle{ref: ref, pid: pid}} = Forwarder.start(client, @params, [])
+    {:ok, %Handle{ref: ref, pid: pid}} = Forwarder.events(client, @params, [])
 
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 1_000
 

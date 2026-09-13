@@ -19,6 +19,19 @@ defmodule Claudex.Messages do
   @required_params [:model, :messages, :max_tokens]
   @count_tokens_required_params [:model, :messages]
 
+  @typedoc """
+  An option for `stream!/3`.
+
+    * `:cancel_ref` - tags the request with a reference, so a
+      `Claudex.Stream.Handle` carrying the same one stops it part-way.
+  """
+  @type stream_option :: {:cancel_ref, reference()}
+
+  @typedoc """
+  An option for `stream_to/3`, described under "Options" there.
+  """
+  @type stream_to_option :: {:to, pid()} | {:ref, reference()}
+
   @doc """
   Sends a request to `POST /v1/messages` and returns the completed message.
 
@@ -112,21 +125,43 @@ defmodule Claudex.Messages do
   you. Use `Claudex.Stream.final_message/1` if you want the assembled
   `Claudex.Message` at the end.
 
+  `stream_to/3` and `Claudex.ToolRunner.stream_to/3` set `:cancel_ref`
+  themselves; a stream you enumerate yourself stops when you stop enumerating
+  it.
+
   Raises `Claudex.Error` on a missing parameter, a failed request, or an
   error the API sends part-way through the stream. Use `stream_to/3` if
   you'd rather have errors delivered as messages than raised.
   """
   @spec stream!(Client.t(), map() | keyword()) :: Enumerable.t()
-  def stream!(%Client{} = client, params) do
+  @spec stream!(Client.t(), map() | keyword(), [stream_option()]) :: Enumerable.t()
+  def stream!(%Client{} = client, params, opts \\ []) do
     case build_body(params) do
-      {:ok, body} -> Connection.stream(client, Map.put(body, :stream, true))
-      {:error, error} -> raise error
+      {:ok, body} ->
+        Connection.stream(
+          client,
+          Map.put(body, :stream, true),
+          Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
+        )
+
+      {:error, error} ->
+        raise error
     end
   end
 
   @doc """
   Runs a stream in its own process and returns straight away, delivering each
   event to a mailbox.
+
+      {:ok, handle} =
+        Claudex.Messages.stream_to(client, %{
+          model: "claude-opus-5",
+          max_tokens: 1024,
+          messages: [Claudex.Message.user("Write a haiku about Elixir.")]
+        })
+
+      def handle_info({:claudex, ref, {:event, event}}, %{assigns: %{ref: ref}} = socket)
+      def handle_info({:claudex, ref, :done}, %{assigns: %{ref: ref}} = socket)
 
   `params` takes exactly what `create/2` takes; `stream: true` is set for you.
 
@@ -138,16 +173,25 @@ defmodule Claudex.Messages do
     * `{:claudex, ref, :done}` when the reply is complete
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
 
-  The forwarding process is linked to the caller, so it dies with it. Pass
-  `to: pid` to send the messages somewhere other than the calling process.
+  The forwarding process is linked to the caller, so it dies with it.
+
+  ## Options
+
+    * `:to` - the process the messages go to, defaulting to the caller.
+    * `:ref` - the reference every message is tagged with, for a caller that
+      minted one before starting. One is made for you otherwise, and either
+      way it comes back on the handle.
+
+  `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
+  way, adding a message per completed turn.
   """
   @spec stream_to(Client.t(), map() | keyword()) ::
           {:ok, Handle.t()} | {:error, Error.t()}
-  @spec stream_to(Client.t(), map() | keyword(), keyword()) ::
+  @spec stream_to(Client.t(), map() | keyword(), [stream_to_option()]) ::
           {:ok, Handle.t()} | {:error, Error.t()}
   def stream_to(%Client{} = client, params, opts \\ []) do
     with {:ok, body} <- build_body(params) do
-      Forwarder.start(client, Map.put(body, :stream, true), opts)
+      Forwarder.events(client, Map.put(body, :stream, true), opts)
     end
   end
 

@@ -18,9 +18,10 @@ defmodule Claudex.ToolRunner.Turn do
 
     * `:completed` - Claude answered without asking for another tool.
     * `:refusal` - Claude declined. Its tool calls, if any, were not run.
-    * `:truncated` - the reply ran out of room, hitting the `max_tokens` this
-      request asked for or the model's own context window. What it was
-      part-way through saying, or asking for, is unfinished, so its tool calls
+    * `:truncated` - the reply is unfinished. It ran out of room, hitting the
+      `max_tokens` this request asked for or the model's own context window,
+      or the stream carrying it ended part-way, which is what cancelling one
+      does. What it was saying, or asking for, is cut off, so its tool calls
       were not run either.
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can

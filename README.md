@@ -244,6 +244,18 @@ client
 end)
 ```
 
+Both of those block the process they run in. `stream_to/3` runs the loop in a linked process instead and sends each event and each completed turn to a mailbox, which is what a LiveView or a GenServer wants:
+
+```elixir
+{:ok, handle} = Claudex.ToolRunner.stream_to(client, params)
+
+# {:claudex, ref, {:event, event}}   per delta, every turn
+# {:claudex, ref, {:turn, turn}}     as each turn completes, tools already run
+# {:claudex, ref, :done}             the conversation ended
+```
+
+`Claudex.Stream.cancel/1` on that handle stops the request in flight, and the tool calls of the reply it interrupts are not run.
+
 ### Deciding whether a call runs
 
 A tool decides for itself what it will and won't do — raise `Claudex.Tool.Error` and Claude sees the reason and adapts:

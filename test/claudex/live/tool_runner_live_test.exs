@@ -7,6 +7,7 @@ defmodule Claudex.Live.ToolRunnerTest do
   use Claudex.TestSupport.LiveCase, async: false
 
   alias Claudex.{ContentBlock, Message, ToolRunner}
+  alias Claudex.Stream.Event
   alias Claudex.ToolRunner.Turn
 
   # The system prompt goes in the top-level `:system` param, not as a message.
@@ -190,6 +191,50 @@ defmodule Claudex.Live.ToolRunnerTest do
       # The denial reached Claude as a result it could reason about rather than
       # ending the conversation.
       assert %Turn{stop: :completed} = List.last(turns)
+    end
+  end
+
+  describe "stream_to/3" do
+    test "delivers a whole tool conversation to another process's mailbox", %{client: client} do
+      {:ok, handle} =
+        ToolRunner.stream_to(
+          client,
+          params([Message.user("What is 12 plus 30, and then subtract 5 from that?")])
+        )
+
+      ref = handle.ref
+
+      # Deltas land while the first reply is still being written, ahead of the
+      # turn they belong to.
+      assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 60_000
+
+      turns = collect_turns(ref, [])
+
+      assert length(turns) >= 2
+      assert Enum.map(turns, & &1.index) == Enum.to_list(1..length(turns))
+
+      assert Enum.any?(turns, fn turn ->
+               Enum.any?(turn.tool_uses, &(&1.name in ["add", "subtract"]))
+             end)
+
+      assert %Turn{stop: :completed} = last = List.last(turns)
+      assert Message.text(last.message) =~ "37"
+
+      # The loop ran to the end in a process of its own: this one never blocked
+      # on it, and the history came back whole on the final turn.
+      assert Enum.all?(turns, &(&1.messages != []))
+      assert length(last.messages) > length(hd(turns).messages)
+    end
+  end
+
+  defp collect_turns(ref, turns) do
+    receive do
+      {:claudex, ^ref, {:turn, turn}} -> collect_turns(ref, [turn | turns])
+      {:claudex, ^ref, {:event, _event}} -> collect_turns(ref, turns)
+      {:claudex, ^ref, :done} -> Enum.reverse(turns)
+      {:claudex, ^ref, {:error, error}} -> flunk("the loop failed: #{inspect(error)}")
+    after
+      60_000 -> flunk("the loop never finished")
     end
   end
 end

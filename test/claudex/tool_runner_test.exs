@@ -2,7 +2,7 @@ defmodule Claudex.ToolRunnerTest do
   use ExUnit.Case, async: true
 
   alias Claudex.{Client, ContentBlock, Error, Message, ToolRunner}
-  alias Claudex.Stream.Event
+  alias Claudex.Stream.{Event, Handle}
   alias Claudex.TestSupport.MessageStream
   alias Claudex.ToolRunner.Turn
 
@@ -34,6 +34,102 @@ defmodule Claudex.ToolRunnerTest do
     @tool true
     @spec unencodable() :: any()
     def unencodable, do: {:error, :not_found}
+  end
+
+  defmodule StallingTransport do
+    @moduledoc """
+    Serves the first event of a reply and then stalls, the way the API does
+    while the model is still writing. A plug stub can't do this: Req collects a
+    plug's response before handing it over, so nothing arrives until it returns.
+    """
+
+    @first_event """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    """
+
+    @stall :timer.seconds(5)
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @first_event}, {request, Req.Response.new(status: 200)})
+
+      Process.sleep(@stall)
+
+      acc
+    end
+  end
+
+  defmodule Tattler do
+    @moduledoc """
+    Reports that it ran, for a test whose point is that it must not. The
+    forwarder propagates `$callers`, so the test process is at the head of it.
+    """
+
+    use Claudex.Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b) do
+      [caller | _rest] = Process.get(:"$callers")
+      send(caller, {:tool_ran, a, b})
+
+      a + b
+    end
+  end
+
+  defmodule ToolThenStallTransport do
+    @moduledoc """
+    Emits a complete `tool_use` block, then stalls before `message_delta` and
+    `message_stop` — the wire shape when a reply is cut off after Claude has
+    finished asking for a tool but before the turn itself has finished.
+    """
+
+    @blocks ~S"""
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"add","input":{}}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"a\":1,\"b\":2}"}}
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0}
+
+    """
+
+    @stall :timer.seconds(5)
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @blocks}, {request, Req.Response.new(status: 200)})
+
+      Process.sleep(@stall)
+
+      acc
+    end
+  end
+
+  defmodule SilentTransport do
+    @moduledoc """
+    Stalls before sending anything at all, so a cancel arrives while the reply
+    has not started.
+    """
+
+    @stall :timer.seconds(5)
+
+    @doc false
+    def run(request) do
+      Process.sleep(@stall)
+
+      {request, Req.Response.new(status: 200)}
+    end
   end
 
   @params %{
@@ -471,6 +567,194 @@ defmodule Claudex.ToolRunnerTest do
       # One request went out: the loop never sent results for a half-asked call.
       assert_received {:sent, _first}
       refute_received {:sent, _second}
+    end
+  end
+
+  test "a cancel ref stops stream/3, and the turn it interrupts is truncated" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: ToolThenStallTransport]
+      )
+
+    cancel_ref = make_ref()
+    parent = self()
+
+    pid =
+      spawn_link(fn ->
+        # The forwarder does this for stream_to/3; a bare stream/3 in a task
+        # of your own carries whatever its caller set up.
+        Process.put(:"$callers", [parent])
+
+        turns =
+          client
+          |> ToolRunner.stream(%{@params | tools: Tattler},
+            cancel_ref: cancel_ref,
+            on_event: &signal_block_stop(parent, &1)
+          )
+          |> Enum.to_list()
+
+        send(parent, {:turns, turns})
+      end)
+
+    # Cancel once the tool_use block is whole, so the reply really does carry
+    # a call the loop could have dispatched.
+    assert_receive :block_stopped, 2_000
+    send(pid, {:claudex_cancel, cancel_ref})
+
+    assert_receive {:turns, [%Turn{stop: :truncated} = turn]}, 2_000
+
+    assert [%ContentBlock.ToolUse{name: "add"}] = turn.tool_uses
+    assert turn.tool_results == []
+    refute_received {:tool_ran, _a, _b}
+  end
+
+  defp signal_block_stop(parent, %Event.ContentBlockStop{}), do: send(parent, :block_stopped)
+  defp signal_block_stop(_parent, _event), do: :ok
+
+  describe "stream_to/3" do
+    test "sends each event as it arrives, each turn as it completes, then :done" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{ref: ref, pid: pid}} = ToolRunner.stream_to(client(), @params)
+      assert is_pid(pid)
+
+      assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
+
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1} = first}}, 2_000
+      assert [%ContentBlock.ToolUse{name: "add"}] = first.tool_uses
+      assert [%{content: "42", is_error: false}] = first.tool_results
+
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 2, stop: :completed} = second}}, 2_000
+      assert Message.text(second.message) == "42"
+
+      assert_receive {:claudex, ^ref, :done}, 2_000
+    end
+
+    test "delivers to another process when told to" do
+      respond_with([message([text("42")], "end_turn")])
+
+      parent = self()
+      target = start_supervised!({Task, fn -> relay(parent) end}, restart: :temporary)
+
+      assert {:ok, %Handle{ref: ref}} = ToolRunner.stream_to(client(), @params, to: target)
+
+      # Everything arrives by way of the target, so nothing proves the routing
+      # except the target having seen it.
+      assert_receive {:relayed, {:claudex, ^ref, {:turn, %Turn{}}}}, 2_000
+      assert_receive {:relayed, {:claudex, ^ref, :done}}, 2_000
+
+      refute_received {:claudex, ^ref, _direct}
+    end
+
+    test "runs an :on_event of the caller's own as well as forwarding it" do
+      respond_with([message([text("42")], "end_turn")])
+
+      parent = self()
+
+      assert {:ok, %Handle{ref: ref}} =
+               ToolRunner.stream_to(client(), @params, on_event: &send(parent, {:mine, &1}))
+
+      assert_receive {:mine, %Event.MessageStart{}}, 2_000
+      assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
+      assert_receive {:claudex, ^ref, :done}, 2_000
+    end
+
+    test "sends a failed request as an error rather than raising it at the caller" do
+      Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 429, "") end)
+
+      assert {:ok, %Handle{ref: ref}} = ToolRunner.stream_to(client(), @params)
+
+      assert_receive {:claudex, ^ref, {:error, %Error{type: :rate_limit}}}, 2_000
+      refute_receive {:claudex, ^ref, :done}, 200
+
+      # The forwarder is linked, so a raise that escaped it would have taken
+      # this process with it before the assertion above ran.
+      assert Process.alive?(self())
+    end
+
+    test "sends a missing required parameter as an error too" do
+      assert {:ok, %Handle{ref: ref}} =
+               ToolRunner.stream_to(client(), Map.delete(@params, :max_tokens))
+
+      assert_receive {:claudex, ^ref, {:error, %Error{type: :bad_request} = error}}, 2_000
+      assert error.message =~ "max_tokens"
+    end
+
+    test "cancel/1 stops the request in flight, without waiting for the reply" do
+      assert {:ok, %Handle{ref: ref} = handle} = ToolRunner.stream_to(stalling_client(), @params)
+
+      assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
+
+      assert Claudex.Stream.cancel(handle) == :ok
+
+      # The stub is five seconds into a stall. A cancel the loop only notices
+      # between turns cannot report inside this window.
+      assert_receive {:claudex, ^ref, :cancelled}, 1_000
+
+      refute_receive {:claudex, ^ref, {:turn, _turn}}, 200
+      refute_receive {:claudex, ^ref, :done}, 100
+    end
+
+    test "a cancel landing before the reply starts reports as cancelled, not as an error" do
+      client =
+        Client.new(
+          api_key: "sk-ant-test",
+          max_retries: 0,
+          req_options: [adapter: SilentTransport]
+        )
+
+      assert {:ok, %Handle{ref: ref} = handle} = ToolRunner.stream_to(client, @params)
+
+      assert Claudex.Stream.cancel(handle) == :ok
+
+      # Nothing accumulated, so the turn ends by raising rather than by running
+      # out. That is the cancel arriving, and it must not read as a failure.
+      assert_receive {:claudex, ^ref, :cancelled}, 1_000
+
+      refute_receive {:claudex, ^ref, {:error, _error}}, 200
+    end
+
+    test "a cancelled reply does not run the tool calls it was part-way through asking for" do
+      client =
+        Client.new(
+          api_key: "sk-ant-test",
+          max_retries: 0,
+          req_options: [adapter: ToolThenStallTransport]
+        )
+
+      assert {:ok, %Handle{ref: ref} = handle} =
+               ToolRunner.stream_to(client, %{@params | tools: Tattler})
+
+      # The block is complete, so the reply really does carry a tool_use. What
+      # it never gets is a stop reason, because message_delta never arrives.
+      assert_receive {:claudex, ^ref, {:event, %Event.ContentBlockStop{}}}, 2_000
+
+      assert Claudex.Stream.cancel(handle) == :ok
+      assert_receive {:claudex, ^ref, :cancelled}, 2_000
+
+      refute_receive {:tool_ran, _a, _b}, 500
+      refute_received {:claudex, ^ref, {:turn, _turn}}
+    end
+
+    defp relay(parent) do
+      receive do
+        message ->
+          send(parent, {:relayed, message})
+          relay(parent)
+      end
+    end
+
+    defp stalling_client do
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: StallingTransport]
+      )
     end
   end
 end
