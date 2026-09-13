@@ -29,6 +29,17 @@ defmodule Claudex.Files do
 
   alias Claudex.{API, Client, Error, FileMetadata, Page}
 
+  @typedoc """
+  An option for `upload/3`, described under "Options" there.
+  """
+  @type upload_option :: {:content_type, String.t()} | {:expires_in_seconds, pos_integer()}
+
+  @typedoc """
+  A paging option for `list/2` and `stream!/2`. Files paginate with an opaque
+  cursor rather than ids, so `:page` is the `next_page` of the last one.
+  """
+  @type list_option :: {:limit, pos_integer()} | {:page, String.t()}
+
   @doc """
   Uploads a file, either from a path or as `{content, filename}`.
 
@@ -45,7 +56,7 @@ defmodule Claudex.Files do
   """
   @spec upload(Client.t(), Path.t() | {iodata(), String.t()}) ::
           {:ok, FileMetadata.t()} | {:error, Error.t()}
-  @spec upload(Client.t(), Path.t() | {iodata(), String.t()}, keyword()) ::
+  @spec upload(Client.t(), Path.t() | {iodata(), String.t()}, [upload_option()]) ::
           {:ok, FileMetadata.t()} | {:error, Error.t()}
   def upload(client, file, opts \\ [])
 
@@ -74,7 +85,8 @@ defmodule Claudex.Files do
   `page: page.next_page` for the next page, and stop when it's nil.
   """
   @spec list(Client.t()) :: {:ok, Page.t(FileMetadata.t())} | {:error, Error.t()}
-  @spec list(Client.t(), keyword()) :: {:ok, Page.t(FileMetadata.t())} | {:error, Error.t()}
+  @spec list(Client.t(), [list_option()]) ::
+          {:ok, Page.t(FileMetadata.t())} | {:error, Error.t()}
   def list(%Client{} = client, opts \\ []) do
     with {:ok, body} <- API.get(client, "/v1/files", opts) do
       {:ok, Page.decode(body, &FileMetadata.decode/1)}
@@ -91,11 +103,11 @@ defmodule Claudex.Files do
       |> Enum.each(&Claudex.Files.delete(client, &1.id))
 
   Pages are fetched as you consume them, so taking the first few costs one
-  request. Takes the same options as `list/2`, minus the cursor it threads
-  itself. Enumerating raises `Claudex.Error` if a request fails.
+  request. Takes the same options as `list/2`; a cursor among them says
+  where to start, and is threaded from there. Enumerating raises `Claudex.Error` if a request fails.
   """
   @spec stream!(Client.t()) :: Enumerable.t()
-  @spec stream!(Client.t(), keyword()) :: Enumerable.t()
+  @spec stream!(Client.t(), [list_option()]) :: Enumerable.t()
   def stream!(%Client{} = client, opts \\ []) do
     Page.stream!(opts, &list(client, &1))
   end

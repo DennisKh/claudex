@@ -84,6 +84,9 @@ defmodule Claudex.ToolRunner do
       before the tool does, returning `:ok` or `{:deny, reason}`
     * `:on_event` - a function run on each `Claudex.Stream.Event` as it
       arrives, for showing a reply while it is still being written
+    * `:cancel_ref` - tags every request the loop makes, so a
+      `Claudex.Stream.Handle` carrying the same reference stops the one in
+      flight. `stream_to/3` sets it itself.
 
   ## Approving a tool call
 
@@ -129,34 +132,60 @@ defmodule Claudex.ToolRunner do
 
   ## Running the loop somewhere else
 
-  The loop blocks the process it runs in, so a LiveView or a GenServer runs it
-  in a task and lets `:on_event` send the deltas back:
+  The loop blocks the process it runs in, so a LiveView or a GenServer hands it
+  to `stream_to/3`, which runs it in a linked process and sends back each event
+  as it arrives and each turn as it completes:
 
-      ref = make_ref()
-      parent = self()
+      {:ok, handle} =
+        Claudex.ToolRunner.stream_to(client, %{
+          model: "claude-opus-5",
+          max_tokens: 1024,
+          tools: MyApp.Tools,
+          messages: [Claudex.Message.user("What is 12 plus 30?")]
+        })
 
-      Task.Supervisor.async_nolink(MyApp.TaskSupervisor, fn ->
-        Claudex.ToolRunner.run(client, params, on_event: &send(parent, {:reply, ref, &1}))
-      end)
+      def handle_info({:claudex, ref, {:event, event}}, %{assigns: %{ref: ref}} = socket)
+      def handle_info({:claudex, ref, {:turn, turn}}, %{assigns: %{ref: ref}} = socket)
+      def handle_info({:claudex, _stale, _message}, socket), do: {:noreply, socket}
 
-  Matching that `ref` where the messages arrive keeps a reply from a
-  conversation the user has left out of the one on screen:
+  Matching the handle's `ref` keeps a reply from a conversation the user has
+  left out of the one on screen, and `Claudex.Stream.cancel/1` on that handle
+  stops the request in flight.
 
-      def handle_info({:reply, ref, event}, %{assigns: %{ref: ref}} = socket)
-      def handle_info({:reply, _stale, _event}, socket), do: {:noreply, socket}
-
-  The conversation ends with the task, so `:before_call` fits a decision the
-  user makes now. One that arrives in a later request needs storing, and the
-  loop re-entered from there.
+  The conversation ends with that process, so `:before_call` fits a decision
+  the user makes now. One that arrives in a later request needs storing, and
+  the loop re-entered from there.
   """
 
   require Logger
 
   alias Claudex.{Client, Error, Message, Messages, Tool}
   alias Claudex.ContentBlock.ToolUse
-  alias Claudex.Stream.Accumulator
+  alias Claudex.Stream.{Accumulator, Event, Forwarder, Handle}
   alias Claudex.Tool.CallError
   alias Claudex.ToolRunner.Turn
+
+  @typedoc """
+  An option for `run/3`, `stream/3` and `stream_to/3`, each described under
+  "Options" in `Claudex.ToolRunner`.
+  """
+  @type option ::
+          {:max_turns, pos_integer()}
+          | {:before_call, (ToolUse.t() -> :ok | {:deny, String.t()})}
+          | {:on_event, (Event.t() -> any())}
+
+  @typedoc """
+  An option for `run/3` and `stream/3`: any `t:option/0`, plus the reference
+  that cancels the request in flight.
+  """
+  @type loop_option :: option() | {:cancel_ref, reference()}
+
+  @typedoc """
+  An option for `stream_to/3`: any `t:option/0`, plus the ones that say where
+  its messages go, which are `Claudex.Messages.stream_to/3`'s. It sets its own
+  `:cancel_ref` from the handle it returns.
+  """
+  @type stream_to_option :: option() | Messages.stream_to_option()
 
   @doc """
   Runs the conversation until Claude stops asking for tools, returning the last
@@ -181,7 +210,8 @@ defmodule Claudex.ToolRunner do
   Returns `{:error, %Claudex.Error{}}` if a request fails.
   """
   @spec run(Client.t(), map() | keyword()) :: {:ok, Turn.t()} | {:error, Error.t()}
-  @spec run(Client.t(), map() | keyword(), keyword()) :: {:ok, Turn.t()} | {:error, Error.t()}
+  @spec run(Client.t(), map() | keyword(), [loop_option()]) ::
+          {:ok, Turn.t()} | {:error, Error.t()}
   def run(%Client{} = client, params, opts \\ []) do
     client
     |> stream(params, opts)
@@ -235,10 +265,14 @@ defmodule Claudex.ToolRunner do
   `run/3` is this reduce keeping only the last turn, so anything a run has to
   add up belongs here instead.
 
+  A cancel sent with `:cancel_ref` stops the request in flight. The turn it
+  interrupts arrives with `stop: :truncated` and its tool calls unrun, and the
+  stream ends there.
+
   Enumerating raises `Claudex.Error` if a request fails.
   """
   @spec stream(Client.t(), map() | keyword()) :: Enumerable.t()
-  @spec stream(Client.t(), map() | keyword(), keyword()) :: Enumerable.t()
+  @spec stream(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
   def stream(%Client{} = client, params, opts \\ []) do
     params = Map.new(params)
 
@@ -248,7 +282,8 @@ defmodule Claudex.ToolRunner do
       registry: Tool.registry(params[:tools]),
       max_turns: Keyword.get(opts, :max_turns, @default_max_turns),
       before_call: Keyword.get(opts, :before_call),
-      on_event: Keyword.get(opts, :on_event, &ignore/1)
+      on_event: Keyword.get(opts, :on_event, &ignore/1),
+      cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
     }
 
     Stream.unfold({Message.append([], params[:messages] || []), 1}, fn
@@ -256,6 +291,78 @@ defmodule Claudex.ToolRunner do
       {messages, index} -> next_turn(config, messages, index)
     end)
     |> Stream.map(&emit_turn/1)
+  end
+
+  @doc """
+  Runs the conversation in its own process and returns straight away,
+  delivering each turn to a mailbox.
+
+      {:ok, handle} =
+        Claudex.ToolRunner.stream_to(client, %{
+          model: "claude-opus-5",
+          max_tokens: 1024,
+          tools: MyApp.Tools,
+          messages: [Claudex.Message.user("What is 12 plus 30?")]
+        })
+
+      def handle_info({:claudex, ref, {:event, event}}, %{assigns: %{ref: ref}} = socket)
+      def handle_info({:claudex, ref, {:turn, turn}}, %{assigns: %{ref: ref}} = socket)
+
+  `params` takes exactly what `Claudex.Messages.create/2` takes, so `:system`,
+  `:thinking` and the rest go in that same map; `opts` are the runner's own,
+  listed in `Claudex.ToolRunner`.
+
+  Returns `{:ok, handle}`, a `Claudex.Stream.Handle` carrying the `ref` every
+  message is tagged with, and then sends:
+
+    * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`, on
+      every turn
+    * `{:claudex, ref, {:turn, turn}}` as each `Claudex.ToolRunner.Turn`
+      completes, tools already run
+    * `{:claudex, ref, :done}` when the conversation ends
+    * `{:claudex, ref, {:error, %Claudex.Error{}}}` if a request fails
+    * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
+
+  Every failure arrives as an `{:error, error}` message, a missing `:model` or
+  `:max_tokens` included, so there is nothing to match on the return.
+
+  `:to` and `:ref` work as they do on `Claudex.Messages.stream_to/3`: where
+  the messages go, and what tags them. Every other option is the runner's own,
+  listed in `Claudex.ToolRunner`, and an `:on_event` of your own still runs
+  with the event forwarded either way.
+
+  The forwarding process is linked to the caller, so it dies with it, and it
+  is also where `:before_call` runs. A gate that asks another process for a
+  decision blocks the forwarder rather than the caller, which is the point;
+  send that process a message and wait for its answer rather than calling into
+  one that is waiting on you.
+
+  `Claudex.Stream.cancel/1` stops the request in flight, so a reply being
+  written stops part-way and the tool calls it had got as far as asking for
+  are not run. A tool already running is not interrupted, and the turn it
+  belongs to is never sent.
+  """
+  @spec stream_to(Client.t(), map() | keyword()) :: {:ok, Handle.t()}
+  @spec stream_to(Client.t(), map() | keyword(), [stream_to_option()]) :: {:ok, Handle.t()}
+  def stream_to(%Client{} = client, params, opts \\ []) do
+    {forwarder_opts, runner_opts} = Keyword.split(opts, [:to, :ref])
+
+    Forwarder.start(forwarder_opts, fn to, ref ->
+      client
+      |> stream(params, forwarding(runner_opts, to, ref))
+      |> Forwarder.forward_each(to, ref, :turn)
+    end)
+  end
+
+  defp forwarding(opts, to, ref) do
+    on_event = Keyword.get(opts, :on_event, &ignore/1)
+
+    opts
+    |> Keyword.put(:cancel_ref, ref)
+    |> Keyword.put(:on_event, fn event ->
+      on_event.(event)
+      send(to, {:claudex, ref, {:event, event}})
+    end)
   end
 
   defp emit_turn(%Turn{} = turn) do
@@ -275,18 +382,29 @@ defmodule Claudex.ToolRunner do
   defp next_turn(config, messages, index) do
     message = request!(config, messages)
     messages = Message.append(messages, message)
-    tool_uses = Message.tool_uses(message)
 
-    turn = %Turn{message: message, index: index, tool_uses: tool_uses, messages: messages}
+    resolve_turn(config, %Turn{
+      message: message,
+      index: index,
+      tool_uses: Message.tool_uses(message),
+      messages: messages
+    })
+  end
 
-    case Message.stop(message) do
+  # canceled stream may carry stop_reason `nil`
+  defp resolve_turn(_config, %Turn{message: %Message{stop_reason: nil}} = turn) do
+    {%{turn | stop: :truncated}, :done}
+  end
+
+  defp resolve_turn(config, %Turn{messages: messages, index: index} = turn) do
+    case Message.stop(turn.message) do
       stop when stop in [:refusal, :truncated] ->
         {%{turn | stop: stop}, :done}
 
-      :paused when tool_uses == [] ->
+      :paused when turn.tool_uses == [] ->
         resume(config, turn, messages, index)
 
-      _other when tool_uses != [] ->
+      _other when turn.tool_uses != [] ->
         continue(config, turn, messages, index)
 
       _other ->
@@ -316,7 +434,9 @@ defmodule Claudex.ToolRunner do
 
   defp request!(config, messages) do
     config.client
-    |> Messages.stream!(Map.put(config.params, :messages, messages))
+    |> Messages.stream!(Map.put(config.params, :messages, messages),
+      cancel_ref: config.cancel_ref
+    )
     |> Enum.reduce(Accumulator.new(), fn event, accumulator ->
       config.on_event.(event)
       Accumulator.add(accumulator, event)

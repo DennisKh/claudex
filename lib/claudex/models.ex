@@ -10,6 +10,12 @@ defmodule Claudex.Models do
 
   alias Claudex.{API, Client, Error, Model, Page}
 
+  @typedoc """
+  A paging option for `list/2` and `stream!/2`, each described under
+  "Options" in `list/2`.
+  """
+  @type option :: {:limit, pos_integer()} | {:after_id, String.t()} | {:before_id, String.t()}
+
   @doc """
   Lists the models available to your key, newest first.
 
@@ -23,7 +29,7 @@ defmodule Claudex.Models do
   to get the next one.
   """
   @spec list(Client.t()) :: {:ok, Page.t(Model.t())} | {:error, Error.t()}
-  @spec list(Client.t(), keyword()) :: {:ok, Page.t(Model.t())} | {:error, Error.t()}
+  @spec list(Client.t(), [option()]) :: {:ok, Page.t(Model.t())} | {:error, Error.t()}
   def list(%Client{} = client, opts \\ []) do
     with {:ok, body} <- API.get(client, "/v1/models", opts) do
       {:ok, Page.decode(body, &Model.decode/1)}
@@ -43,11 +49,11 @@ defmodule Claudex.Models do
   where a hardcoded list goes stale.
 
   Pages are fetched as you consume them, so taking the first few costs one
-  request. Takes the same options as `list/2`, minus the cursor it threads
-  itself. Enumerating raises `Claudex.Error` if a request fails.
+  request. Takes the same options as `list/2`; a cursor among them says
+  where to start, and is threaded from there. Enumerating raises `Claudex.Error` if a request fails.
   """
   @spec stream!(Client.t()) :: Enumerable.t()
-  @spec stream!(Client.t(), keyword()) :: Enumerable.t()
+  @spec stream!(Client.t(), [option()]) :: Enumerable.t()
   def stream!(%Client{} = client, opts \\ []) do
     Page.stream!(opts, &list(client, &1))
   end

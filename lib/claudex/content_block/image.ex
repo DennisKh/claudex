@@ -26,25 +26,44 @@ defmodule Claudex.ContentBlock.Image do
           raw: map() | nil
         }
 
+  @typedoc """
+  An option for `base64/3`, `url/2` and `file/2`.
+
+    * `:cache_control` - marks the block as a prompt-caching breakpoint,
+      `%{type: "ephemeral"}` for the five-minute cache or
+      `%{type: "ephemeral", ttl: "1h"}` for the hour one.
+  """
+  @type option :: {:cache_control, map()}
+
   @doc """
   An image from its bytes, already Base64-encoded.
 
       Claudex.ContentBlock.Image.base64(data, "image/png")
+
+  Takes `t:option/0`.
   """
   @spec base64(String.t(), String.t()) :: t()
-  @spec base64(String.t(), String.t(), keyword()) :: t()
+  @spec base64(String.t(), String.t(), [option()]) :: t()
   def base64(data, media_type, opts \\ []) do
     build(%{type: "base64", media_type: media_type, data: data}, opts)
   end
 
-  @doc "An image Claude fetches from `url`."
+  @doc """
+  An image Claude fetches from `url`.
+
+  Takes `t:option/0`.
+  """
   @spec url(String.t()) :: t()
-  @spec url(String.t(), keyword()) :: t()
+  @spec url(String.t(), [option()]) :: t()
   def url(url, opts \\ []), do: build(%{type: "url", url: url}, opts)
 
-  @doc "An image already uploaded through `Claudex.Files`."
+  @doc """
+  An image already uploaded through `Claudex.Files`.
+
+  Takes `t:option/0`.
+  """
   @spec file(String.t()) :: t()
-  @spec file(String.t(), keyword()) :: t()
+  @spec file(String.t(), [option()]) :: t()
   def file(file_id, opts \\ []), do: build(%{type: "file", file_id: file_id}, opts)
 
   @doc "Turns the block back into the map the API expects in a request."
