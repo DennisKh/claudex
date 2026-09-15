@@ -312,6 +312,55 @@ defmodule Claudex.TracingTest do
     assert turns |> Enum.map(&attributes(&1)["claudex.turn.index"]) |> Enum.sort() == [1, 2, 3]
   end
 
+  test "the conversation span carries the run's own question and answer" do
+    Application.put_env(:claudex, :trace_content, true)
+
+    replies = [
+      %{
+        message()
+        | "content" => [
+            %{
+              "type" => "tool_use",
+              "id" => "t1",
+              "name" => "add",
+              "input" => %{"a" => 12, "b" => 30}
+            }
+          ],
+          "stop_reason" => "tool_use"
+      },
+      message()
+    ]
+
+    {:ok, counter} = Agent.start_link(fn -> replies end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      MessageStream.respond(
+        conn,
+        Agent.get_and_update(counter, fn [head | tail] -> {head, tail} end)
+      )
+    end)
+
+    params =
+      @params
+      |> Map.put(:tools, Calculator)
+      |> Map.put(:system, "You are a calculator.")
+
+    assert {:ok, _turn} = ToolRunner.run(client(), params)
+
+    spans = collect_spans([])
+    [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
+    recorded = attributes(root)
+
+    # A trace's input and output are the run's, not the last request's. Without
+    # them a session page has nothing to show for the whole conversation.
+    assert [%{"role" => "system"}, %{"role" => "user"}] = JSON.decode!(recorded["gen_ai.prompt"])
+    assert recorded["gen_ai.completion"] =~ "42"
+    assert recorded["claudex.stop"] == "completed"
+
+    assert [%{"type" => "function", "name" => "add"}] =
+             JSON.decode!(recorded["gen_ai.tool.definitions"])
+  end
+
   test "a turn is a grouping span, not a generation" do
     stream_reply(message())
 

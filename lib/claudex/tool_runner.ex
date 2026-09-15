@@ -305,16 +305,24 @@ defmodule Claudex.ToolRunner do
   # call of a run lands in a single trace rather than one trace per turn.
   # Bracketing the enumeration is what keeps it open across a lazy stream.
   defp traced(turns, config) do
-    {name, attributes} =
-      Attributes.conversation(config.params[:model], config.max_turns, config.session)
+    {name, attributes} = Attributes.conversation(config.params, config.max_turns, config.session)
 
     Stream.transform(
       turns,
-      fn -> Tracing.start_span(name, attributes) end,
-      fn turn, span -> {[turn], span} end,
-      fn span -> Tracing.end_span(span) end
+      fn -> {Tracing.start_span(name, attributes), nil} end,
+      fn turn, {span, _previous} -> {[turn], {span, turn}} end,
+      fn {span, last} -> finish_conversation(span, last) end
     )
   end
+
+  # A trace's own input and output are the run's: the question it started
+  # with and the answer it ended on, which is the last turn's reply.
+  defp finish_conversation(span, %Turn{} = turn) do
+    Tracing.set_attributes(span, Attributes.conversation_result(turn.message, turn.stop))
+    Tracing.end_span(span)
+  end
+
+  defp finish_conversation(span, nil), do: Tracing.end_span(span)
 
   @doc """
   Runs the conversation in its own process and returns straight away,

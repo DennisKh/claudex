@@ -50,8 +50,10 @@ defmodule Claudex.Tracing.Attributes do
   reaches its answer after the loop ends, so the run is the invocation and the
   turns are steps within it.
   """
-  @spec conversation(String.t() | nil, pos_integer(), String.t() | nil) :: {String.t(), map()}
-  def conversation(model, max_turns, session) do
+  @spec conversation(map(), pos_integer(), String.t() | nil) :: {String.t(), map()}
+  def conversation(params, max_turns, session) do
+    model = params[:model]
+
     attributes =
       %{
         "gen_ai.system" => @system,
@@ -60,8 +62,25 @@ defmodule Claudex.Tracing.Attributes do
       }
       |> put_model(model)
       |> put_session(session)
+      |> put_content("gen_ai.input.messages", Messages.input(params[:messages]))
+      |> put_content("gen_ai.system_instructions", Messages.system(params[:system]))
+      |> put_content("gen_ai.tool.definitions", Messages.definitions(params[:tools]))
+      |> put_content("gen_ai.prompt", Messages.chat_input(params[:messages], params[:system]))
 
     {name(@invoke_agent, model), attributes}
+  end
+
+  @doc """
+  Attributes for how a conversation ended, for its own span.
+
+  A trace's input and output are the run's, not the last request's: what was
+  asked at the start and what came back at the end.
+  """
+  @spec conversation_result(Message.t(), atom() | nil) :: map()
+  def conversation_result(%Message{} = message, stop) do
+    %{}
+    |> put_present("claudex.stop", stop && to_string(stop))
+    |> put_reply_content(message)
   end
 
   @doc """

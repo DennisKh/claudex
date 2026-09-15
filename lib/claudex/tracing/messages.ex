@@ -31,13 +31,21 @@ defmodule Claudex.Tracing.Messages do
 
   def system(_system), do: nil
 
-  @doc "The tools the model was given, as tool definitions."
-  @spec definitions([map()] | nil) :: [map()] | nil
-  def definitions(tools) when is_list(tools) and tools != [] do
-    Enum.map(tools, &definition/1)
-  end
+  @doc """
+  The tools the model was given, as tool definitions.
 
-  def definitions(_tools), do: nil
+  Takes what `:tools` takes, a module included: a request body has them
+  expanded already, the params a conversation started with do not.
+  """
+  @spec definitions(module() | [module() | map()] | nil) :: [map()] | nil
+  def definitions(nil), do: nil
+
+  def definitions(tools) do
+    case Claudex.Tool.list(tools) do
+      [] -> nil
+      expanded -> Enum.map(expanded, &definition/1)
+    end
+  end
 
   @doc """
   The conversation in the chat-message shape, for `gen_ai.prompt`.
