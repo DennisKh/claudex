@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/DennisKh/claudex/compare/v0.9.0...v0.9.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **tool_runner:** describe a tool result JSON cannot carry ([#66](https://github.com/DennisKh/claudex/issues/66)) ([57fd487](https://github.com/DennisKh/claudex/commit/57fd487eed20e82b4dafab2e52911affbe728207))
+
 ## [0.9.0](https://github.com/DennisKh/claudex/compare/v0.8.1...v0.9.0) (2026-09-13)
 
 

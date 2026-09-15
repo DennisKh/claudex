@@ -67,9 +67,10 @@ defmodule Claudex.ToolRunner do
   the content and a warning in your logs — a bug in a tool shouldn't read to
   Claude like a policy decision, and shouldn't end the conversation either.
 
-  Whatever a tool returns is the result: a binary is sent as-is, anything else
-  is JSON-encoded. Returning is success; raising is failure. A tool's return
-  value is your own data, so it can't double as an error channel.
+  Whatever a tool returns is the result: text is sent as-is, anything else is
+  JSON-encoded, and anything JSON can't carry is described instead. Returning
+  is success; raising is failure. A tool's return value is your own data, so
+  it can't double as an error channel.
 
   `:tools` takes several modules as a list. Keep tool names unique across
   them — Claude is told about both, but only the one from the last module
@@ -570,20 +571,18 @@ defmodule Claudex.ToolRunner do
     end)
   end
 
-  defp encode(value) when is_binary(value), do: value
+  defp encode(value) when is_binary(value) do
+    if String.valid?(value), do: value, else: inspect(value)
+  end
 
-  # A tool returns whatever it returns — a tuple, a PID, a struct with no
-  # encoder. None of that is JSON, and none of it should take the loop down,
-  # so an unencodable result is described rather than encoded.
   defp encode(value) do
     JSON.encode!(value)
   rescue
-    Protocol.UndefinedError -> inspect(value)
+    _not_encodable -> inspect(value)
+  catch
+    _kind, _reason -> inspect(value)
   end
 
-  # A bug is worth seeing in the logs, and worth labelling so Claude doesn't
-  # read it as a considered decision. Everything else — a refusal above all —
-  # goes back as the error wrote it.
   defp describe(tool_use, %CallError{type: :tool_raised, message: message}) do
     Logger.warning("Claudex tool #{tool_use.name} failed: #{message}")
 

@@ -245,6 +245,34 @@ defmodule Claudex.ToolRunnerTest do
     refute_received {:sent, _second}
   end
 
+  defmodule Reader do
+    use Claudex.Tool
+
+    @doc "Reads a file and returns its bytes."
+    @tool true
+    @spec read(String.t()) :: binary()
+    def read(_path), do: <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A>>
+  end
+
+  test "a tool returning bytes does not break the request that carries them back" do
+    respond_with([
+      message([tool_use("read", %{"path" => "logo.png"})], "tool_use"),
+      message([text("done")], "end_turn")
+    ])
+
+    # The result goes into the next request's JSON body. Bytes a file gave
+    # back are a binary, so they passed straight through and failed the
+    # request rather than the tool, with the tool's own name nowhere in it.
+    assert {:ok, %Turn{stop: :completed}} =
+             ToolRunner.run(client(), %{@params | tools: Reader})
+
+    assert_received {:sent, _first}
+    assert_received {:sent, second}
+
+    assert [_user, _assistant, %{"role" => "user", "content" => [result]}] = second["messages"]
+    assert result["content"] =~ "137"
+  end
+
   test "a tool raising Tool.Error becomes an error result Claude can read" do
     respond_with([
       message([tool_use("halve", %{"n" => -4})], "tool_use"),
