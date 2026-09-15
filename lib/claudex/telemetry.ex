@@ -51,6 +51,13 @@ defmodule Claudex.Telemetry do
 
   One event per reply in a tool conversation, and one when the loop ends
   carrying `:stop`, which is one of the reasons on `Claudex.ToolRunner.Turn`.
+
+  ## Tracing is a separate surface
+
+  These events are for development logs and carry no message content by
+  design. `Claudex.Tracing` emits OpenTelemetry spans instead, with the GenAI
+  semantic conventions and optional content capture, for sending to Langfuse,
+  Honeycomb, Datadog or anything else that reads OTLP.
   """
 
   require Logger

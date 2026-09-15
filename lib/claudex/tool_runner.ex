@@ -87,6 +87,10 @@ defmodule Claudex.ToolRunner do
     * `:cancel_ref` - tags every request the loop makes, so a
       `Claudex.Stream.Handle` carrying the same reference stops the one in
       flight. `stream_to/3` sets it itself.
+    * `:session` - names the conversation for tracing, as `session.id` on its
+      span. A chat's id, or whatever the user called it. Without one the trace
+      stands alone, which is right for a conversation that belongs to nothing
+      larger. See `Claudex.Tracing`.
 
   ## Approving a tool call
 
@@ -159,11 +163,12 @@ defmodule Claudex.ToolRunner do
 
   require Logger
 
-  alias Claudex.{Client, Error, Message, Messages, Tool}
+  alias Claudex.{Client, Error, Message, Messages, Tool, Tracing}
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Stream.{Accumulator, Event, Forwarder, Handle}
   alias Claudex.Tool.CallError
   alias Claudex.ToolRunner.Turn
+  alias Claudex.Tracing.Attributes
 
   @typedoc """
   An option for `run/3`, `stream/3` and `stream_to/3`, each described under
@@ -173,6 +178,7 @@ defmodule Claudex.ToolRunner do
           {:max_turns, pos_integer()}
           | {:before_call, (ToolUse.t() -> :ok | {:deny, String.t()})}
           | {:on_event, (Event.t() -> any())}
+          | {:session, String.t()}
 
   @typedoc """
   An option for `run/3` and `stream/3`: any `t:option/0`, plus the reference
@@ -283,7 +289,8 @@ defmodule Claudex.ToolRunner do
       max_turns: Keyword.get(opts, :max_turns, @default_max_turns),
       before_call: Keyword.get(opts, :before_call),
       on_event: Keyword.get(opts, :on_event, &ignore/1),
-      cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
+      cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0),
+      session: Keyword.get(opts, :session)
     }
 
     Stream.unfold({Message.append([], params[:messages] || []), 1}, fn
@@ -291,6 +298,22 @@ defmodule Claudex.ToolRunner do
       {messages, index} -> next_turn(config, messages, index)
     end)
     |> Stream.map(&emit_turn/1)
+    |> traced(config)
+  end
+
+  # One span around the whole conversation, so every turn, request and tool
+  # call of a run lands in a single trace rather than one trace per turn.
+  # Bracketing the enumeration is what keeps it open across a lazy stream.
+  defp traced(turns, config) do
+    {name, attributes} =
+      Attributes.conversation(config.params[:model], config.max_turns, config.session)
+
+    Stream.transform(
+      turns,
+      fn -> Tracing.start_span(name, attributes) end,
+      fn turn, span -> {[turn], span} end,
+      fn span -> Tracing.end_span(span) end
+    )
   end
 
   @doc """
@@ -400,6 +423,12 @@ defmodule Claudex.ToolRunner do
   end
 
   defp next_turn(config, messages, index) do
+    {name, attributes} = Attributes.turn(index)
+
+    Tracing.span(name, attributes, fn -> run_turn(config, messages, index) end)
+  end
+
+  defp run_turn(config, messages, index) do
     message = request!(config, messages)
     messages = Message.append(messages, message)
 

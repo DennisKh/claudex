@@ -135,6 +135,8 @@ defmodule Claudex.Tool do
   """
 
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
+  alias Claudex.Tracing
+  alias Claudex.Tracing.Attributes
 
   @tool_opts [:args, :args_schema, :strict]
 
@@ -214,10 +216,16 @@ defmodule Claudex.Tool do
 
   @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
   def call(module, name, input) when is_atom(module) and is_map(input) do
-    :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
-      result = module.__call_tool__(name, input)
+    {span_name, attributes} = Attributes.tool(name, input)
 
-      {result, %{tool: name, outcome: outcome(result)}}
+    Tracing.span(span_name, attributes, fn ->
+      :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
+        result = module.__call_tool__(name, input)
+
+        Tracing.set_attributes(Attributes.tool_outcome(outcome(result), result))
+
+        {result, %{tool: name, outcome: outcome(result)}}
+      end)
     end)
   end
 

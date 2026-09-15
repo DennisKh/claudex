@@ -1,14 +1,16 @@
 defmodule Claudex.API do
   @moduledoc false
 
-  alias Claudex.{Client, Error}
+  alias Claudex.{Client, Error, Tracing}
+  alias Claudex.Tracing.Attributes
 
   @doc """
   Runs one request against the client and reduces the result to a tagged tuple:
   the decoded body on a 2xx, a `Claudex.Error` on anything else, including a
   transport failure.
 
-  Wraps the call in the `[:claudex, :request, ...]` telemetry events.
+  Wraps the call in the `[:claudex, :request, ...]` telemetry events and an
+  OpenTelemetry span, which is a no-op unless the app traces.
   """
   @spec request(Client.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def request(%Client{} = client, options) do
@@ -16,6 +18,12 @@ defmodule Claudex.API do
       %{method: Keyword.get(options, :method, :get), path: Keyword.get(options, :url)}
       |> put_model(options)
 
+    {name, attributes} = Attributes.request(metadata, options)
+
+    Tracing.span(name, attributes, fn -> traced(client, options, metadata) end)
+  end
+
+  defp traced(client, options, metadata) do
     started = System.monotonic_time()
 
     :telemetry.execute(
@@ -32,6 +40,8 @@ defmodule Claudex.API do
         %{duration: System.monotonic_time() - started},
         Map.merge(metadata, response_metadata(raw))
       )
+
+      record_response(raw)
 
       handle(raw)
     catch
@@ -81,6 +91,16 @@ defmodule Claudex.API do
       [request_id | _rest] -> request_id
       [] -> nil
     end
+  end
+
+  defp record_response({:ok, %Req.Response{status: status, body: body}}) do
+    Tracing.set_attributes(Attributes.response(body, status))
+
+    if status not in 200..299, do: Tracing.set_error(Attributes.error_message(body, status))
+  end
+
+  defp record_response({:error, exception}) do
+    Tracing.set_error(inspect(exception.__struct__))
   end
 
   defp error_module(:error, reason, stacktrace) do

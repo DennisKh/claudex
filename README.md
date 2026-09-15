@@ -549,6 +549,46 @@ LiveView fill the same `[debug]` stream. To see only Claudex's:
 
 The events cover the things you can't otherwise see: the model and `request_id` behind each call (Claudex keeps the request id only on errors), tool outcomes, why a tool conversation stopped, and retries Claudex *declined* because part of a response had already been delivered. Metadata carries model names, status, token counts, durations and tool names — never prompts, completions, tool arguments, or anything from your client.
 
+## Tracing
+
+Claudex emits OpenTelemetry spans as well: one per request, one per turn of a tool conversation, and one per tool call, nested so a trace reads as the conversation it was. Attributes follow the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so a backend shows the model, token counts and stop reason with no Claudex-specific integration.
+
+Nothing is needed to turn it off. Claudex depends on `opentelemetry_api`, which starts no processes and resolves to a no-op tracer, so an app that never traces pays nothing. To turn it on, add the SDK and an exporter yourself:
+
+```elixir
+{:opentelemetry, "~> 1.7"},
+{:opentelemetry_exporter, "~> 1.10"}
+```
+
+`mix claudex.gen.tracing` writes the config below into your `config/runtime.exs`; `mix claudex.gen.tracing langfuse` writes the Langfuse-shaped one.
+
+Sending to Langfuse is three lines in your own `runtime.exs`, because Langfuse reads OTLP and Claudex doesn't know it exists:
+
+```elixir
+auth =
+  Base.encode64(
+    System.fetch_env!("LANGFUSE_PUBLIC_KEY") <> ":" <> System.fetch_env!("LANGFUSE_SECRET_KEY")
+  )
+
+config :opentelemetry_exporter,
+  otlp_protocol: :http_protobuf,
+  otlp_endpoint: System.get_env("LANGFUSE_HOST", "https://cloud.langfuse.com") <> "/api/public/otel",
+  otlp_headers: [
+    {"authorization", "Basic " <> auth},
+    {"x-langfuse-ingestion-version", "4"}
+  ]
+```
+
+Point the endpoint and header elsewhere for Honeycomb, Datadog, Phoenix/Arize or Braintrust. Prompts, completions and tool arguments stay off a span unless you ask for them with `config :claudex, trace_content: true` — that setting is what fills the input and output panels of a tracing UI.
+
+Name a conversation to group its trace with others — a chat id, or whatever the user called it:
+
+```elixir
+Claudex.ToolRunner.run(client, params, session: chat.id)
+```
+
+See `Claudex.Tracing` for the span tree and what each one carries.
+
 ## Models and token counting
 
 ```elixir

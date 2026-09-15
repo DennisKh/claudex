@@ -60,7 +60,8 @@ defmodule Claudex.MixProject do
           Claudex.Client,
           Claudex.Error,
           Claudex.Page,
-          Claudex.Telemetry
+          Claudex.Telemetry,
+          Claudex.Tracing
         ],
         Messages: [
           Claudex.Messages,
@@ -118,6 +119,9 @@ defmodule Claudex.MixProject do
 
   defp deps do
     [
+      {:opentelemetry_api, "~> 1.5"},
+      {:opentelemetry, "~> 1.7", only: [:dev, :test]},
+      {:opentelemetry_exporter, "~> 1.10", only: :dev},
       {:req, "~> 0.7.4"},
       {:telemetry, "~> 1.4"},
       {:jason, "~> 1.4"},

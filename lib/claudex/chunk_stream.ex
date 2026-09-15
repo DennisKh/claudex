@@ -1,7 +1,8 @@
 defmodule Claudex.ChunkStream do
   @moduledoc false
 
-  alias Claudex.{API, Client, Error}
+  alias Claudex.{API, Client, Error, Tracing}
+  alias Claudex.Tracing.Attributes
 
   @doc """
   Streams a response body as raw binary chunks.
@@ -58,6 +59,8 @@ defmodule Claudex.ChunkStream do
       done?: false,
       metadata: metadata,
       cancel_ref: cancel_ref,
+      span: start_span(metadata, request_options),
+      first_chunk: nil,
       chunks: 0,
       bytes: 0,
       response: %{status: nil, request_id: nil},
@@ -81,7 +84,14 @@ defmodule Claudex.ChunkStream do
 
       {^producer_ref, :chunk, data} ->
         send(state.producer, {producer_ref, :demand})
-        {[data], %{state | chunks: state.chunks + 1, bytes: state.bytes + byte_size(data)}}
+
+        {[data],
+         %{
+           state
+           | chunks: state.chunks + 1,
+             bytes: state.bytes + byte_size(data),
+             first_chunk: state.first_chunk || System.monotonic_time()
+         }}
 
       {^producer_ref, {:done, response}} ->
         {:halt, %{state | done?: true, response: response}}
@@ -112,7 +122,26 @@ defmodule Claudex.ChunkStream do
       Map.merge(state.metadata, state.response)
     )
 
+    Tracing.set_attributes(Attributes.stream(measurements(state)))
+    Tracing.end_span(state.span)
+
     :ok
+  end
+
+  defp start_span(metadata, request_options) do
+    {name, attributes} = Attributes.request(metadata, request_options)
+
+    Tracing.start_span(name, attributes)
+  end
+
+  defp measurements(state) do
+    %{
+      chunks: state.chunks,
+      bytes: state.bytes,
+      started: state.started,
+      first_chunk: state.first_chunk,
+      status: state.response.status
+    }
   end
 
   defp run(client, request_options, consumer, producer_ref) do
