@@ -523,17 +523,10 @@ defmodule Claudex.ToolRunner do
     end)
   end
 
-  # A result goes back to the API inside the next request's JSON body, so text
-  # it cannot carry has to be described here. Bytes read from a file are the
-  # way this happens: they are a binary, so they used to pass straight through
-  # and fail the next request instead of the tool that produced them.
   defp encode(value) when is_binary(value) do
     if String.valid?(value), do: value, else: inspect(value)
   end
 
-  # A tool returns whatever it returns: a tuple, a PID, a struct with no
-  # encoder. None of that is JSON, and none of it should take the loop down,
-  # so an unencodable result is described rather than encoded.
   defp encode(value) do
     JSON.encode!(value)
   rescue
@@ -542,9 +535,6 @@ defmodule Claudex.ToolRunner do
     _kind, _reason -> inspect(value)
   end
 
-  # A bug is worth seeing in the logs, and worth labelling so Claude doesn't
-  # read it as a considered decision. Everything else — a refusal above all —
-  # goes back as the error wrote it.
   defp describe(tool_use, %CallError{type: :tool_raised, message: message}) do
     Logger.warning("Claudex tool #{tool_use.name} failed: #{message}")
 
