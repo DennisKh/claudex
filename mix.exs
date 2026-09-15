@@ -136,13 +136,6 @@ defmodule Claudex.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_env), do: ["lib"]
 
-  # "test.live" runs the smoke tests in test/claudex/live/ against the real
-  # Claude API. They're tagged :live and excluded by default (see
-  # test/test_helper.exs) since they cost money and need network access.
-  # A consumer gets `opentelemetry_api` and nothing else, so tracing has to be
-  # inert with no SDK present. No test can check that from :test, where the
-  # SDK is a dependency, so this runs in an environment that has neither it
-  # nor any other dev or test dependency.
   defp check_without_otel(_args) do
     {output, status} =
       System.cmd("mix", ["run", "priv/check_without_otel.exs"],
@@ -155,6 +148,9 @@ defmodule Claudex.MixProject do
     if status != 0, do: Mix.raise("tracing is not inert without the OpenTelemetry SDK")
   end
 
+  # "test.live" runs the smoke tests in test/claudex/live/ against the real
+  # Claude API. They're tagged :live and excluded by default (see
+  # test/test_helper.exs) since they cost money and need network access.
   defp aliases do
     [
       "test.live": ["test --include live"],
