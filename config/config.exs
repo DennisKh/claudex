@@ -1,7 +1,5 @@
 import Config
 
-if config_env() == :test do
-  config :opentelemetry,
-    span_processor: :simple,
-    traces_exporter: :none
+if config_env() in [:dev, :test] do
+  import_config "#{config_env()}.exs"
 end
