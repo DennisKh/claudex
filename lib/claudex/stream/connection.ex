@@ -20,27 +20,36 @@ defmodule Claudex.Stream.Connection do
     |> Stream.transform(&recorder/0, &record/2, fn _recorder -> :ok end)
   end
 
-  # A streamed reply has no response body, so the model, the token counts and
-  # the answer exist only in the events going past. Assembling them a second
-  # time costs a reduce, so it only happens when a span is listening.
-  defp recorder do
-    if Tracing.recording?(), do: Accumulator.new(), else: :untraced
+  # Decided on the first event rather than up front, because the span this
+  # stream belongs to is opened by the transport underneath and does not exist
+  # when the stream is built.
+  defp recorder, do: :undecided
+
+  defp record(event, :undecided) do
+    if Tracing.recording?() do
+      record(event, %{accumulator: Accumulator.new(), span: Tracing.current_span()})
+    else
+      {[event], :untraced}
+    end
   end
 
   defp record(event, :untraced), do: {[event], :untraced}
 
-  defp record(event, accumulator) do
-    accumulator = Accumulator.add(accumulator, event)
+  defp record(event, state) do
+    state = %{state | accumulator: Accumulator.add(state.accumulator, event)}
 
-    if match?(%Event.MessageStop{}, event), do: record_reply(accumulator)
+    if match?(%Event.MessageStop{}, event), do: record_reply(state)
 
-    {[event], accumulator}
+    {[event], state}
   end
 
-  defp record_reply(accumulator) do
-    case Accumulator.message(accumulator) do
+  # The span is the one held from the first event, not whatever is current at
+  # the last. A caller pulling events one at a time can run its own traced
+  # work in between, and the reply belongs to the request that produced it.
+  defp record_reply(state) do
+    case Accumulator.message(state.accumulator) do
       nil -> :ok
-      message -> Tracing.set_attributes(Attributes.reply(message))
+      message -> Tracing.set_attributes(state.span, Attributes.reply(message))
     end
   end
 

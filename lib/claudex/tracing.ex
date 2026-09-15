@@ -143,11 +143,30 @@ defmodule Claudex.Tracing do
   This is what fills the input and output panels of a tracing UI. Seeing them
   empty means content capture is off, not that something is missing.
 
-  ## When tracing breaks
+  ## Alongside your own tracing
 
-  A span never fails the work it measures. Every call into the tracer is
-  guarded, so an exporter that raises or a tracer that is misconfigured costs
-  the trace and nothing else.
+  Claudex's spans are its own. They carry the instrumentation scope
+  `claudex`, so a backend can tell them from yours and a filter can drop
+  them, and nothing here configures a tracer, a sampler, an exporter or a
+  processor: those stay entirely yours. Claudex only ever starts spans,
+  restoring whatever was current when each one closes.
+
+  Each span's attributes go on that span, held rather than looked up when it
+  ends. A caller pulling a stream one event at a time can run its own traced
+  work in between, and an app that starts a span in one callback and ends it
+  in another is not made to pay for it.
+
+  ## Tracing is optional
+
+  Adding nothing is a supported configuration. Without the SDK the tracer is
+  a no-op, `recording?/0` is false, and every span call returns without
+  reaching anything: a tool conversation runs exactly as it would if this
+  module did not exist. There is no dependency to add, no config to write and
+  no error to handle.
+
+  A span never fails the work it measures either. Every call into the tracer
+  is guarded, so an exporter that raises or a tracer that is misconfigured
+  costs the trace and nothing else.
   """
 
   @tracer_scope __MODULE__
@@ -188,6 +207,16 @@ defmodule Claudex.Tracing do
     _any -> false
   catch
     _kind, _reason -> false
+  end
+
+  @doc false
+  @spec current_span() :: term()
+  def current_span do
+    {:otel_tracer.current_span_ctx(), :undefined}
+  rescue
+    _any -> :untraced
+  catch
+    _kind, _reason -> :untraced
   end
 
   @doc false

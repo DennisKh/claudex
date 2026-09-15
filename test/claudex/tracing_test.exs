@@ -10,6 +10,7 @@ defmodule Claudex.TracingTest do
   require Record
 
   alias Claudex.{Client, Messages, ToolRunner, Tracing}
+  alias Claudex.Stream.Event
   alias Claudex.TestSupport.MessageStream
 
   @fields Record.extract(:span, from_lib: "opentelemetry/include/otel_span.hrl")
@@ -544,6 +545,87 @@ defmodule Claudex.TracingTest do
     # at the front of the conversation, so it goes in both places.
     assert [%{"role" => "system", "content" => "You are a calculator."} | _rest] =
              JSON.decode!(recorded["gen_ai.prompt"])
+  end
+
+  test "nothing outside Claudex.Tracing calls OpenTelemetry directly" do
+    # Tracing is optional: an app that adds no SDK gets a no-op tracer, and
+    # every call into it here is wrapped so a broken one cannot fail a
+    # request. That only holds while the calls stay in one module.
+    offenders =
+      "lib/**/*.ex"
+      |> Path.wildcard()
+      |> Enum.reject(&(&1 == "lib/claudex/tracing.ex"))
+      |> Enum.filter(&(File.read!(&1) =~ ~r/:otel_\w+\.|:opentelemetry\./))
+
+    assert offenders == [],
+           "these reach OpenTelemetry without going through Claudex.Tracing: #{inspect(offenders)}"
+  end
+
+  test "every tracing entry point is inert when nothing is listening" do
+    # What an app with no SDK gets back from each one. The guards return these
+    # rather than raising, so a request never fails for want of a tracer.
+    assert Tracing.span("work", %{}, fn -> :the_result end) == :the_result
+    assert Tracing.set_attributes(:untraced, %{"a" => 1}) == :ok
+    assert Tracing.end_span(:untraced) == :ok
+  end
+
+  test "a caller's own spans stay free of Claudex's attributes" do
+    require OpenTelemetry.Tracer, as: Tracer
+
+    stream_reply(message())
+
+    # What a LiveView rendering deltas does: pull an event, do its own traced
+    # work, pull the next. An app's span must not collect our attributes, and
+    # a reply must land on the request that produced it whatever is current
+    # by the time it finishes.
+    client()
+    |> Messages.stream!(@params)
+    |> Enum.each(fn _event ->
+      Tracer.with_span "my_app.render" do
+        :ok
+      end
+    end)
+
+    spans = collect_spans([])
+
+    for app_span <- named(spans, "my_app.render") do
+      assert attributes(app_span) == %{}
+    end
+
+    [request] = named(spans, "chat claude-haiku-4-5")
+    assert attributes(request)["gen_ai.usage.input_tokens"] == 15
+    assert attributes(request)["gen_ai.response.model"] == "claude-haiku-4-5-20251001"
+  end
+
+  test "a reply lands on its own request even if a caller left a span open" do
+    stream_reply(message())
+
+    # Not every app scopes its spans. One that starts a span in one callback
+    # and ends it in another leaves something else current when our reply
+    # finishes, and the tokens still belong to the request that earned them.
+    leaked =
+      client()
+      |> Messages.stream!(@params)
+      |> Enum.reduce(nil, fn
+        %Event.ContentBlockStop{}, nil ->
+          tracer = :opentelemetry.get_application_tracer(__MODULE__)
+          ctx = :otel_tracer.start_span(tracer, "my_app.unclosed", %{})
+          :otel_tracer.set_current_span(ctx)
+          ctx
+
+        _event, held ->
+          held
+      end)
+
+    :otel_span.end_span(leaked)
+
+    spans = collect_spans([])
+
+    [request] = named(spans, "chat claude-haiku-4-5")
+    assert attributes(request)["gen_ai.usage.input_tokens"] == 15
+
+    [app_span] = named(spans, "my_app.unclosed")
+    assert attributes(app_span) == %{}
   end
 
   test "the span hands back what the work returned" do

@@ -122,7 +122,7 @@ defmodule Claudex.ChunkStream do
       Map.merge(state.metadata, state.response)
     )
 
-    Tracing.set_attributes(Attributes.stream(measurements(state)))
+    Tracing.set_attributes(state.span, Attributes.stream(measurements(state)))
     Tracing.end_span(state.span)
 
     :ok
