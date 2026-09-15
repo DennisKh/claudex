@@ -30,6 +30,12 @@ examples/*/_build/
 examples/*/deps/
 examples/*/mix.lock
 
+# Secrets for the local Langfuse stack. The example is committed; what you
+# copy it to is not.
+.env.langfuse
+.env.*.local
+!.env.langfuse.example
+
 # Local-only working files: never part of the package.
 /scripts/
 .tool-versions

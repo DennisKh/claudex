@@ -581,6 +581,25 @@ config :opentelemetry_exporter,
 
 Point the endpoint and header elsewhere for Honeycomb, Datadog, Phoenix/Arize or Braintrust. Prompts, completions and tool arguments stay off a span unless you ask for them with `config :claudex, trace_content: true` — that setting is what fills the input and output panels of a tracing UI.
 
+### Running Langfuse locally
+
+`docker-compose.langfuse.yml` brings up the whole stack — web, worker, Postgres, ClickHouse, Redis and MinIO — so you can see your traces without sending them anywhere:
+
+```bash
+cp .env.langfuse.example .env.langfuse
+docker compose -f docker-compose.langfuse.yml --env-file .env.langfuse up -d
+```
+
+Open http://localhost:3000, create an organisation and a project, and take the public and secret keys it gives you. Then point Claudex at it:
+
+```bash
+export LANGFUSE_HOST=http://localhost:3000
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+```
+
+Only port 3000 and the MinIO console on 9090 are exposed; everything else stays on the compose network. `docker compose -f docker-compose.langfuse.yml down -v` removes the volumes and starts over. `.env.langfuse` is gitignored, because that is where real keys end up.
+
 Name a conversation to group its trace with others — a chat id, or whatever the user called it:
 
 ```elixir

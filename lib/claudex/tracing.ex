@@ -121,6 +121,10 @@ defmodule Claudex.Tracing do
   Point the endpoint and header somewhere else and the same spans reach
   Honeycomb, Datadog, Phoenix/Arize or Braintrust.
 
+  `docker-compose.langfuse.yml` in this repository runs the whole stack
+  locally if you want to see the traces without sending them anywhere. The
+  README has the two commands.
+
   ## Capturing prompts and completions
 
   Message content is off by default, because a span reaches wherever your
@@ -128,8 +132,11 @@ defmodule Claudex.Tracing do
 
       config :claudex, trace_content: true
 
-  With it on, a request span carries the messages and the reply, and a tool
-  span carries the arguments it was called with and what it returned.
+  With it on, the conversation span carries the question the run started with
+  and the answer it ended on, a request span carries the messages and the
+  reply, and a tool span carries the arguments it was called with and what it
+  returned. A trace's own input and output are the run's, which is what a
+  backend shows on a session or in a list of traces.
   Everything else — model, token counts, latency, stop reason, tool names —
   is recorded either way, which is why a trace is useful without it.
 
@@ -181,6 +188,20 @@ defmodule Claudex.Tracing do
     _any -> false
   catch
     _kind, _reason -> false
+  end
+
+  @doc false
+  @spec set_attributes(term(), map()) :: :ok
+  def set_attributes(:untraced, _attributes), do: :ok
+
+  def set_attributes({span_ctx, _parent}, attributes) do
+    :otel_span.set_attributes(span_ctx, attributes)
+
+    :ok
+  rescue
+    _any -> :ok
+  catch
+    _kind, _reason -> :ok
   end
 
   @doc false
