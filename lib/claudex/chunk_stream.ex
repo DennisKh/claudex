@@ -123,6 +123,7 @@ defmodule Claudex.ChunkStream do
     )
 
     Tracing.set_attributes(state.span, Attributes.stream(measurements(state)))
+    record_failure(state)
     Tracing.end_span(state.span)
 
     :ok
@@ -133,6 +134,19 @@ defmodule Claudex.ChunkStream do
 
     Tracing.start_span(name, attributes)
   end
+
+  # A streamed request that failed never wrote a status, so its span would end
+  # green. The runner always streams, which would make every failed tool
+  # conversation look like a successful one.
+  defp record_failure(%{response: %{status: status}} = state) when is_integer(status) do
+    if status not in 200..299, do: Tracing.set_error(state.span, "HTTP #{status}")
+  end
+
+  defp record_failure(%{done?: false} = state) do
+    Tracing.set_error(state.span, "the stream ended early")
+  end
+
+  defp record_failure(_state), do: :ok
 
   defp measurements(state) do
     %{

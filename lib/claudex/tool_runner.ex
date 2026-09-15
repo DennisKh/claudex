@@ -315,14 +315,25 @@ defmodule Claudex.ToolRunner do
     )
   end
 
-  # A trace's own input and output are the run's: the question it started
-  # with and the answer it ended on, which is the last turn's reply.
+  # A trace's own input and output are the run's: the question it started with
+  # and the answer it ended on. A turn with no stop is not that answer: the
+  # conversation was still going when it ended, which is what a raise looks
+  # like from here, and recording it would show a finished run whose reply is
+  # a turn from the middle.
+  defp finish_conversation(span, %Turn{stop: nil}) do
+    Tracing.set_error(span, "the conversation ended before a turn finished it")
+    Tracing.end_span(span)
+  end
+
   defp finish_conversation(span, %Turn{} = turn) do
     Tracing.set_attributes(span, Attributes.conversation_result(turn.message, turn.stop))
     Tracing.end_span(span)
   end
 
-  defp finish_conversation(span, nil), do: Tracing.end_span(span)
+  defp finish_conversation(span, nil) do
+    Tracing.set_error(span, "the conversation ended before a turn finished it")
+    Tracing.end_span(span)
+  end
 
   @doc """
   Runs the conversation in its own process and returns straight away,

@@ -7,17 +7,24 @@ defmodule Claudex.Tracing.Messages do
   # response. Claude's content blocks map onto those almost one for one,
   # which is why a backend can render a Claudex trace as a conversation.
 
-  @doc "The conversation so far, as input messages."
+  @doc "Shapes the conversation so far into the conventions' input messages."
   @spec input([map()]) :: [map()]
   def input(messages) when is_list(messages), do: Enum.map(messages, &message/1)
   def input(_messages), do: []
 
-  @doc "One reply's content blocks, as a single assistant output message."
-  @spec output([map()] | String.t()) :: [map()]
+  @doc """
+  Shapes one reply's content blocks into a single assistant output message.
+
+  Nil for a body that is not a reply. Every endpoint goes through the same
+  span, so a models list would otherwise be recorded as a generation whose
+  assistant said nothing.
+  """
+  @spec output([map()] | String.t() | nil) :: [map()] | nil
+  def output(nil), do: nil
   def output(content), do: [%{role: "assistant", parts: parts(content)}]
 
   @doc """
-  The system prompt, which the conventions keep out of the chat history.
+  Shapes the system prompt, which the conventions keep out of the chat history.
 
   Takes a string or the list of text blocks the API also accepts.
   """
@@ -32,7 +39,7 @@ defmodule Claudex.Tracing.Messages do
   def system(_system), do: nil
 
   @doc """
-  The tools the model was given, as tool definitions.
+  Shapes the tools the model was given into tool definitions.
 
   Takes what `:tools` takes, a module included: a request body has them
   expanded already, the params a conversation started with do not.
@@ -48,7 +55,7 @@ defmodule Claudex.Tracing.Messages do
   end
 
   @doc """
-  The conversation in the chat-message shape, for `gen_ai.prompt`.
+  Shapes the conversation as chat messages, for `gen_ai.prompt`.
 
   That attribute predates the conventions' structured model and has no defined
   shape, so this is the one its readers parse: a flat list of messages with
@@ -60,14 +67,16 @@ defmodule Claudex.Tracing.Messages do
   end
 
   @doc """
-  One reply in the chat-message shape, for `gen_ai.completion`.
+  Shapes one reply as a chat message, for `gen_ai.completion`.
 
   Tool calls go in `tool_calls` with a name, arguments and an id. Claude sends
   them as `tool_use` content blocks, which a reader of this attribute has no
   reason to recognise, so a reply asking for a tool would read as a reply
   asking for nothing.
   """
-  @spec chat_output([map()] | String.t()) :: map()
+  @spec chat_output([map()] | String.t() | nil) :: map() | nil
+  def chat_output(nil), do: nil
+
   def chat_output(content) when is_binary(content),
     do: %{role: "assistant", content: content, tool_calls: []}
 
@@ -133,8 +142,8 @@ defmodule Claudex.Tracing.Messages do
   defp part(%{"type" => "tool_result", "tool_use_id" => id} = block),
     do: %{type: "tool_call_response", id: id, response: block["content"]}
 
-  # A block type the conventions have no part for — thinking, a server tool,
-  # an image — goes through under its own name rather than being dropped.
+  # A block type the conventions have no part for (thinking, a server tool, an
+  # image) goes through under its own name rather than being dropped.
   defp part(%{type: type} = block), do: %{type: type, content: block}
   defp part(%{"type" => type} = block), do: %{type: type, content: block}
   defp part(block), do: %{type: "text", content: block}

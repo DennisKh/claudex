@@ -23,6 +23,13 @@ defmodule Claudex.Stream.Connection do
   # Decided on the first event rather than up front, because the span this
   # stream belongs to is opened by the transport underneath and does not exist
   # when the stream is built.
+  #
+  # This folds a second accumulator over events the consumer is already
+  # folding, so a traced reply is assembled twice and held twice while the
+  # stream runs. The alternative is a cut-down accumulator here, which would
+  # be a second copy of `Claudex.Stream.Accumulator`'s knowledge of every
+  # event shape, and that one drifts. An app that is not tracing does neither:
+  # nothing is accumulated unless a span is recording.
   defp recorder, do: :undecided
 
   defp record(event, :undecided) do

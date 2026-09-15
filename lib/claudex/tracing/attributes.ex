@@ -13,20 +13,20 @@ defmodule Claudex.Tracing.Attributes do
   @execute_tool "execute_tool"
   @invoke_agent "invoke_agent"
 
-  @doc "Span name and attributes for one request, from its telemetry metadata."
+  @doc "Names a request's span and builds its attributes, from the telemetry metadata."
   @spec request(map(), keyword()) :: {String.t(), map()}
   def request(metadata, options) do
     {name(metadata), base(metadata) |> put_request(metadata, Keyword.get(options, :json))}
   end
 
-  @doc "Attributes for a response body and status."
+  @doc "Builds the attributes a response body and status add to a request's span."
   @spec response(term(), pos_integer()) :: map()
   def response(body, status) do
     %{"http.response.status_code" => status} |> Map.merge(body_attributes(body))
   end
 
   @doc """
-  Attributes for a finished stream.
+  Builds the attributes a finished stream adds to its span.
 
   Takes `:chunks`, `:bytes`, `:started`, `:first_chunk` and `:status`. The
   first chunk is when a caller can start showing something, which no layer
@@ -43,7 +43,7 @@ defmodule Claudex.Tracing.Attributes do
   end
 
   @doc """
-  Span name and attributes for a whole tool conversation.
+  Names a conversation's span and builds its attributes.
 
   The conventions call this `invoke_agent`: one cycle from the request through
   the answer, with tool executions nested inside it. A tool conversation only
@@ -62,16 +62,18 @@ defmodule Claudex.Tracing.Attributes do
       }
       |> put_model(model)
       |> put_session(session)
-      |> put_content("gen_ai.input.messages", Messages.input(params[:messages]))
-      |> put_content("gen_ai.system_instructions", Messages.system(params[:system]))
-      |> put_content("gen_ai.tool.definitions", Messages.definitions(params[:tools]))
-      |> put_content("gen_ai.prompt", Messages.chat_input(params[:messages], params[:system]))
+      |> put_content("gen_ai.input.messages", fn -> Messages.input(params[:messages]) end)
+      |> put_content("gen_ai.system_instructions", fn -> Messages.system(params[:system]) end)
+      |> put_content("gen_ai.tool.definitions", fn -> Messages.definitions(params[:tools]) end)
+      |> put_content("gen_ai.prompt", fn ->
+        Messages.chat_input(params[:messages], params[:system])
+      end)
 
     {name(@invoke_agent, model), attributes}
   end
 
   @doc """
-  Attributes for how a conversation ended, for its own span.
+  Builds the attributes recording how a conversation ended, for its own span.
 
   A trace's input and output are the run's, not the last request's: what was
   asked at the start and what came back at the end.
@@ -84,7 +86,7 @@ defmodule Claudex.Tracing.Attributes do
   end
 
   @doc """
-  Span name and attributes for one turn of a tool conversation.
+  Names a turn's span and builds its attributes.
 
   The conventions have no operation for a step inside an invocation, so this
   is Claudex's own: a grouping span that keeps a turn's request and its tool
@@ -103,7 +105,7 @@ defmodule Claudex.Tracing.Attributes do
     {"turn", %{"claudex.turn.index" => index}}
   end
 
-  @doc "Span name and attributes for one tool call."
+  @doc "Names a tool call's span and builds its attributes, including its arguments."
   @spec tool(String.t(), map()) :: {String.t(), map()}
   def tool(name, input) do
     attributes =
@@ -113,14 +115,14 @@ defmodule Claudex.Tracing.Attributes do
         "gen_ai.tool.name" => name,
         "gen_ai.tool.type" => "function"
       }
-      |> put_content("gen_ai.tool.call.arguments", input)
-      |> put_content("gen_ai.prompt", input)
+      |> put_content("gen_ai.tool.call.arguments", fn -> input end)
+      |> put_content("gen_ai.prompt", fn -> input end)
 
     {@execute_tool <> " " <> name, attributes}
   end
 
   @doc """
-  Attributes for a reply assembled from a stream.
+  Builds the attributes a reply assembled from a stream adds to its span.
 
   The non-streaming path reads these off the response body. A streamed reply
   has no body, so nothing records the model, the token counts or the answer
@@ -136,25 +138,38 @@ defmodule Claudex.Tracing.Attributes do
     |> put_reply_content(message)
   end
 
-  @doc "Attributes for how a tool call turned out, and what it returned."
+  @doc """
+  Returns the error a failed tool call puts on its span, or nil when it worked.
+
+  A tool that refuses or breaks returns rather than raising, so nothing marks
+  the span and a backend's error filter passes over it.
+  """
+  @spec tool_error(term()) :: String.t() | nil
+  def tool_error({:error, %{message: message}}), do: message
+  def tool_error({:error, reason}), do: inspect(reason)
+  def tool_error(_result), do: nil
+
+  @doc "Builds the attributes recording how a tool call turned out and what it returned."
   @spec tool_outcome(atom(), term()) :: map()
   def tool_outcome(outcome, result) do
     returned = returned(result)
 
     %{"claudex.tool.outcome" => to_string(outcome)}
-    |> put_content("gen_ai.tool.call.result", returned)
-    |> put_content("gen_ai.completion", returned)
+    |> put_content("gen_ai.tool.call.result", fn -> returned end)
+    |> put_content("gen_ai.completion", fn -> returned end)
   end
 
-  @doc "The message a failed response should set as the span's error status."
+  @doc "Returns the message a failed response sets as its span's error status."
   @spec error_message(term(), pos_integer()) :: String.t()
   def error_message(%{"error" => %{"message" => message}}, _status), do: message
   def error_message(_body, status), do: "HTTP #{status}"
 
   # The conventions name a generation span for the operation and the model,
-  # which is what a backend reads to show it as one. Everything else Claudex
-  # calls is a plain HTTP request and says so.
-  defp name(%{model: model}), do: name(@chat, model)
+  # which is what a backend reads to show it as one. Only a request that
+  # generates something is one: count_tokens carries a model and generates
+  # nothing, and counting it as a generation inflates every dashboard that
+  # counts them.
+  defp name(%{model: model, path: "/v1/messages"}), do: name(@chat, model)
   defp name(%{method: method, path: path}), do: "#{upcase(method)} #{path}"
 
   defp name(operation, model) when is_binary(model), do: operation <> " " <> model
@@ -164,7 +179,7 @@ defmodule Claudex.Tracing.Attributes do
     %{"http.request.method" => upcase(metadata.method), "url.path" => to_string(metadata.path)}
   end
 
-  defp put_request(attributes, %{model: model}, %{} = body) do
+  defp put_request(attributes, %{model: model, path: "/v1/messages"}, %{} = body) do
     attributes
     |> Map.merge(%{
       "gen_ai.system" => @system,
@@ -173,10 +188,10 @@ defmodule Claudex.Tracing.Attributes do
     })
     |> put_present("gen_ai.request.max_tokens", body[:max_tokens])
     |> put_present("gen_ai.request.temperature", body[:temperature])
-    |> put_content("gen_ai.input.messages", Messages.input(body[:messages]))
-    |> put_content("gen_ai.system_instructions", Messages.system(body[:system]))
-    |> put_content("gen_ai.tool.definitions", Messages.definitions(body[:tools]))
-    |> put_content("gen_ai.prompt", Messages.chat_input(body[:messages], body[:system]))
+    |> put_content("gen_ai.input.messages", fn -> Messages.input(body[:messages]) end)
+    |> put_content("gen_ai.system_instructions", fn -> Messages.system(body[:system]) end)
+    |> put_content("gen_ai.tool.definitions", fn -> Messages.definitions(body[:tools]) end)
+    |> put_content("gen_ai.prompt", fn -> Messages.chat_input(body[:messages], body[:system]) end)
   end
 
   defp put_request(attributes, _metadata, _body), do: attributes
@@ -188,8 +203,8 @@ defmodule Claudex.Tracing.Attributes do
     |> put_present("gen_ai.usage.input_tokens", get_in(body, ["usage", "input_tokens"]))
     |> put_present("gen_ai.usage.output_tokens", get_in(body, ["usage", "output_tokens"]))
     |> put_finish_reason(body["stop_reason"])
-    |> put_content("gen_ai.output.messages", Messages.output(body["content"]))
-    |> put_content("gen_ai.completion", Messages.chat_output(body["content"]))
+    |> put_content("gen_ai.output.messages", fn -> Messages.output(body["content"]) end)
+    |> put_content("gen_ai.completion", fn -> Messages.chat_output(body["content"]) end)
   end
 
   defp body_attributes(_body), do: %{}
@@ -207,8 +222,8 @@ defmodule Claudex.Tracing.Attributes do
       content = Message.to_param(message).content
 
       attributes
-      |> put_content("gen_ai.output.messages", Messages.output(content))
-      |> put_content("gen_ai.completion", Messages.chat_output(content))
+      |> put_content("gen_ai.output.messages", fn -> Messages.output(content) end)
+      |> put_content("gen_ai.completion", fn -> Messages.chat_output(content) end)
     else
       attributes
     end
@@ -254,20 +269,29 @@ defmodule Claudex.Tracing.Attributes do
   #
   # A span goes wherever the exporter sends it, so message content is only on
   # one when the app asked for that.
-  defp put_content(attributes, _key, nil), do: attributes
+  # Elixir evaluates arguments before the call, so the shapers have to be
+  # handed in unapplied: otherwise a conversation is walked and rebuilt on
+  # every request of every run, and thrown away, for an app that never traces.
+  defp put_content(attributes, key, build) do
+    if Tracing.trace_content?(), do: put_built(attributes, key, build.()), else: attributes
+  end
 
-  defp put_content(attributes, key, content) do
-    if Tracing.trace_content?() do
-      Map.put(attributes, key, encode(content))
-    else
-      attributes
-    end
+  defp put_built(attributes, _key, nil), do: attributes
+  defp put_built(attributes, key, content), do: Map.put(attributes, key, encode(content))
+
+  # Content is whatever a tool returned or a message carried, so encoding it
+  # has to be total: a tool that reads a PNG hands back bytes JSON refuses,
+  # and a span must never fail the work it measures.
+  defp encode(content) when is_binary(content) do
+    if String.valid?(content), do: content, else: inspect(content)
   end
 
   defp encode(content) do
     JSON.encode!(content)
   rescue
-    Protocol.UndefinedError -> inspect(content)
+    _not_encodable -> inspect(content)
+  catch
+    _kind, _reason -> inspect(content)
   end
 
   # What the tool gave back, not how Claudex tagged it. `{:ok, 42}` in a trace

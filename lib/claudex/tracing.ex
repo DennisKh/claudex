@@ -26,25 +26,25 @@ defmodule Claudex.Tracing do
   program when it finds none. `unknown_service:erl` means it fell all the way
   through.
 
-  ## The SDK settings worth knowing
+  ## SDK settings that interact with what Claudex records
 
-  These belong to `opentelemetry`, not to Claudex, and the defaults are fine
-  for most apps. Four are worth knowing because of what Claudex puts on a span:
+  These belong to `opentelemetry` rather than to Claudex, and the defaults
+  suit most apps. Four change what a Claudex trace looks like:
 
-    * `OTEL_RESOURCE_ATTRIBUTES` — `key=value` pairs on every span, read by
-      default. `deployment.environment=staging,service.version=1.4.0` is the
-      usual pair, and it is how one backend tells your environments apart.
-    * `attribute_value_length_limit` — `:infinity` by default, so a long
+    * `OTEL_RESOURCE_ATTRIBUTES` puts `key=value` pairs on every span and is
+      read by default. `deployment.environment=staging,service.version=1.4.0`
+      is the usual pair, and is how one backend tells your environments apart.
+    * `attribute_value_length_limit` is `:infinity` by default, so a long
       conversation captured with `trace_content: true` goes out whole. Cap it
       with `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` if your collector rejects
       large spans, and expect the messages to be the attribute that gets cut.
-    * `sampler` — `{:parent_based, %{root: :always_on}}` by default, so every
+    * `sampler` is `{:parent_based, %{root: :always_on}}` by default, so every
       conversation is traced. A run is one trace, so a ratio sampler drops or
       keeps whole conversations rather than pieces of them.
-    * `processors` — batched by default, which is right for a running app and
-      wrong for a script: a short-lived VM can exit before the batch is sent.
-      Use `:otel_simple_processor` when a mix task or a release command has to
-      see its own traces.
+    * `processors` are batched by default, which is right for a running app
+      and wrong for a script: a short-lived VM can exit before the batch is
+      sent. Use `:otel_simple_processor` when a mix task or a release command
+      has to see its own traces.
 
   Attributes follow the
   [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
@@ -137,8 +137,8 @@ defmodule Claudex.Tracing do
   reply, and a tool span carries the arguments it was called with and what it
   returned. A trace's own input and output are the run's, which is what a
   backend shows on a session or in a list of traces.
-  Everything else — model, token counts, latency, stop reason, tool names —
-  is recorded either way, which is why a trace is useful without it.
+  Everything else is recorded either way: model, token counts, latency, stop
+  reason and tool names, which is why a trace is useful without content.
 
   This is what fills the input and output panels of a tracing UI. Seeing them
   empty means content capture is off, not that something is missing.
@@ -209,6 +209,35 @@ defmodule Claudex.Tracing do
     _kind, _reason -> false
   end
 
+  @doc """
+  The tracing context of the calling process, to attach in another one.
+
+  A span is found through the process dictionary, so work handed to a new
+  process starts a trace of its own unless the context goes with it.
+  """
+  @spec context() :: term()
+  def context do
+    :otel_ctx.get_current()
+  rescue
+    _any -> :undefined
+  catch
+    _kind, _reason -> :undefined
+  end
+
+  @doc "Adopts a context from `context/0` into this process."
+  @spec attach(term()) :: :ok
+  def attach(:undefined), do: :ok
+
+  def attach(context) do
+    :otel_ctx.attach(context)
+
+    :ok
+  rescue
+    _any -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
   @doc false
   @spec current_span() :: term()
   def current_span do
@@ -246,8 +275,19 @@ defmodule Claudex.Tracing do
   end
 
   @doc false
+  @spec set_error(term(), String.t()) :: :ok
+  def set_error(:untraced, _message), do: :ok
+  def set_error({span_ctx, _parent}, message), do: put_error(span_ctx, message)
+
+  @doc false
   @spec set_error(String.t()) :: :ok
-  def set_error(message), do: put_error(:otel_tracer.current_span_ctx(), message)
+  def set_error(message) do
+    put_error(:otel_tracer.current_span_ctx(), message)
+  rescue
+    _any -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
 
   @doc """
   Whether prompts and completions are recorded on spans.

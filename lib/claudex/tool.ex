@@ -222,11 +222,22 @@ defmodule Claudex.Tool do
       :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
         result = module.__call_tool__(name, input)
 
-        Tracing.set_attributes(Attributes.tool_outcome(outcome(result), result))
+        record_call(result)
 
         {result, %{tool: name, outcome: outcome(result)}}
       end)
     end)
+  end
+
+  # A tool reports failure by returning rather than raising, so nothing marks
+  # the span unless this does, and a backend's error filter passes over it.
+  defp record_call(result) do
+    Tracing.set_attributes(Attributes.tool_outcome(outcome(result), result))
+
+    case Attributes.tool_error(result) do
+      nil -> :ok
+      message -> Tracing.set_error(message)
+    end
   end
 
   @doc """

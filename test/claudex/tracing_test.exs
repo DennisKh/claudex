@@ -12,6 +12,7 @@ defmodule Claudex.TracingTest do
   alias Claudex.{Client, Messages, ToolRunner, Tracing}
   alias Claudex.Stream.Event
   alias Claudex.TestSupport.MessageStream
+  alias Claudex.Tracing.Attributes
 
   @fields Record.extract(:span, from_lib: "opentelemetry/include/otel_span.hrl")
   Record.defrecordp(:span, @fields)
@@ -23,6 +24,13 @@ defmodule Claudex.TracingTest do
   }
 
   setup do
+    # The exporter is global to the VM and there is no way to unset it: every
+    # set_exporter arity wraps its argument in a tuple, so :none reaches
+    # otel_exporter:init/1 as {:none, []} and it tries to call none:init/1.
+    # Left pointing at a finished test's pid it sends into a dead process,
+    # which is a no-op, and config/config.exs sets traces_exporter: :none for
+    # this environment anyway, so a file that sets none of its own exports
+    # nowhere either way.
     :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
     on_exit(fn -> Application.delete_env(:claudex, :trace_content) end)
 
@@ -561,12 +569,14 @@ defmodule Claudex.TracingTest do
            "these reach OpenTelemetry without going through Claudex.Tracing: #{inspect(offenders)}"
   end
 
-  test "every tracing entry point is inert when nothing is listening" do
-    # What an app with no SDK gets back from each one. The guards return these
-    # rather than raising, so a request never fails for want of a tracer.
-    assert Tracing.span("work", %{}, fn -> :the_result end) == :the_result
+  test "the handles a stream holds when it is not tracing go back in unharmed" do
+    # An app with no SDK is checked by `mix test.no_otel`, which runs in :prod
+    # where the SDK is absent. The test environment has it, so this covers the
+    # other half: the values the code itself passes around when a stream found
+    # nothing to record.
     assert Tracing.set_attributes(:untraced, %{"a" => 1}) == :ok
     assert Tracing.end_span(:untraced) == :ok
+    assert Tracing.attach(:undefined) == :ok
   end
 
   test "a caller's own spans stay free of Claudex's attributes" do
@@ -626,6 +636,178 @@ defmodule Claudex.TracingTest do
 
     [app_span] = named(spans, "my_app.unclosed")
     assert attributes(app_span) == %{}
+  end
+
+  test "content JSON refuses does not raise where the attributes are built" do
+    Application.put_env(:claudex, :trace_content, true)
+
+    # Attributes are built as an argument at the call sites, outside every
+    # tracer guard, so anything that raises in here reaches the caller. A tool
+    # that hands back bytes is the realistic way to get there.
+    bytes = <<0x89, 0x50, 0x4E, 0x47, 0xFF, 0xFE>>
+
+    assert %{"gen_ai.tool.call.result" => recorded} =
+             Attributes.tool_outcome(:ok, {:ok, bytes})
+
+    assert recorded =~ "137"
+    assert String.valid?(recorded)
+
+    # Anything else a tool might return, none of which JSON encodes either.
+    for value <- [self(), {:error, :nope}, make_ref()] do
+      assert %{"gen_ai.tool.call.result" => _encoded} =
+               Attributes.tool_outcome(:ok, {:ok, value})
+    end
+  end
+
+  test "stream_to/3 joins the caller's trace rather than starting its own" do
+    require OpenTelemetry.Tracer, as: Tracer
+
+    stream_reply(message())
+
+    # The loop runs in a process of its own, and a span is found through the
+    # process dictionary. Without the context going with it, a caller that
+    # wrapped the run in its own span gets two unrelated traces.
+    {:ok, handle} =
+      Tracer.with_span "my_app.handle_message" do
+        {:ok, handle} =
+          ToolRunner.stream_to(client(), Map.put(@params, :tools, Calculator), to: self())
+
+        ref = handle.ref
+        assert_receive {:claudex, ^ref, :done}, 2_000
+
+        {:ok, handle}
+      end
+
+    assert %Claudex.Stream.Handle{} = handle
+
+    spans = collect_spans([])
+    traces = spans |> Enum.map(&span(&1, :trace_id)) |> Enum.uniq()
+
+    assert length(traces) == 1
+
+    [app_span] = named(spans, "my_app.handle_message")
+    [conversation] = named(spans, "invoke_agent claude-haiku-4-5")
+
+    assert span(conversation, :parent_span_id) == span(app_span, :span_id)
+  end
+
+  test "a response that is not a reply is not recorded as one" do
+    Application.put_env(:claudex, :trace_content, true)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(conn, %{"data" => [], "has_more" => false})
+    end)
+
+    assert {:ok, _page} = Claudex.Models.list(client())
+
+    [listing] = named(collect_spans([]), "GET /v1/models")
+    recorded = attributes(listing)
+
+    # Every endpoint goes through the same span. A models list with an
+    # assistant message whose content is null is a generation that never was.
+    refute Map.has_key?(recorded, "gen_ai.completion")
+    refute Map.has_key?(recorded, "gen_ai.output.messages")
+  end
+
+  defmodule RefusingTool do
+    use Claudex.Tool
+
+    @doc "Refuses whatever it is asked."
+    @tool true
+    @spec divide(integer(), integer()) :: integer()
+    def divide(_a, _b), do: raise(Claudex.Tool.Error, "cannot divide by zero")
+  end
+
+  test "a tool that fails marks its span, not only an attribute" do
+    replies = [
+      %{
+        message()
+        | "content" => [
+            %{
+              "type" => "tool_use",
+              "id" => "t1",
+              "name" => "divide",
+              "input" => %{"a" => 1, "b" => 0}
+            }
+          ],
+          "stop_reason" => "tool_use"
+      },
+      message()
+    ]
+
+    {:ok, counter} = Agent.start_link(fn -> replies end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      MessageStream.respond(
+        conn,
+        Agent.get_and_update(counter, fn [head | tail] -> {head, tail} end)
+      )
+    end)
+
+    assert {:ok, _turn} = ToolRunner.run(client(), Map.put(@params, :tools, RefusingTool))
+
+    [tool] = named(collect_spans([]), "execute_tool divide")
+
+    # A tool returns its failure rather than raising, so without this the span
+    # ends green and an error filter passes over it.
+    assert {:status, :error, message} = span(tool, :status)
+    assert message =~ "cannot divide by zero"
+  end
+
+  test "a failed streaming request marks its span" do
+    Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 429, "") end)
+
+    assert {:error, _error} = ToolRunner.run(client(), Map.put(@params, :tools, Calculator))
+
+    spans = collect_spans([])
+    [request] = named(spans, "chat claude-haiku-4-5")
+
+    # The runner always streams, so without this every failed tool
+    # conversation shows green.
+    assert {:status, :error, _message} = span(request, :status)
+
+    # And the run it belonged to did not finish, so its own span says so
+    # rather than reporting a turn from the middle as the answer.
+    [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
+    assert {:status, :error, _reason} = span(root, :status)
+    refute Map.has_key?(attributes(root), "claudex.stop")
+  end
+
+  test "message shaping does not run when content is not being recorded" do
+    # Elixir evaluates arguments before the call, so a shaper handed in
+    # applied runs whether or not its result is wanted: a conversation walked
+    # and rebuilt on every request of every run, for an app that never traces.
+    # A tools value that cannot be shaped makes the difference observable.
+    body = %{
+      model: "claude-haiku-4-5",
+      messages: [%{role: "user", content: "hi"}],
+      tools: NotAToolModule
+    }
+
+    metadata = %{method: :post, path: "/v1/messages", model: "claude-haiku-4-5"}
+
+    assert {_name, attributes} = Attributes.request(metadata, json: body)
+    refute Map.has_key?(attributes, "gen_ai.tool.definitions")
+
+    # With content on it is shaped, and this is what shaping it does.
+    Application.put_env(:claudex, :trace_content, true)
+
+    assert_raise ArgumentError, ~r/doesn't `use Claudex.Tool`/, fn ->
+      Attributes.request(metadata, json: body)
+    end
+  end
+
+  test "count_tokens is not a generation, though it carries a model" do
+    Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, %{"input_tokens" => 16}) end)
+
+    assert {:ok, 16} = Messages.count_tokens(client(), Map.delete(@params, :max_tokens))
+
+    [counting] = named(collect_spans([]), "POST /v1/messages/count_tokens")
+
+    # It generates nothing, so counting it as a generation inflates the count
+    # and drags the average output tokens towards zero.
+    refute Map.has_key?(attributes(counting), "gen_ai.operation.name")
+    refute Map.has_key?(attributes(counting), "gen_ai.request.model")
   end
 
   test "the span hands back what the work returned" do
