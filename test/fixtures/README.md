@@ -7,15 +7,16 @@ None of these were hand-written. `test/claudex/replay_test.exs` replays them
 back through the decoders, so a fixture going stale shows up there as a
 failing decode.
 
-All thirteen were added in one commit, `88bf1b5` (2026-09-08,
+All but `server_tools.json` were added in one commit, `88bf1b5` (2026-09-08,
 "test: replay recorded API payloads in the offline suite (#19)"); git history
-carries no earlier or later capture for any of them. A few fixtures embed
+carries no earlier or later capture for any of them; `server_tools.json` was
+captured later and is dated exactly. A few fixtures embed
 their own `created_at`, which is the request's real timestamp rather than a
 guess; the rest carry no timestamp of their own, so the commit date is the
-only dated record of when they entered the repo. Every one names
-`claude-haiku-4-5-20251001` as `model` (or, for the Models endpoints, as the
-id looked up) — the live suite's `@model` alias resolves to `claude-haiku-4-5`
-at the time of capture.
+only dated record of when they entered the repo. Every one of those names `claude-haiku-4-5-20251001` as `model` (or, for the
+Models endpoints, as the id looked up), the live suite's `@model` alias
+resolving to `claude-haiku-4-5` at the time of capture. `server_tools.json` is
+`claude-sonnet-5`, because Haiku rejects the `web_search` tool.
 
 | File | Endpoint | Live test | Captured |
 | --- | --- | --- | --- |
@@ -31,6 +32,7 @@ at the time of capture.
 | `models_page.json` | `GET /v1/models` | `live/models_live_test.exs` — "lists models and pages through them" | commit date only |
 | `file.json` | `POST /v1/files` | `live/files_live_test.exs` (setup) — uploads the file every test in that module shares | `created_at` in the fixture: `2026-09-04T23:23:04.285973Z` |
 | `files_page.json` | `GET /v1/files` | `live/files_live_test.exs` — "lists files with the cursor the Files API actually uses" | `created_at` in the fixture: `2026-09-04T23:23:04.285973Z` (same uploaded file) |
+| `server_tools.json` | `POST /v1/messages`, with the `web_search_20260209` tool | `live/server_tools_live_test.exs` — "web search comes back as server tool blocks" | 2026-09-17, recorded for this file |
 | `batch.json` | `POST /v1/messages/batches` | `live/batches_live_test.exs` — "submits a batch, reads it back, and cancels it" | `created_at` in the fixture: `2026-09-04T23:19:44.604104+00:00` |
 
 "Commit date only" means the fixture carries no timestamp of its own; the

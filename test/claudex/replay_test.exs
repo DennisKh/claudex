@@ -133,6 +133,28 @@ defmodule Claudex.ReplayTest do
     assert thinking.signature != ""
   end
 
+  test "a recorded web search decodes into server tool blocks that round-trip" do
+    stub_json("server_tools")
+
+    assert {:ok, message} = Messages.create(client(), @params)
+
+    call = Enum.find(message.content, &match?(%ContentBlock.ServerToolUse{}, &1))
+    result = Enum.find(message.content, &match?(%ContentBlock.ServerToolResult{}, &1))
+
+    assert call.name == "web_search"
+    assert call.input != %{}
+    assert result.tool == :web_search
+    assert result.tool_use_id == call.id
+    refute result.error_code
+    assert message.usage.server_tool_use["web_search_requests"] == 1
+
+    # A changed or missing encrypted_content is a 400 on the next turn, so a
+    # decoded result has to go back out exactly as it arrived.
+    assert Enum.all?(result.content, &match?(%{"encrypted_content" => _}, &1))
+    assert ContentBlock.to_param(result) == result.raw
+    assert ContentBlock.to_param(call) == call.raw
+  end
+
   test "a recorded thinking stream rebuilds the block from its deltas" do
     events = events_from("thinking_stream")
 
