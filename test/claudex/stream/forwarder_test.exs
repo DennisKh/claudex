@@ -6,7 +6,7 @@ defmodule Claudex.Stream.ForwarderTest do
 
   use ExUnit.Case, async: true
 
-  alias Claudex.{Client, Messages}
+  alias Claudex.{Client, Error, Messages}
   alias Claudex.Stream.{Event, Forwarder, Handle}
 
   @params %{model: "claude-haiku-4-5", max_tokens: 16, messages: [%{role: "user", content: "Hi"}]}
@@ -113,9 +113,19 @@ defmodule Claudex.Stream.ForwarderTest do
   end
 
   test "events/3 mints a ref and defaults to the calling process" do
-    assert {:ok, %Handle{ref: ref}} = Forwarder.events(client(), @params, [])
+    assert {:ok, %Handle{ref: ref_one}} = Forwarder.events(client(), @params, [])
+    assert {:ok, %Handle{ref: ref_two}} = Forwarder.events(client(), @params, [])
 
-    assert_receive {:claudex, ^ref, :done}, 2_000
+    assert ref_one != ref_two
+
+    assert_receive {:claudex, ^ref_one, :done}, 2_000
+    assert_receive {:claudex, ^ref_two, :done}, 2_000
+  end
+
+  test "a throw from inside the stream reaches the caller as an error, not a hang" do
+    assert {:ok, %Handle{ref: ref}} = Forwarder.start([], fn _sink -> throw(:boom) end)
+
+    assert_receive {:claudex, ^ref, {:error, %Error{type: :stream}}}, 2_000
   end
 
   test "a destination name nobody holds is reported once, not once per message" do

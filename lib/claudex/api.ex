@@ -9,13 +9,22 @@ defmodule Claudex.API do
   the decoded body on a 2xx, a `Claudex.Error` on anything else, including a
   transport failure.
 
+  `options` reach `Req.request/2` unchanged, so any Req option works. `:method`
+  is the only one required, and a call without it raises. The rest are whatever
+  the endpoint needs: `:url`, `:params`, `:json`, `:form_multipart` and
+  `:decode_body` are the ones used here.
+
+  `:method`, `:url` and a `:model` inside the `:json` body are also read for the
+  telemetry metadata and the span, so an endpoint that names its model in the
+  body gets it recorded without passing it twice.
+
   Wraps the call in the `[:claudex, :request, ...]` telemetry events and an
   OpenTelemetry span, which is a no-op unless the app traces.
   """
   @spec request(Client.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def request(%Client{} = client, options) do
     metadata =
-      %{method: Keyword.get(options, :method, :get), path: Keyword.get(options, :url)}
+      %{method: Keyword.fetch!(options, :method), path: Keyword.get(options, :url)}
       |> put_model(options)
 
     Tracing.span(

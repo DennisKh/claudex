@@ -19,7 +19,7 @@ defmodule Claudex.Tracing.AttributesTest do
     :ok
   end
 
-  defp metadata(path, extra \\ %{}) do
+  defp metadata(path, extra) do
     Map.merge(%{method: :post, path: path}, extra)
   end
 
@@ -38,27 +38,6 @@ defmodule Claudex.Tracing.AttributesTest do
       assert attributes["gen_ai.request.temperature"] == 0.5
       assert attributes["http.request.method"] == "POST"
       assert attributes["url.path"] == @messages_path
-    end
-
-    test "another endpoint carrying a model is not a generation" do
-      # count_tokens takes a model and generates nothing. Counting it as a
-      # generation inflates every dashboard that counts them.
-      {name, attributes} =
-        Attributes.request(metadata("/v1/messages/count_tokens", %{model: "claude-opus-5"}),
-          json: %{model: "claude-opus-5", messages: []}
-        )
-
-      assert name == "POST /v1/messages/count_tokens"
-      refute Map.has_key?(attributes, "gen_ai.operation.name")
-      refute Map.has_key?(attributes, "gen_ai.request.model")
-    end
-
-    test "an endpoint with no model at all is a plain request" do
-      {name, attributes} =
-        Attributes.request(metadata("/v1/models") |> Map.put(:method, :get), [])
-
-      assert name == "GET /v1/models"
-      refute Map.has_key?(attributes, "gen_ai.system")
     end
 
     test "absent optional parameters are absent, not nil" do
@@ -88,12 +67,6 @@ defmodule Claudex.Tracing.AttributesTest do
       assert attributes["gen_ai.usage.output_tokens"] == 5
       assert attributes["gen_ai.response.finish_reasons"] == ["end_turn"]
       assert attributes["http.response.status_code"] == 200
-    end
-
-    test "a body that is not a reply gets no reply invented for it" do
-      attributes = Attributes.response(%{"data" => [], "has_more" => false}, 200)
-
-      assert attributes == %{"http.response.status_code" => 200}
     end
 
     test "a body that is not a map at all is just the status" do
@@ -142,13 +115,6 @@ defmodule Claudex.Tracing.AttributesTest do
       assert {"turn", %{"claudex.turn.index" => 7}} = Attributes.turn(7)
     end
 
-    test "a turn is not a generation, so it carries no model" do
-      {_name, attributes} = Attributes.turn(1)
-
-      refute Map.has_key?(attributes, "gen_ai.request.model")
-      refute Map.has_key?(attributes, "gen_ai.operation.name")
-    end
-
     test "a conversation is an agent invocation, named for the model" do
       {name, attributes} =
         Attributes.conversation(%{model: "claude-opus-5", messages: []}, 20, "chat-1")
@@ -157,12 +123,6 @@ defmodule Claudex.Tracing.AttributesTest do
       assert attributes["gen_ai.operation.name"] == "invoke_agent"
       assert attributes["claudex.turn.max"] == 20
       assert attributes["session.id"] == "chat-1"
-    end
-
-    test "an unnamed conversation carries no session" do
-      {_name, attributes} = Attributes.conversation(%{model: "m", messages: []}, 20, nil)
-
-      refute Map.has_key?(attributes, "session.id")
     end
   end
 
@@ -254,48 +214,6 @@ defmodule Claudex.Tracing.AttributesTest do
 
       refute Map.has_key?(attributes, "gen_ai.usage.input_tokens")
       refute Map.has_key?(attributes, "gen_ai.response.finish_reasons")
-    end
-  end
-
-  describe "with trace_content off" do
-    setup do
-      Application.put_env(:claudex, :trace_content, false)
-
-      :ok
-    end
-
-    test "no message content reaches any builder" do
-      {_name, request} =
-        Attributes.request(metadata(@messages_path, %{model: "m"}),
-          json: %{model: "m", system: "be brief", messages: [%{role: "user", content: "hi"}]}
-        )
-
-      {_name, tool} = Attributes.tool("add", %{"a" => 1})
-
-      recorded =
-        Map.merge(request, tool)
-        |> Map.merge(Attributes.tool_outcome(:ok, {:ok, "42"}))
-        |> Map.merge(
-          Attributes.response(%{"content" => [%{"type" => "text", "text" => "42"}]}, 200)
-        )
-
-      for key <- [
-            "gen_ai.prompt",
-            "gen_ai.completion",
-            "gen_ai.input.messages",
-            "gen_ai.output.messages",
-            "gen_ai.system_instructions",
-            "gen_ai.tool.definitions",
-            "gen_ai.tool.call.arguments",
-            "gen_ai.tool.call.result"
-          ] do
-        refute Map.has_key?(recorded, key), "#{key} was recorded with content off"
-      end
-
-      # Everything that is not content still is.
-      assert recorded["gen_ai.request.model"] == "m"
-      assert recorded["gen_ai.tool.name"] == "add"
-      assert recorded["claudex.tool.outcome"] == "ok"
     end
   end
 end

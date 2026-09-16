@@ -140,7 +140,7 @@ defmodule Claudex.RetryTest do
     assert [%Event.MessageStart{}, %Event.MessageStop{}] = events
   end
 
-  test "a stream retried after a retry-after header honours the delay" do
+  test "a 529 is retried, and Req accepts the {:delay, _} the client returns" do
     Req.Test.expect(__MODULE__, fn conn ->
       conn |> Plug.Conn.put_resp_header("retry-after", "0") |> Plug.Conn.send_resp(529, "")
     end)

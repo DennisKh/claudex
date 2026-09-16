@@ -268,6 +268,29 @@ defmodule Claudex.TelemetryTest do
     assert Telemetry.detach_default_logger() == :ok
   end
 
+  test "attach_default_logger/1 logs at :debug by default" do
+    Telemetry.attach_default_logger()
+    on_exit(&Telemetry.detach_default_logger/0)
+
+    respond_with([message([%{"type" => "text", "text" => "hello"}])])
+
+    at_debug =
+      ExUnit.CaptureLog.capture_log([level: :debug], fn ->
+        assert {:ok, _message} = Messages.create(client(), @params)
+      end)
+
+    assert at_debug =~ "claudex POST /v1/messages"
+
+    respond_with([message([%{"type" => "text", "text" => "hello"}])])
+
+    at_info =
+      ExUnit.CaptureLog.capture_log([level: :info], fn ->
+        assert {:ok, _message} = Messages.create(client(), @params)
+      end)
+
+    refute at_info =~ "claudex POST /v1/messages"
+  end
+
   test "the default logger writes a line per event at the level asked for" do
     respond_with([message([%{"type" => "text", "text" => "hello"}])])
     Telemetry.attach_default_logger(level: :info)

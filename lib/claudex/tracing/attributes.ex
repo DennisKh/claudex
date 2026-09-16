@@ -105,14 +105,6 @@ defmodule Claudex.Tracing.Attributes do
   """
   @spec turn(pos_integer()) :: {String.t(), map()}
   def turn(index) do
-    # The index stays out of the name. Span names are labels for a kind of
-    # work, not for one instance of it: every turn of every run sharing one
-    # name is what lets a backend fold them into a single node and count them.
-    # It is also why the conventions keep ids out of names.
-    #
-    # No model here either. A backend infers "this is a generation" from a
-    # model attribute, and a turn is a grouping span: the generation is the
-    # `chat` span inside it.
     {"turn", %{"claudex.turn.index" => index}}
   end
 
