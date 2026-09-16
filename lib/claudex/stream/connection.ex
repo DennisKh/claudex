@@ -1,8 +1,9 @@
 defmodule Claudex.Stream.Connection do
   @moduledoc false
 
-  alias Claudex.{ChunkStream, Client}
-  alias Claudex.Stream.{Event, SSE}
+  alias Claudex.{ChunkStream, Client, Tracing}
+  alias Claudex.Stream.{Accumulator, Event, SSE}
+  alias Claudex.Tracing.Attributes
 
   @doc """
   Returns a lazy stream of events for a streaming Messages request.
@@ -16,6 +17,34 @@ defmodule Claudex.Stream.Connection do
     client
     |> ChunkStream.stream([method: :post, url: "/v1/messages", json: body], cancel_ref)
     |> Stream.transform(&SSE.new/0, &decode_chunk/2, &flush/1, fn _decoder -> :ok end)
+    |> Stream.transform(&recorder/0, &record/2, fn _recorder -> :ok end)
+  end
+
+  defp recorder, do: :undecided
+
+  defp record(event, :undecided) do
+    if Tracing.enabled?() and Tracing.recording?() do
+      record(event, %{accumulator: Accumulator.new(), span: Tracing.current_span()})
+    else
+      {[event], :untraced}
+    end
+  end
+
+  defp record(event, :untraced), do: {[event], :untraced}
+
+  defp record(event, state) do
+    state = %{state | accumulator: Accumulator.add(state.accumulator, event)}
+
+    if match?(%Event.MessageStop{}, event), do: record_reply(state)
+
+    {[event], state}
+  end
+
+  defp record_reply(state) do
+    case Accumulator.message(state.accumulator) do
+      nil -> :ok
+      message -> Tracing.set_attributes(state.span, Attributes.reply(message))
+    end
   end
 
   defp decode_chunk(chunk, decoder) do

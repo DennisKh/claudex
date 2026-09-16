@@ -43,13 +43,14 @@ defmodule Claudex.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url, "Changelog" => @source_url <> "/blob/main/CHANGELOG.md"},
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
+      files: ~w(lib assets mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
     ]
   end
 
   defp docs do
     [
       main: "readme",
+      assets: %{"assets" => "assets"},
       logo: "assets/logo.svg",
       favicon: "assets/logo.svg",
       extras: ["README.md", "CHANGELOG.md", "LICENSE"],
@@ -60,7 +61,8 @@ defmodule Claudex.MixProject do
           Claudex.Client,
           Claudex.Error,
           Claudex.Page,
-          Claudex.Telemetry
+          Claudex.Telemetry,
+          Claudex.Tracing
         ],
         Messages: [
           Claudex.Messages,
@@ -104,6 +106,8 @@ defmodule Claudex.MixProject do
           Claudex.Model
         ],
         Internals: [
+          Claudex.Tracing.Attributes,
+          Claudex.Tracing.Messages,
           Claudex.Tool.Schema,
           Claudex.Tool.Schema.StructExpansion,
           Claudex.Tool.Dispatch,
@@ -118,6 +122,9 @@ defmodule Claudex.MixProject do
 
   defp deps do
     [
+      {:opentelemetry_api, "~> 1.5"},
+      {:opentelemetry, "~> 1.7", only: [:dev, :test]},
+      {:opentelemetry_exporter, "~> 1.10", only: :dev, runtime: false},
       {:req, "~> 0.7.4"},
       {:telemetry, "~> 1.4"},
       {:jason, "~> 1.4"},
@@ -132,13 +139,26 @@ defmodule Claudex.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_env), do: ["lib"]
 
+  defp check_without_otel(_args) do
+    {output, status} =
+      System.cmd("mix", ["run", "priv/check_without_otel.exs"],
+        env: [{"MIX_ENV", "consumer"}],
+        stderr_to_stdout: true
+      )
+
+    IO.puts(output)
+
+    if status != 0, do: Mix.raise("tracing is not inert without the OpenTelemetry SDK")
+  end
+
   # "test.live" runs the smoke tests in test/claudex/live/ against the real
   # Claude API. They're tagged :live and excluded by default (see
   # test/test_helper.exs) since they cost money and need network access.
   defp aliases do
     [
       "test.live": ["test --include live"],
-      "test.record": &record_fixtures/1
+      "test.record": &record_fixtures/1,
+      "test.no_otel": &check_without_otel/1
     ]
   end
 

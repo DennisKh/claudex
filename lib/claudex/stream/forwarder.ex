@@ -14,7 +14,7 @@ defmodule Claudex.Stream.Forwarder do
 
   require Logger
 
-  alias Claudex.{Client, Error}
+  alias Claudex.{Client, Error, Tracing}
   alias Claudex.Stream.{Connection, Handle}
 
   @typedoc """
@@ -36,10 +36,12 @@ defmodule Claudex.Stream.Forwarder do
     ref = Keyword.get(opts, :ref, make_ref())
     monitor? = Keyword.get(opts, :monitor, false)
     callers = [self() | Process.get(:"$callers", [])]
+    context = Tracing.context()
 
     pid =
       spawn_link(fn ->
         Process.put(:"$callers", callers)
+        Tracing.attach(context)
         monitor = if monitor?, do: Process.monitor(to)
 
         forward(consume, %{to: to, ref: ref, monitor: monitor})

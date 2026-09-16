@@ -549,6 +549,77 @@ LiveView fill the same `[debug]` stream. To see only Claudex's:
 
 The events cover the things you can't otherwise see: the model and `request_id` behind each call (Claudex keeps the request id only on errors), tool outcomes, why a tool conversation stopped, and retries Claudex *declined* because part of a response had already been delivered. Metadata carries model names, status, token counts, durations and tool names — never prompts, completions, tool arguments, or anything from your client.
 
+## Tracing
+
+Claudex emits OpenTelemetry spans as well: one per request, one per turn of a tool conversation, and one per tool call, nested so a trace reads as the conversation it was. Attributes follow the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so a backend shows the model, token counts and stop reason with no Claudex-specific integration.
+
+![Langfuse trace view](assets/langfuse-trace-1.png)
+
+*One tool conversation in Langfuse: a single `invoke_agent` trace, a `turn` span per round, with the request and each tool call nested under it.*
+
+Tracing is off until you ask for it with `config :claudex, tracing: true`, and nothing is built or measured while it is off. To turn it on, set the config and add these to your deps:
+
+```elixir
+{:opentelemetry, "~> 1.7"},
+{:opentelemetry_exporter, "~> 1.10"}
+```
+
+`mix claudex.gen.tracing` writes the config below into your `config/runtime.exs`; `mix claudex.gen.tracing langfuse` writes the Langfuse-shaped one.
+
+Sending to Langfuse is three lines in your own `runtime.exs`, because Langfuse reads OTLP and Claudex doesn't know it exists:
+
+```elixir
+auth =
+  Base.encode64(
+    System.fetch_env!("LANGFUSE_PUBLIC_KEY") <> ":" <> System.fetch_env!("LANGFUSE_SECRET_KEY")
+  )
+
+config :claudex,
+  tracing: true,
+  trace_content: true
+
+config :opentelemetry_exporter,
+  otlp_protocol: :http_protobuf,
+  otlp_endpoint: System.get_env("LANGFUSE_HOST", "https://cloud.langfuse.com") <> "/api/public/otel",
+  otlp_headers: [
+    {"authorization", "Basic " <> auth},
+    {"x-langfuse-ingestion-version", "4"}
+  ]
+```
+
+Point the endpoint and header elsewhere for Honeycomb, Datadog, Phoenix/Arize or Braintrust. Prompts, completions and tool arguments stay off a span unless you ask for them with `config :claudex, trace_content: true` — that setting is what fills the input and output panels of a tracing UI.
+
+### Running Langfuse locally
+
+`docker-compose.langfuse.yml` brings up the whole stack — web, worker, Postgres, ClickHouse, Redis and MinIO — so you can see your traces without sending them anywhere:
+
+```bash
+cp .env.langfuse.example .env.langfuse
+docker compose -f docker-compose.langfuse.yml --env-file .env.langfuse up -d
+```
+
+Open http://localhost:3000, create an organisation and a project, and take the public and secret keys it gives you. Then point Claudex at it:
+
+```bash
+export LANGFUSE_HOST=http://localhost:3000
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+```
+
+Only port 3000 and the MinIO console on 9090 are exposed; everything else stays on the compose network. `docker compose -f docker-compose.langfuse.yml down -v` removes the volumes and starts over. `.env.langfuse` is gitignored, because that is where real keys end up.
+
+Name a conversation to group its trace with others — a chat id, or whatever the user called it:
+
+```elixir
+Claudex.ToolRunner.run(client, params, session: chat.id)
+```
+
+![Langfuse session view](assets/langfuse-trace-2.png)
+
+*The same session id across several runs: each run is its own trace, grouped under one session.*
+
+See `Claudex.Tracing` for the span tree and what each one carries.
+
 ## Models and token counting
 
 ```elixir
