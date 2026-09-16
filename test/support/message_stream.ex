@@ -24,6 +24,7 @@ defmodule Claudex.TestSupport.MessageStream do
   def sse(message) do
     {content, message} = Map.pop(message, "content")
     {stop_reason, message} = Map.pop(message, "stop_reason")
+    usage = message["usage"] || %{"output_tokens" => 5}
 
     [event("message_start", %{"type" => "message_start", "message" => start(message)})] ++
       (content |> Enum.with_index() |> Enum.flat_map(&block/1)) ++
@@ -31,7 +32,7 @@ defmodule Claudex.TestSupport.MessageStream do
         event("message_delta", %{
           "type" => "message_delta",
           "delta" => %{"stop_reason" => stop_reason, "stop_sequence" => nil},
-          "usage" => %{"output_tokens" => 5}
+          "usage" => usage
         }),
         event("message_stop", %{"type" => "message_stop"})
       ]

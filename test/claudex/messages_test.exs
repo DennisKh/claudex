@@ -198,6 +198,14 @@ defmodule Claudex.MessagesTest do
              Messages.count_tokens(client(), params)
   end
 
+  test "count_tokens/2 reports a reply with no input_tokens" do
+    Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, %{"foo" => 1}) end)
+
+    params = %{model: "claude-opus-5", messages: [%{role: "user", content: "Hello"}]}
+
+    assert {:error, %Error{type: :stream}} = Messages.count_tokens(client(), params)
+  end
+
   describe "output_config" do
     defp echo_body do
       test_pid = self()

@@ -379,6 +379,19 @@ defmodule Claudex.ToolRunnerTest do
              ToolRunner.run(client(), @params)
   end
 
+  test "run/3 reports a stream that ends without starting a message" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} =
+        conn
+        |> Plug.Conn.send_chunked(200)
+        |> Plug.Conn.chunk(~s(event: message_stop\ndata: {"type":"message_stop"}\n\n))
+
+      conn
+    end)
+
+    assert {:error, %Error{type: :stream}} = ToolRunner.run(client(), @params)
+  end
+
   test "a tool returning something JSON can't encode is described, not fatal" do
     respond_with([
       message([tool_use("unencodable", %{})], "tool_use"),

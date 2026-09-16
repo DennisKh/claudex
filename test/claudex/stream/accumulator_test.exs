@@ -30,6 +30,8 @@ defmodule Claudex.Stream.AccumulatorTest do
 
   defp block_stop(index), do: Event.decode(%{"type" => "content_block_stop", "index" => index})
 
+  defp text_block_start(index), do: block_start(index, %{"type" => "text", "text" => "#{index}-"})
+
   test "message/1 is nil until the stream starts a message" do
     assert Accumulator.message(Accumulator.new()) == nil
     assert Accumulator.message(fold([block_stop(0)])) == nil
@@ -53,18 +55,17 @@ defmodule Claudex.Stream.AccumulatorTest do
   end
 
   test "add/2 keeps blocks in index order regardless of arrival order" do
+    # 33+ blocks: Erlang maps switch from a flatmap (iterates in key order) to
+    # a hashmap (does not) past 32 keys, so fewer blocks would let the map's
+    # own iteration order stand in for the sort this is meant to guard.
+    indexes = Enum.to_list(0..32)
+
     message =
-      [
-        message_start(),
-        block_start(1, %{"type" => "text", "text" => "second"}),
-        block_start(0, %{"type" => "text", "text" => "first "}),
-        block_stop(0),
-        block_stop(1)
-      ]
+      [message_start() | indexes |> Enum.reverse() |> Enum.map(&text_block_start/1)]
       |> fold()
       |> Accumulator.message()
 
-    assert Message.text(message) == "first second"
+    assert Message.text(message) == Enum.map_join(indexes, "", &"#{&1}-")
   end
 
   test "add/2 parses a tool call's arguments once the block stops" do

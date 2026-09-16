@@ -450,7 +450,7 @@ defmodule Claudex.TracingTest do
     assert recorded["gen_ai.response.model"] == "claude-haiku-4-5-20251001"
     assert recorded["gen_ai.response.id"] == "msg_1"
     assert recorded["gen_ai.usage.input_tokens"] == 15
-    assert recorded["gen_ai.usage.output_tokens"] == 5
+    assert recorded["gen_ai.usage.output_tokens"] == 6
     assert recorded["gen_ai.response.finish_reasons"] == ["end_turn"]
   end
 

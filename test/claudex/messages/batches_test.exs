@@ -233,6 +233,79 @@ defmodule Claudex.Messages.BatchesTest do
     assert %BatchResult{custom_id: "fourth", result: :expired} = fourth
   end
 
+  test "results/2 raises on a JSONL line that isn't a JSON object" do
+    results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      case conn.request_path do
+        "/v1/messages/batches/msgbatch_1" ->
+          Req.Test.json(conn, ended_batch(results_url))
+
+        "/v1/messages/batches/msgbatch_1/results" ->
+          {:ok, conn} = conn |> Plug.Conn.send_chunked(200) |> Plug.Conn.chunk("123\n")
+          conn
+      end
+    end)
+
+    assert {:ok, stream} = Batches.results(client(), "msgbatch_1")
+    assert_raise Claudex.Error, fn -> Enum.to_list(stream) end
+  end
+
+  test "BatchResult.decode/1 reports a result type it doesn't recognise" do
+    assert %BatchResult{result: {:error, %Error{type: :stream}}} =
+             BatchResult.decode(%{"custom_id" => "first", "result" => %{"type" => "queued"}})
+  end
+
+  defmodule CrashingResultsTransport do
+    @moduledoc """
+    Answers the batch lookup normally, then kills the process streaming its
+    results right after the first chunk — the way a dropped connection or an
+    OOM kill ends a download mid-stream, with no error response to report.
+    """
+
+    @doc false
+    def run(%{url: %URI{path: "/v1/messages/batches/msgbatch_1"}} = request) do
+      body = Req.Request.get_private(request, :ended_batch)
+
+      {request,
+       Req.Response.new(status: 200, headers: [{"content-type", "application/json"}], body: body)}
+    end
+
+    def run(%{url: %URI{path: "/v1/messages/batches/msgbatch_1/results"}} = request) do
+      {_action, acc} =
+        request.into.(
+          {:data, ~s({"custom_id":"first","result":{"type":"canceled"}}\n)},
+          {request, Req.Response.new(status: 200)}
+        )
+
+      Process.exit(self(), :kill)
+
+      acc
+    end
+  end
+
+  defp crashing_client(batch_json) do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: CrashingResultsTransport]
+      )
+
+    %{client | req: Req.Request.put_private(client.req, :ended_batch, batch_json)}
+  end
+
+  test "results/2 raises when the process running the download exits mid-stream" do
+    results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
+    batch_json = Jason.encode!(ended_batch(results_url))
+
+    assert {:ok, stream} = Batches.results(crashing_client(batch_json), "msgbatch_1")
+
+    assert_raise Claudex.Error, ~r/the process running the request exited/, fn ->
+      Enum.to_list(stream)
+    end
+  end
+
   test "results/2 refuses a batch that hasn't finished" do
     Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, @batch) end)
 

@@ -148,6 +148,30 @@ defmodule Claudex.FilesTest do
              Files.download(client(), "file_1")
   end
 
+  defmodule DecodedContentAdapter do
+    @moduledoc """
+    Answers with a body Req has already turned into a term, standing in for a
+    decoder some other `req_options` config runs ahead of `download/2`'s own
+    `decode_body: false`.
+    """
+
+    @doc false
+    def run(request) do
+      {request, Req.Response.new(status: 200, body: %{"error" => "not bytes"})}
+    end
+  end
+
+  test "download/2 reports a body that wasn't returned as bytes" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: DecodedContentAdapter]
+      )
+
+    assert {:error, %Error{type: :stream}} = Files.download(client, "file_1")
+  end
+
   test "delete/2 returns :ok" do
     Req.Test.stub(__MODULE__, fn conn ->
       assert conn.method == "DELETE"

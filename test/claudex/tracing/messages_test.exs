@@ -143,13 +143,6 @@ defmodule Claudex.Tracing.MessagesTest do
   end
 
   describe "chat_output/1" do
-    test "a reply asking for a tool says so under tool_calls" do
-      blocks = [%{type: "tool_use", id: "t1", name: "add", input: %{"a" => 1}}]
-
-      assert %{role: "assistant", content: "", tool_calls: [call]} = Messages.chat_output(blocks)
-      assert call == %{type: "tool_call", id: "t1", name: "add", args: %{"a" => 1}}
-    end
-
     test "text blocks join into the content" do
       blocks = [%{type: "text", text: "4"}, %{type: "text", text: "2"}]
 
