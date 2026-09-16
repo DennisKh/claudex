@@ -1,9 +1,20 @@
 defmodule Claudex.Tracing.Attributes do
-  @moduledoc false
+  @moduledoc """
+  Every span name and attribute key Claudex records.
 
-  # Every span name and attribute key Claudex emits, in one place. The GenAI
-  # semantic conventions are still moving, so a rename lands here and nowhere
-  # else. `Claudex.Tracing` owns the span mechanics; this owns the vocabulary.
+  `Claudex.Tracing` owns the mechanics of a span; this owns its vocabulary.
+  The GenAI semantic conventions are still moving, so a rename lands here and
+  nowhere else.
+
+  The builders come in pairs. One returns `{name, attributes}` for a span
+  about to be started, because the conventions name a span for its operation
+  and model and that is as much part of the vocabulary as the attributes are.
+  The others return attributes alone, for what is learned after a span is
+  open: a response, a finished stream, how a tool call turned out.
+
+  Message content goes on a span only when `Claudex.Tracing.trace_content?/0`
+  says so, which is why the shapers are passed in unapplied.
+  """
 
   alias Claudex.{Message, Tracing}
   alias Claudex.Tracing.Messages
@@ -164,11 +175,6 @@ defmodule Claudex.Tracing.Attributes do
   def error_message(%{"error" => %{"message" => message}}, _status), do: message
   def error_message(_body, status), do: "HTTP #{status}"
 
-  # The conventions name a generation span for the operation and the model,
-  # which is what a backend reads to show it as one. Only a request that
-  # generates something is one: count_tokens carries a model and generates
-  # nothing, and counting it as a generation inflates every dashboard that
-  # counts them.
   defp name(%{model: model, path: "/v1/messages"}), do: name(@chat, model)
   defp name(%{method: method, path: path}), do: "#{upcase(method)} #{path}"
 
@@ -254,24 +260,11 @@ defmodule Claudex.Tracing.Attributes do
 
   defp put_model(attributes, _model), do: attributes
 
-  # `session.id` is a standard attribute rather than one backend's idea, so a
-  # conversation named here groups the same way wherever the spans are sent.
   defp put_session(attributes, session) when is_binary(session),
     do: Map.put(attributes, "session.id", session)
 
   defp put_session(attributes, _session), do: attributes
 
-  # A tool's arguments and result go out under two names. The conventions call
-  # them `gen_ai.tool.call.arguments` and `.result`; backends read an
-  # observation's input and output from `gen_ai.prompt` and `gen_ai.completion`
-  # whatever the span is. Writing one would be correct and invisible, the other
-  # visible and wrong.
-  #
-  # A span goes wherever the exporter sends it, so message content is only on
-  # one when the app asked for that.
-  # Elixir evaluates arguments before the call, so the shapers have to be
-  # handed in unapplied: otherwise a conversation is walked and rebuilt on
-  # every request of every run, and thrown away, for an app that never traces.
   defp put_content(attributes, key, build) do
     if Tracing.trace_content?(), do: put_built(attributes, key, build.()), else: attributes
   end
@@ -279,9 +272,6 @@ defmodule Claudex.Tracing.Attributes do
   defp put_built(attributes, _key, nil), do: attributes
   defp put_built(attributes, key, content), do: Map.put(attributes, key, encode(content))
 
-  # Content is whatever a tool returned or a message carried, so encoding it
-  # has to be total: a tool that reads a PNG hands back bytes JSON refuses,
-  # and a span must never fail the work it measures.
   defp encode(content) when is_binary(content) do
     if String.valid?(content), do: content, else: inspect(content)
   end
@@ -294,8 +284,6 @@ defmodule Claudex.Tracing.Attributes do
     _kind, _reason -> inspect(content)
   end
 
-  # What the tool gave back, not how Claudex tagged it. `{:ok, 42}` in a trace
-  # is this SDK's plumbing showing through.
   defp returned({:ok, value}), do: value
   defp returned({:error, %{message: message}}), do: message
   defp returned(result), do: result

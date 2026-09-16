@@ -106,8 +106,11 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
         {"x-langfuse-ingestion-version", "4"}
       ]
 
-    # Prompts and completions stay off a span unless you turn this on. A span
-    # goes wherever the exporter sends it, so decide that deliberately.
+    # Claudex records nothing until this is on.
+    config :claudex, tracing: true
+
+    # Prompts and completions stay off a span unless you turn this on too. A
+    # span goes wherever the exporter sends it, so decide that deliberately.
     config :claudex, trace_content: false
     """ <> service_name()
   end
@@ -120,8 +123,11 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     # this only has to name the protocol.
     config :opentelemetry_exporter, otlp_protocol: :http_protobuf
 
-    # Prompts and completions stay off a span unless you turn this on. A span
-    # goes wherever the exporter sends it, so decide that deliberately.
+    # Claudex records nothing until this is on.
+    config :claudex, tracing: true
+
+    # Prompts and completions stay off a span unless you turn this on too. A
+    # span goes wherever the exporter sends it, so decide that deliberately.
     config :claudex, trace_content: false
     """ <> service_name()
   end

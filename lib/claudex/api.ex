@@ -18,12 +18,13 @@ defmodule Claudex.API do
       %{method: Keyword.get(options, :method, :get), path: Keyword.get(options, :url)}
       |> put_model(options)
 
-    {name, attributes} = Attributes.request(metadata, options)
-
-    Tracing.span(name, attributes, fn -> traced(client, options, metadata) end)
+    Tracing.span(
+      fn -> Attributes.request(metadata, options) end,
+      fn span -> traced(client, options, metadata, span) end
+    )
   end
 
-  defp traced(client, options, metadata) do
+  defp traced(client, options, metadata, span) do
     started = System.monotonic_time()
 
     :telemetry.execute(
@@ -41,7 +42,7 @@ defmodule Claudex.API do
         Map.merge(metadata, response_metadata(raw))
       )
 
-      record_response(raw)
+      record_response(raw, span)
 
       handle(raw)
     catch
@@ -93,14 +94,16 @@ defmodule Claudex.API do
     end
   end
 
-  defp record_response({:ok, %Req.Response{status: status, body: body}}) do
-    Tracing.set_attributes(Attributes.response(body, status))
+  defp record_response(_raw, :untraced), do: :ok
 
-    if status not in 200..299, do: Tracing.set_error(Attributes.error_message(body, status))
+  defp record_response({:ok, %Req.Response{status: status, body: body}}, span) do
+    Tracing.set_attributes(span, Attributes.response(body, status))
+
+    if status not in 200..299, do: Tracing.set_error(span, Attributes.error_message(body, status))
   end
 
-  defp record_response({:error, exception}) do
-    Tracing.set_error(inspect(exception.__struct__))
+  defp record_response({:error, exception}, span) do
+    Tracing.set_error(span, inspect(exception.__struct__))
   end
 
   defp error_module(:error, reason, stacktrace) do

@@ -89,9 +89,8 @@ defmodule Claudex.ToolRunner do
       `Claudex.Stream.Handle` carrying the same reference stops the one in
       flight. `stream_to/3` sets it itself.
     * `:session` - names the conversation for tracing, as `session.id` on its
-      span. A chat's id, or whatever the user called it. Without one the trace
-      stands alone, which is right for a conversation that belongs to nothing
-      larger. See `Claudex.Tracing`.
+      span. Without one the trace stands alone, which is right for a conversation
+      that belongs to nothing larger. See `Claudex.Tracing`.
 
   ## Approving a tool call
 
@@ -302,40 +301,6 @@ defmodule Claudex.ToolRunner do
     |> traced(config)
   end
 
-  # One span around the whole conversation, so every turn, request and tool
-  # call of a run lands in a single trace rather than one trace per turn.
-  # Bracketing the enumeration is what keeps it open across a lazy stream.
-  defp traced(turns, config) do
-    {name, attributes} = Attributes.conversation(config.params, config.max_turns, config.session)
-
-    Stream.transform(
-      turns,
-      fn -> {Tracing.start_span(name, attributes), nil} end,
-      fn turn, {span, _previous} -> {[turn], {span, turn}} end,
-      fn {span, last} -> finish_conversation(span, last) end
-    )
-  end
-
-  # A trace's own input and output are the run's: the question it started with
-  # and the answer it ended on. A turn with no stop is not that answer: the
-  # conversation was still going when it ended, which is what a raise looks
-  # like from here, and recording it would show a finished run whose reply is
-  # a turn from the middle.
-  defp finish_conversation(span, %Turn{stop: nil}) do
-    Tracing.set_error(span, "the conversation ended before a turn finished it")
-    Tracing.end_span(span)
-  end
-
-  defp finish_conversation(span, %Turn{} = turn) do
-    Tracing.set_attributes(span, Attributes.conversation_result(turn.message, turn.stop))
-    Tracing.end_span(span)
-  end
-
-  defp finish_conversation(span, nil) do
-    Tracing.set_error(span, "the conversation ended before a turn finished it")
-    Tracing.end_span(span)
-  end
-
   @doc """
   Runs the conversation in its own process and returns straight away,
   delivering each turn to a mailbox.
@@ -417,6 +382,31 @@ defmodule Claudex.ToolRunner do
     end)
   end
 
+  # One span around the whole conversation, so every turn, request and tool
+  # call of a run lands in a single trace.
+  defp traced(turns, config) do
+    describe = fn ->
+      Attributes.conversation(config.params, config.max_turns, config.session)
+    end
+
+    Stream.transform(
+      turns,
+      fn -> {Tracing.start_span(describe), nil} end,
+      fn turn, {span, _previous} -> {[turn], {span, turn}} end,
+      fn {span, last} -> finish_conversation(span, last) end
+    )
+  end
+
+  defp finish_conversation(span, %Turn{message: message, stop: stop}) when is_atom(stop) do
+    Tracing.set_attributes(span, Attributes.conversation_result(message, stop))
+    Tracing.end_span(span)
+  end
+
+  defp finish_conversation(span, nil) do
+    Tracing.set_error(span, "the conversation ended before a turn finished it")
+    Tracing.end_span(span)
+  end
+
   defp forwarding(opts, sink) do
     on_event = Keyword.get(opts, :on_event, &ignore/1)
 
@@ -443,9 +433,9 @@ defmodule Claudex.ToolRunner do
   end
 
   defp next_turn(config, messages, index) do
-    {name, attributes} = Attributes.turn(index)
-
-    Tracing.span(name, attributes, fn -> run_turn(config, messages, index) end)
+    Tracing.span(fn -> Attributes.turn(index) end, fn _span ->
+      run_turn(config, messages, index)
+    end)
   end
 
   defp run_turn(config, messages, index) do

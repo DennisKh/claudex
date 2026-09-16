@@ -216,27 +216,25 @@ defmodule Claudex.Tool do
 
   @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
   def call(module, name, input) when is_atom(module) and is_map(input) do
-    {span_name, attributes} = Attributes.tool(name, input)
-
-    Tracing.span(span_name, attributes, fn ->
+    Tracing.span(fn -> Attributes.tool(name, input) end, fn span ->
       :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
         result = module.__call_tool__(name, input)
 
-        record_call(result)
+        record_call(result, span)
 
         {result, %{tool: name, outcome: outcome(result)}}
       end)
     end)
   end
 
-  # A tool reports failure by returning rather than raising, so nothing marks
-  # the span unless this does, and a backend's error filter passes over it.
-  defp record_call(result) do
-    Tracing.set_attributes(Attributes.tool_outcome(outcome(result), result))
+  defp record_call(_result, :untraced), do: :ok
+
+  defp record_call(result, span) do
+    Tracing.set_attributes(span, Attributes.tool_outcome(outcome(result), result))
 
     case Attributes.tool_error(result) do
       nil -> :ok
-      message -> Tracing.set_error(message)
+      message -> Tracing.set_error(span, message)
     end
   end
 

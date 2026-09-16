@@ -553,7 +553,11 @@ The events cover the things you can't otherwise see: the model and `request_id` 
 
 Claudex emits OpenTelemetry spans as well: one per request, one per turn of a tool conversation, and one per tool call, nested so a trace reads as the conversation it was. Attributes follow the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so a backend shows the model, token counts and stop reason with no Claudex-specific integration.
 
-Nothing is needed to turn it off. Claudex depends on `opentelemetry_api`, which starts no processes and resolves to a no-op tracer, so an app that never traces pays nothing. To turn it on, add the SDK and an exporter yourself:
+![Langfuse trace view](assets/langfuse-trace-1.png)
+
+*One tool conversation in Langfuse: a single `invoke_agent` trace, a `turn` span per round, with the request and each tool call nested under it.*
+
+Tracing is off until you ask for it with `config :claudex, tracing: true`, and nothing is built or measured while it is off. To turn it on, set the config and add these to your deps:
 
 ```elixir
 {:opentelemetry, "~> 1.7"},
@@ -569,6 +573,10 @@ auth =
   Base.encode64(
     System.fetch_env!("LANGFUSE_PUBLIC_KEY") <> ":" <> System.fetch_env!("LANGFUSE_SECRET_KEY")
   )
+
+config :claudex,
+  tracing: true,
+  trace_content: true
 
 config :opentelemetry_exporter,
   otlp_protocol: :http_protobuf,
@@ -605,6 +613,10 @@ Name a conversation to group its trace with others — a chat id, or whatever th
 ```elixir
 Claudex.ToolRunner.run(client, params, session: chat.id)
 ```
+
+![Langfuse session view](assets/langfuse-trace-2.png)
+
+*The same session id across several runs: each run is its own trace, grouped under one session.*
 
 See `Claudex.Tracing` for the span tree and what each one carries.
 

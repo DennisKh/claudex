@@ -43,13 +43,14 @@ defmodule Claudex.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url, "Changelog" => @source_url <> "/blob/main/CHANGELOG.md"},
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
+      files: ~w(lib assets mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
     ]
   end
 
   defp docs do
     [
       main: "readme",
+      assets: %{"assets" => "assets"},
       logo: "assets/logo.svg",
       favicon: "assets/logo.svg",
       extras: ["README.md", "CHANGELOG.md", "LICENSE"],
@@ -105,6 +106,8 @@ defmodule Claudex.MixProject do
           Claudex.Model
         ],
         Internals: [
+          Claudex.Tracing.Attributes,
+          Claudex.Tracing.Messages,
           Claudex.Tool.Schema,
           Claudex.Tool.Schema.StructExpansion,
           Claudex.Tool.Dispatch,

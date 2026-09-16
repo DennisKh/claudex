@@ -3,10 +3,14 @@ defmodule Claudex.Tracing do
   OpenTelemetry spans for the requests Claudex makes, the streams it reads,
   and the tool conversations it runs.
 
-  Claudex depends on `opentelemetry_api` alone, which starts no processes and
-  resolves to a no-op tracer when nothing else is present. An app that never
-  traces pays nothing and needs no configuration. One that does adds the SDK
-  and an exporter itself:
+  This feature is disabled by default. Enable it by setting:
+
+      config :claudex, tracing: true
+
+  Nothing is measured, built or recorded while that is false, whatever else
+  is running. Claudex depends on `opentelemetry_api` alone, which starts no
+  processes, so an app that never traces carries one library that does
+  nothing. One that does adds the SDK and an exporter itself:
 
       # mix.exs
       {:opentelemetry, "~> 1.7"},
@@ -26,25 +30,25 @@ defmodule Claudex.Tracing do
   program when it finds none. `unknown_service:erl` means it fell all the way
   through.
 
-  ## SDK settings that interact with what Claudex records
+  ## SDK defaults that shape a Claudex trace
 
-  These belong to `opentelemetry` rather than to Claudex, and the defaults
-  suit most apps. Four change what a Claudex trace looks like:
+  Nothing here needs setting. Two of `opentelemetry`'s own defaults decide
+  what a trace looks like once it grows, and both are plain app config:
 
-    * `OTEL_RESOURCE_ATTRIBUTES` puts `key=value` pairs on every span and is
-      read by default. `deployment.environment=staging,service.version=1.4.0`
-      is the usual pair, and is how one backend tells your environments apart.
-    * `attribute_value_length_limit` is `:infinity` by default, so a long
-      conversation captured with `trace_content: true` goes out whole. Cap it
-      with `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` if your collector rejects
-      large spans, and expect the messages to be the attribute that gets cut.
-    * `sampler` is `{:parent_based, %{root: :always_on}}` by default, so every
-      conversation is traced. A run is one trace, so a ratio sampler drops or
-      keeps whole conversations rather than pieces of them.
-    * `processors` are batched by default, which is right for a running app
-      and wrong for a script: a short-lived VM can exit before the batch is
-      sent. Use `:otel_simple_processor` when a mix task or a release command
-      has to see its own traces.
+      config :opentelemetry,
+        attribute_value_length_limit: 8_192,
+        sampler: {:parent_based, %{root: {:trace_id_ratio_based, 0.1}}}
+
+  `attribute_value_length_limit` is `:infinity`, so a conversation recorded
+  with `trace_content: true` is exported whole. Cap it when a collector
+  rejects large spans; the messages are the attribute that gets cut.
+  `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` sets the same value.
+
+  `sampler` is `{:parent_based, %{root: :always_on}}`, so every run is traced.
+  A run is one trace, so the ratio above keeps one conversation in ten whole
+  rather than a tenth of every conversation. `OTEL_TRACES_SAMPLER` and
+  `OTEL_TRACES_SAMPLER_ARG` set the same pair, as
+  `parentbased_traceidratio` and `0.1`.
 
   Attributes follow the
   [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
@@ -67,11 +71,6 @@ defmodule Claudex.Tracing do
   conventions have no operation for a step inside an invocation, and a turn's
   request and tool calls belong together.
 
-  Every turn is named `turn`, with its number in `claudex.turn.index`. A span
-  name labels a kind of work rather than one instance of it, so a backend that
-  draws a graph folds all the turns into one node and counts them. Numbering
-  the names would draw a five-turn run as five separate nodes.
-
   A single `Claudex.Messages.create/2` or `stream!/2` is one `chat` span with
   no conversation around it.
 
@@ -82,10 +81,10 @@ defmodule Claudex.Tracing do
 
       Claudex.ToolRunner.run(client, params, session: chat.id)
 
-  That sets `session.id` on the conversation span. It is a standard attribute
-  rather than one backend's idea, so a chat id, a user-given name or a request
-  id groups the same way wherever the spans are sent. Without it a run's trace
-  stands alone, which is right when it belongs to nothing larger.
+  This attaches session.id to the conversation span. Because it uses a standard
+  attribute format, grouping works consistently across tracing backends whether
+  the identifier is a chat ID, custom session name, or request ID. Without this
+  attribute, the trace remains unlinked, which is appropriate for standalone runs.
 
   ## Your own spans
 
@@ -156,13 +155,12 @@ defmodule Claudex.Tracing do
   work in between, and an app that starts a span in one callback and ends it
   in another is not made to pay for it.
 
-  ## Tracing is optional
+  ## Turning it off
 
-  Adding nothing is a supported configuration. Without the SDK the tracer is
-  a no-op, `recording?/0` is false, and every span call returns without
-  reaching anything: a tool conversation runs exactly as it would if this
-  module did not exist. There is no dependency to add, no config to write and
-  no error to handle.
+  `config :claudex, tracing: false`, which is the default, is the whole
+  switch: `enabled?/0` is false, no attributes are built, no messages are
+  shaped, no spans are started and the stream records nothing. A tool
+  conversation runs exactly as it would if this module did not exist.
 
   A span never fails the work it measures either. Every call into the tracer
   is guarded, so an exporter that raises or a tracer that is misconfigured
@@ -171,35 +169,62 @@ defmodule Claudex.Tracing do
 
   @tracer_scope __MODULE__
 
-  @doc false
-  @spec span(String.t(), map(), (-> result)) :: result when result: term()
-  def span(name, attributes, fun) when is_function(fun, 0) do
-    span_ctx = start(name, attributes)
+  @doc """
+  Checks the two things a span needs: `config :claudex, tracing: true`, and an
+  OpenTelemetry SDK loaded to record into.
 
-    try do
-      fun.()
-    rescue
-      exception ->
-        record_exception(span_ctx, exception, __STACKTRACE__)
-        reraise exception, __STACKTRACE__
-    catch
-      kind, reason ->
-        fail(span_ctx, "#{kind}: #{inspect(reason)}")
-        :erlang.raise(kind, reason, __STACKTRACE__)
-    after
-      stop(span_ctx)
+  Nothing is built or measured while this is false.
+  """
+  @spec enabled?() :: boolean()
+  def enabled? do
+    if Application.get_env(:claudex, :tracing, false), do: tracer_records?(), else: false
+  end
+
+  @doc """
+  Runs `fun` inside a span, handing it the span to record onto.
+
+  `describe` returns `{name, attributes}` and is only called when `enabled?/0`
+  is true, so building the attributes costs nothing while tracing is off.
+  `fun` is given the span, or `:untraced` when there is none, and whatever it
+  returns is returned here. An exception is recorded on the span and re-raised
+  unchanged.
+  """
+  @spec span((-> {String.t(), map()}), (term() -> result)) :: result when result: term()
+  def span(describe, fun) when is_function(describe, 0) and is_function(fun, 1) do
+    if enabled?(), do: traced(describe, fun), else: fun.(:untraced)
+  end
+
+  @doc """
+  Starts a span, makes it current, and returns the handle `end_span/1` takes.
+
+  `describe` returns `{name, attributes}` and is only called while tracing is
+  on; the handle is `:untraced` otherwise.
+  """
+  @spec start_span((-> {String.t(), map()})) :: term()
+  def start_span(describe) when is_function(describe, 0) do
+    if enabled?() do
+      {name, attributes} = describe.()
+      start(name, attributes)
+    else
+      :untraced
     end
   end
 
-  @doc false
-  @spec start_span(String.t(), map()) :: term()
-  def start_span(name, attributes), do: start(name, attributes)
+  @doc """
+  Ends a span from `start_span/1` and makes its parent current again.
 
-  @doc false
+  Ending a span is what hands it to the exporter. An `:untraced` handle does
+  nothing.
+  """
   @spec end_span(term()) :: :ok
   def end_span(span_ctx), do: stop(span_ctx)
 
-  @doc false
+  @doc """
+  Checks whether the span current in this process is recording.
+
+  `enabled?/0` answers whether Claudex traces at all; this answers for the
+  span in hand, which a sampler may have dropped.
+  """
   @spec recording?() :: boolean()
   def recording? do
     :otel_span.is_recording(:otel_tracer.current_span_ctx())
@@ -238,7 +263,13 @@ defmodule Claudex.Tracing do
     _kind, _reason -> :ok
   end
 
-  @doc false
+  @doc """
+  Returns a handle for the span current in this process, in the shape
+  `set_attributes/2` and `set_error/2` take.
+
+  The handle carries no parent, so ending it would leave this process with no
+  current span.
+  """
   @spec current_span() :: term()
   def current_span do
     {:otel_tracer.current_span_ctx(), :undefined}
@@ -248,7 +279,7 @@ defmodule Claudex.Tracing do
     _kind, _reason -> :untraced
   end
 
-  @doc false
+  @doc "Puts `attributes` on `span`. An `:untraced` handle does nothing."
   @spec set_attributes(term(), map()) :: :ok
   def set_attributes(:untraced, _attributes), do: :ok
 
@@ -262,44 +293,51 @@ defmodule Claudex.Tracing do
     _kind, _reason -> :ok
   end
 
-  @doc false
-  @spec set_attributes(map()) :: :ok
-  def set_attributes(attributes) when is_map(attributes) do
-    :otel_span.set_attributes(:otel_tracer.current_span_ctx(), attributes)
+  @doc """
+  Marks `span` as failed, with `message` as its status.
 
-    :ok
-  rescue
-    _any -> :ok
-  catch
-    _kind, _reason -> :ok
-  end
-
-  @doc false
+  An `:untraced` handle does nothing.
+  """
   @spec set_error(term(), String.t()) :: :ok
   def set_error(:untraced, _message), do: :ok
   def set_error({span_ctx, _parent}, message), do: put_error(span_ctx, message)
 
-  @doc false
-  @spec set_error(String.t()) :: :ok
-  def set_error(message) do
-    put_error(:otel_tracer.current_span_ctx(), message)
-  rescue
-    _any -> :ok
-  catch
-    _kind, _reason -> :ok
-  end
-
   @doc """
-  Whether prompts and completions are recorded on spans.
+  Checks whether prompts and completions go onto spans.
 
   Off unless `config :claudex, trace_content: true`.
   """
   @spec trace_content?() :: boolean()
-  def trace_content? do
-    case Application.get_env(:claudex, :trace_content, false) do
-      true -> true
-      _off -> false
+  def trace_content?, do: Application.get_env(:claudex, :trace_content, false)
+
+  defp traced(describe, fun) do
+    {name, attributes} = describe.()
+    span_ctx = start(name, attributes)
+
+    try do
+      fun.(span_ctx)
+    rescue
+      exception ->
+        record_exception(span_ctx, exception, __STACKTRACE__)
+        reraise exception, __STACKTRACE__
+    catch
+      kind, reason ->
+        fail(span_ctx, "#{kind}: #{inspect(reason)}")
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    after
+      stop(span_ctx)
     end
+  end
+
+  defp tracer_records? do
+    case :opentelemetry.get_application_tracer(@tracer_scope) do
+      {:otel_tracer_noop, _config} -> false
+      _tracer -> true
+    end
+  rescue
+    _any -> false
+  catch
+    _kind, _reason -> false
   end
 
   defp start(name, attributes) do
@@ -330,9 +368,6 @@ defmodule Claudex.Tracing do
 
   defp record_exception(:untraced, _exception, _stacktrace), do: :ok
 
-  # Built by hand rather than through record_exception/5, which formats an
-  # Elixir exception struct as an Erlang term and puts the whole thing in
-  # exception.type. The semantic convention wants the module and the message.
   defp record_exception({span_ctx, _parent}, exception, stacktrace) do
     :otel_span.add_event(span_ctx, :exception, %{
       "exception.type" => inspect(exception.__struct__),

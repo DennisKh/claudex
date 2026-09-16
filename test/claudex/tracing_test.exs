@@ -810,13 +810,80 @@ defmodule Claudex.TracingTest do
     refute Map.has_key?(attributes(counting), "gen_ai.request.model")
   end
 
+  test "tracing is off when nothing has asked for it" do
+    # config/test.exs turns it on for this suite, so the default is only
+    # visible with the key gone.
+    Application.delete_env(:claudex, :tracing)
+    on_exit(fn -> Application.put_env(:claudex, :tracing, true) end)
+
+    refute Tracing.enabled?()
+  end
+
+  test "tracing off produces nothing, whatever OpenTelemetry is doing" do
+    require OpenTelemetry.Tracer, as: Tracer
+
+    Application.put_env(:claudex, :tracing, false)
+    on_exit(fn -> Application.put_env(:claudex, :tracing, true) end)
+
+    stream_reply(message())
+
+    # The SDK is running and exporting: only Claudex's switch is off.
+    Tracer.with_span "my_app.work" do
+      assert {:ok, _turn} = ToolRunner.run(client(), Map.put(@params, :tools, Calculator))
+    end
+
+    spans = collect_spans([])
+
+    assert Enum.map(spans, &span(&1, :name)) == ["my_app.work"]
+    assert attributes(hd(spans)) == %{}
+    refute Tracing.enabled?()
+  end
+
+  defmodule Adder do
+    use Claudex.Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+  end
+
+  test "tracing off leaves a caller's span untouched, on every path" do
+    require OpenTelemetry.Tracer, as: Tracer
+
+    Application.put_env(:claudex, :tracing, false)
+    on_exit(fn -> Application.put_env(:claudex, :tracing, true) end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      conn
+      |> Plug.Conn.put_status(429)
+      |> Req.Test.json(%{"error" => %{"type" => "rate_limit_error", "message" => "slow down"}})
+    end)
+
+    # A non-streaming request and a tool call, neither of which the streaming
+    # test reaches. With no span of our own, anything written to "the current
+    # span" is written to theirs.
+    Tracer.with_span "my_app.work" do
+      assert {:error, _error} = Messages.create(client(), @params)
+      assert {:ok, 3} = Claudex.Tool.call(Adder, "add", %{"a" => 1, "b" => 2})
+    end
+
+    [app_span] = collect_spans([])
+
+    assert span(app_span, :name) == "my_app.work"
+    assert attributes(app_span) == %{}
+
+    # A failed Claudex request must not turn the caller's span red either.
+    assert span(app_span, :status) == :undefined
+  end
+
   test "the span hands back what the work returned" do
-    assert Tracing.span("work", %{}, fn -> :the_result end) == :the_result
+    assert Tracing.span(fn -> {"work", %{}} end, fn _span -> :the_result end) == :the_result
   end
 
   test "an exception in the work is recorded on the span and re-raised unchanged" do
     assert_raise RuntimeError, "boom", fn ->
-      Tracing.span("work", %{}, fn -> raise "boom" end)
+      Tracing.span(fn -> {"work", %{}} end, fn _span -> raise "boom" end)
     end
 
     assert_receive {:span, recorded}, 2_000

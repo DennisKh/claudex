@@ -42,6 +42,7 @@ defmodule Mix.Tasks.Claudex.Gen.TracingTest do
                List.keyfind(exporter[:otlp_headers], "x-langfuse-ingestion-version", 0)
 
       assert config[:claudex][:trace_content] == false
+      assert config[:claudex][:tracing] == true
     end
 
     test "LANGFUSE_HOST redirects it at a self-hosted install", %{tmp_dir: tmp_dir} do

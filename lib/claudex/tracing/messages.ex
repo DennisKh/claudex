@@ -1,11 +1,19 @@
 defmodule Claudex.Tracing.Messages do
-  @moduledoc false
+  @moduledoc """
+  Claude's messages in the shapes a tracing backend reads.
 
-  # Claude's messages in the shape the GenAI conventions define for
-  # `gen_ai.input.messages` and `gen_ai.output.messages`: a list of
-  # `%{role, parts}`, where a part is text, a tool call, or a tool call's
-  # response. Claude's content blocks map onto those almost one for one,
-  # which is why a backend can render a Claudex trace as a conversation.
+  The conventions define `gen_ai.input.messages` and `gen_ai.output.messages`
+  as a list of `%{role, parts}`, where a part is text, a tool call, or a tool
+  call's response. Claude's content blocks map onto those almost one for one,
+  which is what lets a backend render a Claudex trace as a conversation
+  rather than a blob.
+
+  `chat_input/2` and `chat_output/1` build a second shape for `gen_ai.prompt`
+  and `gen_ai.completion`. Those attributes predate the structured model and
+  have no defined shape, so what their readers expect is the chat message one:
+  a role, a string of content, and tool calls under `tool_calls`. A reply
+  asking for a tool would otherwise read as a reply asking for nothing.
+  """
 
   @doc "Shapes the conversation so far into the conventions' input messages."
   @spec input([map()]) :: [map()]
@@ -14,10 +22,6 @@ defmodule Claudex.Tracing.Messages do
 
   @doc """
   Shapes one reply's content blocks into a single assistant output message.
-
-  Nil for a body that is not a reply. Every endpoint goes through the same
-  span, so a models list would otherwise be recorded as a generation whose
-  assistant said nothing.
   """
   @spec output([map()] | String.t() | nil) :: [map()] | nil
   def output(nil), do: nil
@@ -29,7 +33,6 @@ defmodule Claudex.Tracing.Messages do
   Takes a string or the list of text blocks the API also accepts.
   """
   @spec system(String.t() | [map()] | nil) :: [map()] | nil
-  def system(nil), do: nil
   def system(system) when is_binary(system), do: [%{type: "text", content: system}]
 
   def system(blocks) when is_list(blocks) do
@@ -143,7 +146,7 @@ defmodule Claudex.Tracing.Messages do
     do: %{type: "tool_call_response", id: id, response: block["content"]}
 
   # A block type the conventions have no part for (thinking, a server tool, an
-  # image) goes through under its own name rather than being dropped.
+  # image) goes through under its own name.
   defp part(%{type: type} = block), do: %{type: type, content: block}
   defp part(%{"type" => type} = block), do: %{type: type, content: block}
   defp part(block), do: %{type: "text", content: block}
