@@ -11,7 +11,7 @@ defmodule Claudex.Messages.Batches do
           params: %{
             model: "claude-opus-5",
             max_tokens: 1024,
-            messages: [%{role: "user", content: "..."}]
+            messages: [Claudex.Message.user("...")]
           }
         }
       ]
