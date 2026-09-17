@@ -1,7 +1,7 @@
 defmodule Claudex.ContentBlock.Unknown do
   @moduledoc """
   A content block type this version of Claudex doesn't have a struct for
-  yet, an MCP tool call for example. Nothing is lost: `raw` holds the full
+  yet, a compaction block for example. Nothing is lost: `raw` holds the full
   decoded JSON, and `type` is its `"type"` field. `Claudex.ContentBlock` lists
   the types that have a struct.
   """

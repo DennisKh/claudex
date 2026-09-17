@@ -112,6 +112,28 @@ defmodule Claudex.Stream.AccumulatorTest do
     assert ContentBlock.to_param(call)["input"] == %{"query" => "claudex sdk"}
   end
 
+  test "add/2 parses an MCP connector call's arguments too" do
+    events = [
+      message_start(),
+      block_start(0, %{
+        "type" => "mcp_tool_use",
+        "id" => "mcptoolu_1",
+        "name" => "read_wiki_structure",
+        "server_name" => "deepwiki",
+        "input" => %{}
+      }),
+      delta(0, %{"type" => "input_json_delta", "partial_json" => ~s({"repoName": )}),
+      delta(0, %{"type" => "input_json_delta", "partial_json" => ~s("elixir-lang/elixir"})}),
+      block_stop(0)
+    ]
+
+    assert %Message{content: [%ContentBlock.MCPToolUse{} = call]} =
+             events |> fold() |> Accumulator.message()
+
+    assert call.input == %{"repoName" => "elixir-lang/elixir"}
+    assert ContentBlock.to_param(call)["input"] == %{"repoName" => "elixir-lang/elixir"}
+  end
+
   test "add/2 leaves a tool call's input alone when the arguments are truncated" do
     message =
       [
