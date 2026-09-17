@@ -11,7 +11,7 @@ defmodule Claudex do
         Claudex.Messages.create(client, %{
           model: "claude-opus-5",
           max_tokens: 1024,
-          messages: [%{role: "user", content: "Hello, Claude"}]
+          messages: [Claudex.Message.user("Hello, Claude")]
         })
 
       Claudex.Message.text(message)
@@ -34,17 +34,26 @@ defmodule Claudex do
       with the JSON schema derived from their `@spec` and `@doc`.
     * `Claudex.ToolRunner` - run a whole tool conversation: send, run what
       Claude asks for, send the results back, repeat.
+    * `Claudex.MCP.Server` - point the API at a remote MCP server and let it
+      run that server's tools.
+    * `Claudex.OutputFormat` - make Claude answer with JSON in the shape of one
+      of your structs.
     * `Claudex.Models` - which models your key can use, and what each supports.
     * `Claudex.Files` - upload a file once, then reference it by `file_id`
       instead of re-sending the bytes; also how you download what Claude
       creates.
     * `Claudex.Messages.Batches` - send up to 100,000 requests at once for
       asynchronous processing, at half the token cost.
+    * `Claudex.Page` - one page from a list endpoint, carrying the cursors both
+      of the API's paging styles need. Each of those modules has a `stream!/2`
+      that walks every page.
     * `Claudex.Message`, `Claudex.ContentBlock`, `Claudex.Usage` - what a reply
       is made of.
     * `Claudex.Error` - every failure, with a `:type` you can match on.
     * `Claudex.Telemetry` - the events the SDK emits, and a one-line logger for
       them when you want to see what it's doing.
+    * `Claudex.Tracing` - OpenTelemetry spans for requests, streams and tool
+      conversations, off until you enable it.
 
   Fallible functions return `{:ok, result}` or `{:error, %Claudex.Error{}}`.
   The exceptions are the `!` variants, which raise instead.
