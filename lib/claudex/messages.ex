@@ -74,7 +74,7 @@ defmodule Claudex.Messages do
       {:ok, tokens} =
         Claudex.Messages.count_tokens(client, %{
           model: "claude-opus-5",
-          messages: [%{role: "user", content: "Hello, Claude"}]
+          messages: [Claudex.Message.user("Hello, Claude")]
         })
 
   Only `:model` and `:messages` are required — this endpoint has no
