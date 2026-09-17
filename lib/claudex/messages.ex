@@ -13,7 +13,7 @@ defmodule Claudex.Messages do
   request at a time.
   """
 
-  alias Claudex.{API, Client, Error, Message, OutputFormat, Tool}
+  alias Claudex.{API, Client, Error, MCP, Message, OutputFormat, Tool}
   alias Claudex.Stream.{Connection, Forwarder, Handle}
 
   @required_params [:model, :messages, :max_tokens]
@@ -204,13 +204,24 @@ defmodule Claudex.Messages do
 
   defp build_body(params, required \\ @required_params) do
     body =
-      params |> Map.new() |> normalize_tools() |> normalize_messages() |> normalize_format()
+      params
+      |> Map.new()
+      |> normalize_tools()
+      |> normalize_mcp_servers()
+      |> normalize_messages()
+      |> normalize_format()
 
     with :ok <- validate_required(body, required), do: {:ok, body}
   end
 
   defp normalize_tools(%{tools: tools} = body), do: %{body | tools: Tool.list(tools)}
   defp normalize_tools(body), do: body
+
+  defp normalize_mcp_servers(%{mcp_servers: servers} = body) when is_list(servers) do
+    %{body | mcp_servers: Enum.map(servers, &MCP.Server.to_param/1)}
+  end
+
+  defp normalize_mcp_servers(body), do: body
 
   defp normalize_messages(%{messages: messages} = body) when is_list(messages) do
     %{body | messages: Enum.map(messages, &Message.to_param/1)}

@@ -89,7 +89,8 @@ defmodule Claudex.MixProject do
           Claudex.ToolRunner.Turn,
           Claudex.Tool.Error,
           Claudex.Tool.CallError,
-          Claudex.Tool.SchemaError
+          Claudex.Tool.SchemaError,
+          Claudex.MCP.Server
         ],
         Files: [
           Claudex.Files,
