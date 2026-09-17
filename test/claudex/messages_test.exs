@@ -1,7 +1,7 @@
 defmodule Claudex.MessagesTest do
   use ExUnit.Case, async: true
 
-  alias Claudex.{Client, Error, Message, Messages}
+  alias Claudex.{Client, Error, MCP, Message, Messages}
   alias Claudex.TestSupport.Ticket
 
   defmodule Tools do
@@ -92,6 +92,49 @@ defmodule Claudex.MessagesTest do
       max_tokens: 1024,
       tools: Tools,
       messages: [%{role: "user", content: "add 1 and 2"}]
+    }
+
+    assert {:ok, _message} = Messages.create(client(), params)
+  end
+
+  test "create/2 sends an MCP server struct as the map the API takes" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+      body = Jason.decode!(raw_body)
+
+      assert body["mcp_servers"] == [
+               %{
+                 "type" => "url",
+                 "name" => "github",
+                 "url" => "https://api.githubcopilot.com/mcp/",
+                 "authorization_token" => "ghp_secret_value"
+               }
+             ]
+
+      Req.Test.json(conn, %{
+        "id" => "msg_1",
+        "type" => "message",
+        "role" => "assistant",
+        "model" => "claude-opus-5",
+        "content" => [%{"type" => "text", "text" => "ok"}],
+        "stop_reason" => "end_turn",
+        "stop_sequence" => nil,
+        "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
+      })
+    end)
+
+    params = %{
+      model: "claude-opus-5",
+      max_tokens: 1024,
+      mcp_servers: [
+        %MCP.Server{
+          name: "github",
+          url: "https://api.githubcopilot.com/mcp/",
+          authorization_token: "ghp_secret_value"
+        }
+      ],
+      tools: [%{type: "mcp_toolset", mcp_server_name: "github"}],
+      messages: [%{role: "user", content: "which issues are open?"}]
     }
 
     assert {:ok, _message} = Messages.create(client(), params)

@@ -4,6 +4,8 @@ defmodule Claudex.ContentBlockTest do
   alias Claudex.ContentBlock
 
   alias Claudex.ContentBlock.{
+    MCPToolResult,
+    MCPToolUse,
     RedactedThinking,
     ServerToolResult,
     ServerToolUse,
@@ -43,9 +45,9 @@ defmodule Claudex.ContentBlockTest do
   end
 
   test "falls back to Unknown for an unmodeled block type" do
-    json = %{"type" => "mcp_tool_use", "id" => "mcptoolu_1"}
+    json = %{"type" => "compaction", "id" => "compact_1"}
 
-    assert %Unknown{type: "mcp_tool_use", raw: ^json} = ContentBlock.decode(json)
+    assert %Unknown{type: "compaction", raw: ^json} = ContentBlock.decode(json)
   end
 
   # The blocks below follow the responses in Anthropic's web search and server
@@ -141,6 +143,89 @@ defmodule Claudex.ContentBlockTest do
       ]
 
       assert Enum.map(blocks, &(&1 |> ContentBlock.decode() |> ContentBlock.to_param())) == blocks
+    end
+  end
+
+  # Shapes taken from the beta Messages types in the TypeScript SDK
+  # (BetaMCPToolUseBlock, BetaMCPToolResultBlock), which is the only place the
+  # connector is specified; test/fixtures/mcp_connector.json records a real one.
+  describe "MCP connector blocks" do
+    test "decodes an mcp_tool_use block, keeping the server it went to" do
+      json = %{
+        "type" => "mcp_tool_use",
+        "id" => "mcptoolu_1",
+        "name" => "read_wiki_structure",
+        "server_name" => "deepwiki",
+        "input" => %{"repoName" => "elixir-lang/elixir"}
+      }
+
+      assert %MCPToolUse{id: "mcptoolu_1", name: "read_wiki_structure"} =
+               block = ContentBlock.decode(json)
+
+      assert block.server_name == "deepwiki"
+      assert block.input == %{"repoName" => "elixir-lang/elixir"}
+    end
+
+    test "decodes an mcp_tool_result block" do
+      json = %{
+        "type" => "mcp_tool_result",
+        "tool_use_id" => "mcptoolu_1",
+        "is_error" => false,
+        "content" => [%{"type" => "text", "text" => "Pages: Getting Started"}]
+      }
+
+      assert %MCPToolResult{tool_use_id: "mcptoolu_1", is_error: false} =
+               block = ContentBlock.decode(json)
+
+      assert block.content == [%{"type" => "text", "text" => "Pages: Getting Started"}]
+    end
+
+    test "a failed call is a block, not an error response" do
+      json = %{
+        "type" => "mcp_tool_result",
+        "tool_use_id" => "mcptoolu_1",
+        "is_error" => true,
+        "content" => [%{"type" => "text", "text" => "repository not found"}]
+      }
+
+      assert %MCPToolResult{is_error: true} = ContentBlock.decode(json)
+    end
+
+    test "both go back to the API byte for byte" do
+      blocks = [
+        %{
+          "type" => "mcp_tool_use",
+          "id" => "mcptoolu_1",
+          "name" => "read_wiki_structure",
+          "server_name" => "deepwiki",
+          "input" => %{"repoName" => "elixir-lang/elixir"}
+        },
+        %{
+          "type" => "mcp_tool_result",
+          "tool_use_id" => "mcptoolu_1",
+          "is_error" => false,
+          "content" => [%{"type" => "text", "text" => "Pages: Getting Started"}]
+        }
+      ]
+
+      assert Enum.map(blocks, &(&1 |> ContentBlock.decode() |> ContentBlock.to_param())) == blocks
+    end
+
+    test "a call Claude has not finished streaming replays with the arguments it ended with" do
+      # content_block_start carries an empty input; the real arguments arrive as
+      # input_json_delta fragments and are written onto the struct, not onto raw.
+      start = %{
+        "type" => "mcp_tool_use",
+        "id" => "mcptoolu_1",
+        "name" => "read_wiki_structure",
+        "server_name" => "deepwiki",
+        "input" => %{}
+      }
+
+      block = %{ContentBlock.decode(start) | input: %{"repoName" => "elixir-lang/elixir"}}
+
+      assert ContentBlock.to_param(block) ==
+               %{start | "input" => %{"repoName" => "elixir-lang/elixir"}}
     end
   end
 end

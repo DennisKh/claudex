@@ -15,6 +15,9 @@ defmodule Claudex.ContentBlock do
     * `Claudex.ContentBlock.ServerToolUse` and
       `Claudex.ContentBlock.ServerToolResult`: a call to one the API runs
       itself, and its answer
+    * `Claudex.ContentBlock.MCPToolUse` and
+      `Claudex.ContentBlock.MCPToolResult`: a call to one on an MCP server the
+      API connected to, and its answer
     * `Claudex.ContentBlock.Document` and
       `Claudex.ContentBlock.Image`: a PDF or a picture you send, which Claude
       never sends back. A type Claudex doesn't model yet becomes a `Claudex.ContentBlock.Unknown`,
@@ -27,6 +30,8 @@ defmodule Claudex.ContentBlock do
   alias Claudex.ContentBlock.{
     Document,
     Image,
+    MCPToolResult,
+    MCPToolUse,
     RedactedThinking,
     ServerToolResult,
     ServerToolUse,
@@ -43,6 +48,8 @@ defmodule Claudex.ContentBlock do
           | ToolUse.t()
           | ServerToolUse.t()
           | ServerToolResult.t()
+          | MCPToolUse.t()
+          | MCPToolResult.t()
           | Document.t()
           | Image.t()
           | Unknown.t()
@@ -63,6 +70,8 @@ defmodule Claudex.ContentBlock do
               "redacted_thinking" => RedactedThinking,
               "tool_use" => ToolUse,
               "server_tool_use" => ServerToolUse,
+              "mcp_tool_use" => MCPToolUse,
+              "mcp_tool_result" => MCPToolResult,
               "document" => Document,
               "image" => Image
             },

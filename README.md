@@ -360,6 +360,53 @@ If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and
 
 A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture, and `Claudex.OutputFormat` for the same mapping listed type by type.
 
+### Tools on an MCP server
+
+The API can connect to a remote MCP server itself and run its tools. That needs the `mcp-client-2025-11-20` beta, a server in `mcp_servers`, and an `mcp_toolset` in `tools` naming it:
+
+```elixir
+client = Claudex.new(beta: "mcp-client-2025-11-20")
+
+Claudex.Messages.create(client, %{
+  model: "claude-opus-5",
+  max_tokens: 1024,
+  mcp_servers: [
+    %Claudex.MCP.Server{
+      name: "github",
+      url: "https://api.githubcopilot.com/mcp/",
+      authorization_token: System.fetch_env!("GITHUB_TOKEN")
+    }
+  ],
+  tools: [%{type: "mcp_toolset", mcp_server_name: "github"}],
+  messages: [Claudex.Message.user("Which issues are open on elixir-lang/elixir?")]
+})
+```
+
+The toolset needs nothing but the server's name, and enables every tool that server exposes, so you don't have to know what those are: the API asks the server. Tool names matter only for narrowing the set. `default_config: %{enabled: false}` plus per-name entries in `configs` is an allowlist, `configs` on its own a denylist, and a name the server doesn't expose is not an error, so a typo there quietly does nothing.
+
+```elixir
+# allowlist: these two and nothing else
+%{
+  type: "mcp_toolset",
+  mcp_server_name: "github",
+  default_config: %{enabled: false},
+  configs: %{"list_issues" => %{enabled: true}, "issue_read" => %{enabled: true}}
+}
+
+# denylist: everything the server has, minus the ones that change things
+%{
+  type: "mcp_toolset",
+  mcp_server_name: "github",
+  configs: %{"issue_write" => %{enabled: false}, "merge_pull_request" => %{enabled: false}}
+}
+```
+
+On a server with a large catalogue, `default_config: %{defer_loading: true}` alongside the tool search tool keeps the descriptions out of the prompt until Claude looks one up.
+
+`authorization_token` is whatever that server's own OAuth or token scheme issues, obtained and refreshed by you. `Claudex.MCP.Server` keeps it out of `inspect/1`, so a server sitting in a config or an assign doesn't print the token in a log or a crash report; a plain map works here too and passes through as written. Every server must be referenced by exactly one toolset, and the URL has to be reachable from Anthropic's side, so a local stdio server cannot be connected this way. Claude's call arrives as `Claudex.ContentBlock.MCPToolUse` carrying the `server_name` it went to, and the answer as `Claudex.ContentBlock.MCPToolResult`, paired by `tool_use_id`. A call that failed is still a 200 with `is_error` set. The API runs both before it replies, so `Claudex.Message.tool_uses/1` leaves them out and there is nothing to dispatch.
+
+Data exchanged with an MCP server is not covered by zero data retention.
+
 ## Structured outputs
 
 `output_config.format` makes Claude answer with JSON, and Claudex derives the schema from a struct's `@type t`, the same way `:tools` reads a function's `@spec`:
@@ -493,7 +540,7 @@ Claudex.Message.assistant(blocks)
 
 That survives block types this version of Claudex doesn't model yet, because
 `Claudex.ContentBlock.Unknown` keeps the raw map and replays it untouched, so a
-compaction block or an MCP tool call round-trips without an SDK upgrade.
+compaction block round-trips without an SDK upgrade.
 
 Results for one reply go back together. If a reply asked for two tools, the
 next message has to answer both:
