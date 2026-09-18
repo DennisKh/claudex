@@ -75,6 +75,75 @@ defmodule Claudex.MessageTest do
     end
   end
 
+  describe "empty?/1" do
+    test "a message with no blocks is empty" do
+      assert Message.empty?(%Message{role: "assistant", content: []})
+      assert Message.empty?(%Message{role: "assistant"})
+    end
+
+    test "a text block with nothing in it is empty" do
+      assert Message.empty?(%Message{content: [%ContentBlock.Text{text: ""}]})
+      assert Message.empty?(%Message{content: [%ContentBlock.Text{text: nil}]})
+    end
+
+    test "a turn that only ran tools is not empty" do
+      # A web search or an MCP call answers with no text of its own. Reading
+      # that as empty drops the turn, and the conversation cannot resume
+      # without the blocks it held.
+      blocks = [
+        %ContentBlock.ServerToolUse{id: "srvtoolu_1", name: "web_search", input: %{}},
+        %ContentBlock.ServerToolResult{tool_use_id: "srvtoolu_1", tool: :web_search},
+        %ContentBlock.MCPToolUse{id: "mcptoolu_1", name: "read", server_name: "deepwiki"},
+        %ContentBlock.MCPToolResult{tool_use_id: "mcptoolu_1", content: []}
+      ]
+
+      for block <- blocks do
+        refute Message.empty?(%Message{content: [block]}),
+               "#{inspect(block.__struct__)} was empty"
+      end
+    end
+
+    test "a block this version doesn't model is not empty" do
+      # Unknown exists so a new block type still round-trips. Reading it as
+      # empty throws the turn away before `raw` reaches anyone's storage.
+      refute Message.empty?(%Message{
+               content: [%ContentBlock.Unknown{type: "compaction", raw: %{}}]
+             })
+
+      refute Message.empty?(%Message{content: [%ContentBlock.RedactedThinking{data: "opaque"}]})
+    end
+
+    test "a history from append/2 can be filtered without decoding it again" do
+      # append/2 hands back plain maps, which is the shape that goes to storage
+      # and comes back, so the natural call is on a map rather than a struct.
+      history =
+        []
+        |> Message.append(Message.user("hi"))
+        |> Message.append(%Message{role: "assistant", content: []})
+
+      assert Enum.map(history, &Message.empty?/1) == [false, true]
+    end
+
+    test "a stored turn is read the same whichever way its keys are spelled" do
+      blocks = [%{"type" => "text", "text" => ""}]
+
+      assert Message.empty?(%{"role" => "assistant", "content" => blocks})
+      assert Message.empty?(%{role: "assistant", content: [%{type: "text", text: ""}]})
+
+      refute Message.empty?(%{"role" => "assistant", "content" => [%{"type" => "thinking"}]})
+    end
+
+    test "a message with no content at all is empty" do
+      assert Message.empty?(%{role: "assistant"})
+    end
+
+    test "an empty text block alongside real content is not empty" do
+      content = [%ContentBlock.Text{text: ""}, %ContentBlock.Text{text: "42"}]
+
+      refute Message.empty?(%Message{content: content})
+    end
+  end
+
   describe "to_param/1" do
     test "converts a decoded message into request params" do
       message = %Message{

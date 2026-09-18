@@ -177,6 +177,39 @@ defmodule Claudex.Message do
   end
 
   @doc """
+  Checks whether a message carries anything worth keeping.
+
+  Answers the storage question, not the display one: a reply Claude thought
+  about but said nothing in is not empty, because every block it holds has to
+  go back to the API on the next turn. Only text counts as nothing, and only
+  when there is none of it.
+
+      iex> Claudex.Message.empty?(%Claudex.Message{content: []})
+      true
+
+      iex> Claudex.Message.empty?(%Claudex.Message{
+      ...>   content: [%Claudex.ContentBlock.Text{text: ""}]
+      ...> })
+      true
+
+      iex> Claudex.Message.empty?(%Claudex.Message{
+      ...>   content: [%Claudex.ContentBlock.Unknown{type: "compaction", raw: %{}}]
+      ...> })
+      false
+
+  A block type this version doesn't model counts, so a turn made only of one
+  is kept rather than dropped.
+
+  Takes a plain map too, so a history from `append/2` can be filtered as it
+  comes back out of storage.
+  """
+  @spec empty?(t() | map()) :: boolean()
+  def empty?(%__MODULE__{content: content}), do: blank_content?(content)
+  def empty?(%{content: content}), do: blank_content?(content)
+  def empty?(%{"content" => content}), do: blank_content?(content)
+  def empty?(%{}), do: true
+
+  @doc """
   The tool calls in a message, in the order Claude made them.
 
       iex> message = %Claudex.Message{
@@ -232,4 +265,15 @@ defmodule Claudex.Message do
   end
 
   def stop(_unrecognised), do: :unknown
+
+  defp blank_content?(blocks) when is_list(blocks), do: Enum.all?(blocks, &blank_block?/1)
+  defp blank_content?(text) when is_binary(text), do: text == ""
+  defp blank_content?(_content), do: true
+
+  defp blank_block?(%ContentBlock.Text{text: text}), do: blank_text?(text)
+  defp blank_block?(%{type: "text", text: text}), do: blank_text?(text)
+  defp blank_block?(%{"type" => "text", "text" => text}), do: blank_text?(text)
+  defp blank_block?(_block), do: false
+
+  defp blank_text?(text), do: text in [nil, ""]
 end
