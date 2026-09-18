@@ -201,9 +201,8 @@ defmodule Claudex.Tool do
   Arguments are matched to the function's parameters by name, so their order in
   the map doesn't matter, and a trailing optional parameter can be left out.
 
-  Arguments are matched to the function's parameters by name. A tool that
-  fails returns a `Claudex.Tool.CallError` instead of taking the caller down
-  with it. Its `type` separates a refusal from a bug,
+  A tool that fails returns a `Claudex.Tool.CallError` instead of taking the
+  caller down with it. Its `type` separates a refusal from a bug,
   and `message` is a sentence you can show or send back to Claude whatever the
   type is:
 
@@ -212,11 +211,18 @@ defmodule Claudex.Tool do
 
   For `:tool_raised` the exception type is part of the message, so a bug reads
   differently to Claude than a considered refusal.
+
+  `opts` takes `:session`, which names the conversation this call belongs to
+  on its span. See `Claudex.Tracing`.
   """
 
   @spec call(module(), String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
-  def call(module, name, input) when is_atom(module) and is_map(input) do
-    Tracing.span(fn -> Attributes.tool(name, input) end, fn span ->
+  @spec call(module(), String.t(), map(), [Tracing.session_option()]) ::
+          {:ok, term()} | {:error, CallError.t()}
+  def call(module, name, input, opts \\ []) when is_atom(module) and is_map(input) do
+    session = Keyword.get(opts, :session)
+
+    Tracing.span(fn -> Attributes.tool(name, input, session) end, fn span ->
       :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
         result = module.__call_tool__(name, input)
 

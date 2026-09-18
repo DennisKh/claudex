@@ -53,8 +53,12 @@ defmodule Claudex.Stream.Forwarder do
   @doc false
   @spec events(Client.t(), map(), keyword()) :: {:ok, Handle.t()}
   def events(%Client{} = client, body, opts) do
+    session = Keyword.get(opts, :session)
+
     start(opts, fn sink ->
-      client |> Connection.stream(body, sink.ref) |> forward_each(sink, :event)
+      client
+      |> Connection.stream(body, cancel_ref: sink.ref, session: session)
+      |> forward_each(sink, :event)
     end)
   end
 

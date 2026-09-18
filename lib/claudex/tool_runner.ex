@@ -178,7 +178,7 @@ defmodule Claudex.ToolRunner do
           {:max_turns, pos_integer()}
           | {:before_call, (ToolUse.t() -> :ok | {:deny, String.t()})}
           | {:on_event, (Event.t() -> any())}
-          | {:session, String.t()}
+          | Tracing.session_option()
 
   @typedoc """
   An option for `run/3` and `stream/3`: any `t:option/0`, plus the reference
@@ -385,26 +385,31 @@ defmodule Claudex.ToolRunner do
   # One span around the whole conversation, so every turn, request and tool
   # call of a run lands in a single trace.
   defp traced(turns, config) do
-    describe = fn ->
-      Attributes.conversation(config.params, config.max_turns, config.session)
+    start = fn ->
+      span =
+        Tracing.start_conversation(config.params,
+          max_turns: config.max_turns,
+          session: config.session
+        )
+
+      {span, nil}
     end
 
     Stream.transform(
       turns,
-      fn -> {Tracing.start_span(describe), nil} end,
+      start,
       fn turn, {span, _previous} -> {[turn], {span, turn}} end,
       fn {span, last} -> finish_conversation(span, last) end
     )
   end
 
   defp finish_conversation(span, %Turn{message: message, stop: stop}) when is_atom(stop) do
-    Tracing.set_attributes(span, Attributes.conversation_result(message, stop))
-    Tracing.end_span(span)
+    Tracing.end_conversation(span, message, stop)
   end
 
   defp finish_conversation(span, nil) do
     Tracing.set_error(span, "the conversation ended before a turn finished it")
-    Tracing.end_span(span)
+    Tracing.end_conversation(span)
   end
 
   defp forwarding(opts, sink) do
@@ -494,7 +499,8 @@ defmodule Claudex.ToolRunner do
   defp request!(config, messages) do
     config.client
     |> Messages.stream!(Map.put(config.params, :messages, messages),
-      cancel_ref: config.cancel_ref
+      cancel_ref: config.cancel_ref,
+      session: config.session
     )
     |> Enum.reduce(Accumulator.new(), fn event, accumulator ->
       config.on_event.(event)
@@ -511,7 +517,7 @@ defmodule Claudex.ToolRunner do
 
   defp run_tool(%ToolUse{} = tool_use, config) do
     case decide(config.before_call, tool_use) do
-      :ok -> dispatch(tool_use, config.registry)
+      :ok -> dispatch(tool_use, config)
       {:deny, reason} -> denied(tool_use, reason)
     end
   end
@@ -536,10 +542,10 @@ defmodule Claudex.ToolRunner do
     report(tool_use, :denied, fn -> Tool.result(tool_use.id, reason, is_error: true) end)
   end
 
-  defp dispatch(tool_use, registry) do
-    case Map.fetch(registry, tool_use.name) do
+  defp dispatch(tool_use, config) do
+    case Map.fetch(config.registry, tool_use.name) do
       {:ok, module} ->
-        call(module, tool_use)
+        call(module, tool_use, config.session)
 
       :error ->
         report(tool_use, :unknown_tool, fn ->
@@ -548,8 +554,8 @@ defmodule Claudex.ToolRunner do
     end
   end
 
-  defp call(module, tool_use) do
-    case Tool.call(module, tool_use.name, tool_use.input) do
+  defp call(module, tool_use, session) do
+    case Tool.call(module, tool_use.name, tool_use.input, session: session) do
       {:ok, value} -> Tool.result(tool_use.id, encode(value))
       {:error, reason} -> Tool.result(tool_use.id, describe(tool_use, reason), is_error: true)
     end

@@ -16,16 +16,19 @@ defmodule Claudex.ChunkStream do
   owning process dying.
   """
   @spec stream(Client.t(), keyword()) :: Enumerable.t()
-  @spec stream(Client.t(), keyword(), reference()) :: Enumerable.t()
-  def stream(%Client{} = client, request_options, cancel_ref \\ make_ref()) do
+  @spec stream(Client.t(), keyword(), keyword()) :: Enumerable.t()
+  def stream(%Client{} = client, request_options, opts \\ []) do
+    cancel_ref = Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
+    session = Keyword.get(opts, :session)
+
     Stream.resource(
-      fn -> connect(client, request_options, cancel_ref) end,
+      fn -> connect(client, request_options, cancel_ref, session) end,
       &next/1,
       &disconnect/1
     )
   end
 
-  defp connect(client, request_options, cancel_ref) do
+  defp connect(client, request_options, cancel_ref, session) do
     consumer = self()
     producer_ref = make_ref()
 
@@ -59,7 +62,7 @@ defmodule Claudex.ChunkStream do
       done?: false,
       metadata: metadata,
       cancel_ref: cancel_ref,
-      span: start_span(metadata, request_options),
+      span: start_span(metadata, request_options, session),
       first_chunk: nil,
       chunks: 0,
       bytes: 0,
@@ -129,8 +132,8 @@ defmodule Claudex.ChunkStream do
     :ok
   end
 
-  defp start_span(metadata, request_options) do
-    Tracing.start_span(fn -> Attributes.request(metadata, request_options) end)
+  defp start_span(metadata, request_options, session) do
+    Tracing.start_span(fn -> Attributes.request(metadata, request_options, session) end)
   end
 
   defp record_failure(%{response: %{status: status}} = state) when is_integer(status) do
