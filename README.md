@@ -660,8 +660,6 @@ export LANGFUSE_PUBLIC_KEY=pk-lf-...
 export LANGFUSE_SECRET_KEY=sk-lf-...
 ```
 
-If you generated the config rather than writing it yourself, widen its guard to `if config_env() in [:dev, :prod] do` — a development run exports nothing while it reads `:prod` only.
-
 Only port 3000 and the MinIO console on 9090 are exposed; everything else stays on the compose network. `docker compose -f docker-compose.langfuse.yml down -v` removes the volumes and starts over. `.env.langfuse` is gitignored, because that is where real keys end up.
 
 Name a conversation to group its trace with others — a chat id, or whatever the user called it:
