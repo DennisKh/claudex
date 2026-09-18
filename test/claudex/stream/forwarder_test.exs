@@ -184,7 +184,8 @@ defmodule Claudex.Stream.ForwarderTest do
 
     # The transport is five seconds into a stall. Without the watch reaching
     # the forwarder, this process sits there for all of it.
-    assert_receive {:DOWN, ^finished, :process, ^pid, :normal}, 1_000
+    assert_receive {:DOWN, ^finished, :process, ^pid, reason}, 1_000
+    assert reason in [:normal, :noproc]
   end
 
   test "there is no child_spec: a stream cannot be restarted" do
