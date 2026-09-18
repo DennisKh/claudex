@@ -18,17 +18,22 @@ defmodule Claudex.API do
   telemetry metadata and the span, so an endpoint that names its model in the
   body gets it recorded without passing it twice.
 
+  `session` goes on the span as `session.id`, naming the conversation the
+  request belongs to. It never reaches the API or the telemetry metadata.
+
   Wraps the call in the `[:claudex, :request, ...]` telemetry events and an
   OpenTelemetry span, which is a no-op unless the app traces.
   """
   @spec request(Client.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
-  def request(%Client{} = client, options) do
+  @spec request(Client.t(), keyword(), String.t() | nil) ::
+          {:ok, term()} | {:error, Error.t()}
+  def request(%Client{} = client, options, session \\ nil) do
     metadata =
       %{method: Keyword.fetch!(options, :method), path: Keyword.get(options, :url)}
       |> put_model(options)
 
     Tracing.span(
-      fn -> Attributes.request(metadata, options) end,
+      fn -> Attributes.request(metadata, options, session) end,
       fn span -> traced(client, options, metadata, span) end
     )
   end
@@ -73,10 +78,12 @@ defmodule Claudex.API do
     request(client, method: :get, url: url, params: params)
   end
 
-  @doc "POSTs `body` to `url` as JSON."
+  @doc "POSTs `body` to `url` as JSON. `session` names the conversation for the span."
   @spec post(Client.t(), String.t(), map()) :: {:ok, term()} | {:error, Error.t()}
-  def post(%Client{} = client, url, body) do
-    request(client, method: :post, url: url, json: body)
+  @spec post(Client.t(), String.t(), map(), String.t() | nil) ::
+          {:ok, term()} | {:error, Error.t()}
+  def post(%Client{} = client, url, body, session \\ nil) do
+    request(client, [method: :post, url: url, json: body], session)
   end
 
   @doc "DELETEs `url`."

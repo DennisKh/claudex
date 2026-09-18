@@ -117,6 +117,26 @@ defmodule Mix.Tasks.Claudex.Gen.TracingTest do
         generate(tmp_dir, ["honeycomb"])
       end
     end
+
+    test "the langfuse config does not apply outside :prod", %{tmp_dir: tmp_dir} do
+      generate(tmp_dir, ["langfuse"])
+
+      # No LANGFUSE_* variables are set. If the block ran here, fetch_env!
+      # would raise before either assertion is reached.
+      config = load(tmp_dir, :dev)
+
+      refute Keyword.has_key?(config, :opentelemetry_exporter)
+      refute get_in(config, [:claudex, :tracing])
+    end
+
+    test "the otlp config does not apply outside :prod", %{tmp_dir: tmp_dir} do
+      generate(tmp_dir, [])
+
+      config = load(tmp_dir, :dev)
+
+      refute Keyword.has_key?(config, :opentelemetry_exporter)
+      refute get_in(config, [:claudex, :tracing])
+    end
   end
 
   defp generate(tmp_dir, args) do
@@ -135,7 +155,7 @@ defmodule Mix.Tasks.Claudex.Gen.TracingTest do
     File.write!(full, source)
   end
 
-  defp load(tmp_dir), do: tmp_dir |> path() |> Config.Reader.read!()
+  defp load(tmp_dir, env \\ :prod), do: tmp_dir |> path() |> Config.Reader.read!(env: env)
 
   defp with_env(variables, fun) do
     previous = Map.new(variables, fn {name, _value} -> {name, System.get_env(name)} end)

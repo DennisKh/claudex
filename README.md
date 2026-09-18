@@ -403,7 +403,9 @@ The toolset needs nothing but the server's name, and enables every tool that ser
 
 On a server with a large catalogue, `default_config: %{defer_loading: true}` alongside the tool search tool keeps the descriptions out of the prompt until Claude looks one up.
 
-`authorization_token` is whatever that server's own OAuth or token scheme issues, obtained and refreshed by you. `Claudex.MCP.Server` keeps it out of `inspect/1`, so a server sitting in a config or an assign doesn't print the token in a log or a crash report; a plain map works here too and passes through as written. Every server must be referenced by exactly one toolset, and the URL has to be reachable from Anthropic's side, so a local stdio server cannot be connected this way. Claude's call arrives as `Claudex.ContentBlock.MCPToolUse` carrying the `server_name` it went to, and the answer as `Claudex.ContentBlock.MCPToolResult`, paired by `tool_use_id`. A call that failed is still a 200 with `is_error` set. The API runs both before it replies, so `Claudex.Message.tool_uses/1` leaves them out and there is nothing to dispatch.
+`authorization_token` is whatever that server's own OAuth or token scheme issues, obtained and refreshed by you. `Claudex.MCP.Server` keeps it out of `inspect/1`, so a server sitting in a config or an assign doesn't print the token in a log or a crash report; a plain map works here too and passes through as written. Every server must be referenced by exactly one toolset, and the URL has to be reachable from Anthropic's side, so a local stdio server cannot be connected this way. Claude's call arrives as `Claudex.ContentBlock.MCPToolUse` carrying the `server_name` it went to, and the answer as `Claudex.ContentBlock.MCPToolResult`, paired by `tool_use_id`. A call that failed is still a 200 with `is_error` set, and
+`Claudex.ContentBlock.MCPToolResult.text/1` joins whatever text the server
+answered with. The API runs both before it replies, so `Claudex.Message.tool_uses/1` leaves them out and there is nothing to dispatch.
 
 Data exchanged with an MCP server is not covered by zero data retention.
 
@@ -542,6 +544,11 @@ That survives block types this version of Claudex doesn't model yet, because
 `Claudex.ContentBlock.Unknown` keeps the raw map and replays it untouched, so a
 compaction block round-trips without an SDK upgrade.
 
+`Claudex.Message.empty?/1` answers whether a turn is worth storing at all. A
+reply that only ran a web search or an MCP tool carries no text and still has
+to be kept, so classifying blocks by hand to decide is how a turn goes
+missing.
+
 Results for one reply go back together. If a reply asked for two tools, the
 next message has to answer both:
 
@@ -611,7 +618,7 @@ Tracing is off until you ask for it with `config :claudex, tracing: true`, and n
 {:opentelemetry_exporter, "~> 1.10"}
 ```
 
-`mix claudex.gen.tracing` writes the config below into your `config/runtime.exs`; `mix claudex.gen.tracing langfuse` writes the Langfuse-shaped one.
+`mix claudex.gen.tracing` writes the config below into your `config/runtime.exs`; `mix claudex.gen.tracing langfuse` writes the Langfuse-shaped one. That file runs in every environment, so the task guards what it writes with `if config_env() == :prod do`. Widen the guard by hand to trace a development run, and leave `:test` out of it unless you want your suite exporting.
 
 Sending to Langfuse is three lines in your own `runtime.exs`, because Langfuse reads OTLP and Claudex doesn't know it exists:
 

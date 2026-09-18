@@ -79,12 +79,34 @@ defmodule Claudex.Tracing do
   A trace is one run. What groups several of them is a session, and you name
   it, because only your app knows what a conversation belongs to:
 
+      Claudex.Messages.create(client, params, session: chat.id)
+      Claudex.Messages.stream_to(client, params, to: self(), session: chat.id)
+      Claudex.Messages.count_tokens(client, params, session: chat.id)
+      Claudex.Tool.call(MyApp.Tools, name, input, session: chat.id)
       Claudex.ToolRunner.run(client, params, session: chat.id)
 
-  This attaches session.id to the conversation span. Because it uses a standard
-  attribute format, grouping works consistently across tracing backends whether
-  the identifier is a chat ID, custom session name, or request ID. Without this
-  attribute, the trace remains unlinked, which is appropriate for standalone runs.
+  That puts `session.id` on the request's span, and on a run's conversation,
+  request and tool spans. The turn spans a run groups its work under carry
+  none, since a turn is a step inside a conversation that already names one.
+  The id is yours: a chat row's id, a support ticket, whatever the conversation
+  belongs to. Without one the trace stands alone, which is right for a run that
+  belongs to nothing larger.
+
+  `set_session/1` names one for every span the calling process builds after it,
+  for code that would otherwise thread the id through each call:
+
+      Claudex.Tracing.set_session(chat.id)
+
+      Claudex.Messages.create(client, params)
+      Claudex.Tool.call(MyApp.Tools, name, input)
+
+  A `:session` passed to a call wins over that. `set_session(nil)` clears it,
+  which a process serving more than one conversation has to do, since the id
+  otherwise carries into the next request it makes. It rides OpenTelemetry
+  baggage, so it reaches the process Claudex spawns to stream a reply, and an
+  app that configures a baggage propagator carries it into its own outbound
+  calls under the same context. Claudex sends no propagation headers to
+  Anthropic, so nothing reaches Anthropic itself.
 
   ## Your own spans
 
@@ -167,7 +189,20 @@ defmodule Claudex.Tracing do
   costs the trace and nothing else.
   """
 
+  alias Claudex.Message
+  alias Claudex.Tracing.Attributes
+
   @tracer_scope __MODULE__
+  @session_baggage_key "session.id"
+
+  @typedoc """
+  Names the conversation a call belongs to, as `session.id` on its span.
+
+  Taken by the request functions in `Claudex.Messages`, by
+  `Claudex.Tool.call/4` and by `Claudex.ToolRunner.run/3`. `set_session/1`
+  names one for every span the calling process builds instead.
+  """
+  @type session_option :: {:session, String.t() | nil}
 
   @doc """
   Checks the two things a span needs: `config :claudex, tracing: true`, and an
@@ -178,6 +213,106 @@ defmodule Claudex.Tracing do
   @spec enabled?() :: boolean()
   def enabled? do
     if Application.get_env(:claudex, :tracing, false), do: tracer_records?(), else: false
+  end
+
+  @doc """
+  Sets the session id for the current process, to name the conversation its
+  spans belong to. See "Naming a conversation" above.
+
+  Stored in OpenTelemetry baggage, which `context/0` carries and `attach/1`
+  restores, so it reaches a process Claudex spawns to stream a reply. Pass
+  `nil` to clear it, for a process a pool reuses across conversations. Does
+  nothing while `enabled?/0` is false.
+
+  A row id or any other value `to_string/1` accepts becomes a string, so
+  `session: chat.id` works whatever the column type is. A value with no string
+  form leaves the current session alone rather than raising, since a tracing id
+  cannot be worth breaking the request it was meant to label.
+  """
+  @spec set_session(term()) :: :ok
+  def set_session(nil), do: store_session(nil)
+
+  def set_session(session_id) do
+    case normalize_session(session_id) do
+      nil -> :ok
+      id -> store_session(id)
+    end
+  end
+
+  @doc false
+  @spec normalize_session(term()) :: String.t() | nil
+  def normalize_session(session) when is_binary(session), do: session
+  def normalize_session(nil), do: nil
+
+  def normalize_session(session) do
+    if String.Chars.impl_for(session), do: to_string(session), else: nil
+  end
+
+  @doc """
+  Returns the session id set with `set_session/1` for the current process, or
+  `nil` when none is set.
+  """
+  @spec session_id() :: String.t() | nil
+  def session_id do
+    case :otel_baggage.get_all() do
+      %{@session_baggage_key => {value, _metadata}} -> value
+      _no_session -> nil
+    end
+  rescue
+    _any -> nil
+  catch
+    _kind, _reason -> nil
+  end
+
+  @doc """
+  Starts the span that groups a whole conversation, and returns the handle
+  `end_conversation/3` takes.
+
+  `params` is the request the conversation runs, read for the model and, when
+  `trace_content` is on, the prompt and tool definitions. `opts` takes
+  `:session` for `session.id` and `:max_turns` for a loop with a limit.
+
+      span = Claudex.Tracing.start_conversation(params, session: chat.id)
+
+      {:ok, message} = Claudex.Messages.create(client, params, session: chat.id)
+
+      Claudex.Tracing.end_conversation(span, message)
+
+  `Claudex.ToolRunner` opens one of these around a run. An app driving the
+  loop itself opens its own, so its requests and tool calls land in one trace
+  instead of one each. The handle is an ordinary span handle, so
+  `set_attributes/2` and `set_error/2` take it.
+
+  A span stays open and unexported until `end_conversation/3` runs, and the
+  process goes on nesting new spans under it, so every path out of an exchange
+  has to end it. Within one function that is `try/after`; an app holding the
+  span across callbacks ends it on each way the exchange can finish, including
+  the error and abandoned ones.
+  """
+  @spec start_conversation(map()) :: term()
+  @spec start_conversation(map(), keyword()) :: term()
+  def start_conversation(params, opts \\ []) do
+    start_span(fn ->
+      Attributes.conversation(params, Keyword.get(opts, :max_turns), Keyword.get(opts, :session))
+    end)
+  end
+
+  @doc """
+  Records how a conversation ended and ends its span.
+
+  `message` is the last reply the conversation produced, recorded as its output
+  when `trace_content` is on. `stop` is your own word for why the loop
+  finished, recorded as `claudex.stop`. The two are independent: a turn
+  cancelled before any content has a stop and no message. Ending with neither
+  still closes the span.
+  """
+  @spec end_conversation(term()) :: :ok
+  @spec end_conversation(term(), Message.t() | nil) :: :ok
+  @spec end_conversation(term(), Message.t() | nil, atom() | nil) :: :ok
+  def end_conversation(span, message \\ nil, stop \\ nil) do
+    set_attributes(span, Attributes.conversation_result(message, stop))
+
+    end_span(span)
   end
 
   @doc """
@@ -327,6 +462,36 @@ defmodule Claudex.Tracing do
     after
       stop(span_ctx)
     end
+  end
+
+  defp store_session(session_id) do
+    if enabled?(), do: put_session_baggage(session_id)
+
+    :ok
+  end
+
+  # otel_baggage has no call to remove one key, only clear/0 for all of it, so
+  # clearing ours means reading the rest back and setting it again.
+  defp put_session_baggage(nil) do
+    remaining = :otel_baggage.get_all() |> Map.delete(@session_baggage_key)
+    :otel_baggage.clear()
+    :otel_baggage.set(remaining)
+
+    :ok
+  rescue
+    _any -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp put_session_baggage(session_id) do
+    :otel_baggage.set(@session_baggage_key, session_id)
+
+    :ok
+  rescue
+    _any -> :ok
+  catch
+    _kind, _reason -> :ok
   end
 
   defp tracer_records? do

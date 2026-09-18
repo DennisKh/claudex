@@ -245,7 +245,7 @@ defmodule Claudex.TracingTest do
     end
   end
 
-  test "a named session lands on the conversation span, not on the turns" do
+  test "a named session lands on the conversation span and every request inside it" do
     stream_reply(message())
 
     assert {:ok, _turn} =
@@ -255,12 +255,53 @@ defmodule Claudex.TracingTest do
 
     spans = collect_spans([])
     [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
+    [request] = named(spans, "chat claude-haiku-4-5")
+    [turn] = named(spans, "turn")
 
     assert attributes(root)["session.id"] == "chat-018f3c21"
 
-    # One id on the trace is what a backend groups by. Repeating it on every
-    # span would say the same thing several times.
-    assert Enum.count(spans, &Map.has_key?(attributes(&1), "session.id")) == 1
+    # Baggage rides every request the run makes, because that is the only way
+    # for a caller driving its own loop to reach the same spans. The turn
+    # grouping them is not a request and carries none.
+    assert attributes(request)["session.id"] == "chat-018f3c21"
+    refute Map.has_key?(attributes(turn), "session.id")
+  end
+
+  test "two runs interleaved in one process keep their own session and leave none behind" do
+    # A run carries its session down the call chain rather than parking it in
+    # the process, so overlapping runs cannot overwrite each other's or leave
+    # one behind for whatever the process does next.
+    stream_reply(message())
+
+    a = ToolRunner.stream(client(), @params, session: "chat-a")
+    b = ToolRunner.stream(client(), @params, session: "chat-b")
+
+    a |> Stream.zip(b) |> Enum.to_list()
+
+    spans = collect_spans([])
+
+    assert spans
+           |> named("invoke_agent claude-haiku-4-5")
+           |> Enum.map(&attributes(&1)["session.id"])
+           |> Enum.sort() == ["chat-a", "chat-b"]
+
+    assert spans
+           |> named("chat claude-haiku-4-5")
+           |> Enum.map(&attributes(&1)["session.id"])
+           |> Enum.sort() == ["chat-a", "chat-b"]
+
+    assert Tracing.session_id() == nil
+  end
+
+  test "a run started with :session leaves no session behind for the next one" do
+    stream_reply(message())
+
+    assert {:ok, _turn} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator),
+               session: "chat-018f3c21"
+             )
+
+    assert Tracing.session_id() == nil
   end
 
   test "without a session the conversation span carries no id" do
@@ -271,6 +312,261 @@ defmodule Claudex.TracingTest do
     spans = collect_spans([])
 
     refute Enum.any?(spans, &Map.has_key?(attributes(&1), "session.id"))
+  end
+
+  test "create/3 names the conversation for one call" do
+    reply(message())
+
+    assert {:ok, _message} = Messages.create(client(), @params, session: "chat-per-call")
+
+    assert_receive {:span, recorded}, 2_000
+    assert attributes(recorded)["session.id"] == "chat-per-call"
+    assert Tracing.session_id() == nil, "a per-call session must not outlive the call"
+  end
+
+  test "count_tokens/3 names the conversation for one call" do
+    reply(%{"input_tokens" => 12})
+
+    assert {:ok, 12} =
+             Messages.count_tokens(client(), Map.delete(@params, :max_tokens),
+               session: "chat-counted"
+             )
+
+    assert_receive {:span, recorded}, 2_000
+    assert attributes(recorded)["session.id"] == "chat-counted"
+  end
+
+  test "stream!/3 names the conversation for one call" do
+    stream_reply(message())
+
+    client() |> Messages.stream!(@params, session: "chat-streamed") |> Enum.to_list()
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert attributes(request)["session.id"] == "chat-streamed"
+  end
+
+  test "stream_to/3 names the conversation for one call, across the spawn" do
+    stream_reply(message())
+
+    {:ok, handle} = Messages.stream_to(client(), @params, session: "chat-forwarded-opt")
+    ref = handle.ref
+    assert_receive {:claudex, ^ref, :done}, 2_000
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert attributes(request)["session.id"] == "chat-forwarded-opt"
+  end
+
+  test "a session passed to a call wins over the one set for the process" do
+    reply(message())
+    Tracing.set_session("chat-ambient")
+
+    assert {:ok, _message} = Messages.create(client(), @params, session: "chat-explicit")
+
+    assert_receive {:span, recorded}, 2_000
+    assert attributes(recorded)["session.id"] == "chat-explicit"
+    assert Tracing.session_id() == "chat-ambient", "the call must not disturb the process"
+  end
+
+  test "a tool call's span carries the session named for the process" do
+    replies = [
+      %{
+        message()
+        | "content" => [
+            %{
+              "type" => "tool_use",
+              "id" => "t1",
+              "name" => "add",
+              "input" => %{"a" => 1, "b" => 2}
+            }
+          ],
+          "stop_reason" => "tool_use"
+      },
+      message()
+    ]
+
+    {:ok, counter} = Agent.start_link(fn -> replies end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      reply = Agent.get_and_update(counter, fn [head | tail] -> {head, tail} end)
+      MessageStream.respond(conn, reply)
+    end)
+
+    Tracing.set_session("chat-tooled")
+
+    assert {:ok, _turn} = ToolRunner.run(client(), Map.put(@params, :tools, Calculator))
+
+    [tool] = named(collect_spans([]), "execute_tool add")
+    assert attributes(tool)["session.id"] == "chat-tooled"
+  end
+
+  test "Tool.call/4 names the conversation for one call" do
+    span = Tracing.start_conversation(@params, session: "chat-hand-tools")
+
+    assert {:ok, 3} =
+             Claudex.Tool.call(Calculator, "add", %{"a" => 1, "b" => 2},
+               session: "chat-hand-tools"
+             )
+
+    Tracing.end_conversation(span)
+
+    [tool] = named(collect_spans([]), "execute_tool add")
+    assert attributes(tool)["session.id"] == "chat-hand-tools"
+  end
+
+  test "a session passed to a tool call wins over the one set for the process" do
+    Tracing.set_session("chat-ambient")
+
+    assert {:ok, 3} =
+             Claudex.Tool.call(Calculator, "add", %{"a" => 1, "b" => 2}, session: "chat-explicit")
+
+    assert_receive {:span, recorded}, 2_000
+    assert attributes(recorded)["session.id"] == "chat-explicit"
+    assert Tracing.session_id() == "chat-ambient"
+  end
+
+  test "a row id becomes a session id rather than being dropped" do
+    # `session: chat.id` is an integer in any Ecto-backed app, which is the
+    # example the docs give.
+    assert Tracing.set_session(12_345) == :ok
+    assert Tracing.session_id() == "12345"
+  end
+
+  test "a value with no string form leaves the run alone instead of ending it" do
+    stream_reply(message())
+
+    Tracing.set_session("chat-kept")
+    assert Tracing.set_session(%{id: 1}) == :ok
+    assert Tracing.session_id() == "chat-kept"
+
+    # The flow this protects: whatever an app hands ToolRunner, the run finishes.
+    assert {:ok, _turn} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator), session: %{id: 1})
+  end
+
+  test "an integer session on a call reaches the span as a string" do
+    reply(message())
+
+    assert {:ok, _message} = Messages.create(client(), @params, session: 4_242)
+
+    assert_receive {:span, recorded}, 2_000
+    assert attributes(recorded)["session.id"] == "4242"
+  end
+
+  test "the conversation span picks up the session named for the process" do
+    # Every other builder falls back to the ambient session. The root span is
+    # the one a backend groups a session by, so it cannot be the exception.
+    stream_reply(message())
+    Tracing.set_session("chat-ambient-root")
+
+    assert {:ok, _turn} = ToolRunner.run(client(), Map.put(@params, :tools, Calculator))
+
+    [conversation] = named(collect_spans([]), "invoke_agent claude-haiku-4-5")
+    assert attributes(conversation)["session.id"] == "chat-ambient-root"
+  end
+
+  test "start_conversation/2 groups a hand-driven loop into one trace" do
+    reply(message())
+
+    span = Tracing.start_conversation(@params, session: "chat-by-hand")
+    assert {:ok, reply} = Messages.create(client(), @params, session: "chat-by-hand")
+    Tracing.end_conversation(span, reply, :completed)
+
+    spans = collect_spans([])
+
+    [conversation] = named(spans, "invoke_agent claude-haiku-4-5")
+    [request] = named(spans, "chat claude-haiku-4-5")
+
+    assert span(request, :parent_span_id) == span(conversation, :span_id)
+    assert span(request, :trace_id) == span(conversation, :trace_id)
+
+    assert attributes(conversation)["session.id"] == "chat-by-hand"
+    assert attributes(conversation)["claudex.stop"] == "completed"
+  end
+
+  test "a conversation that ended before any content still records why" do
+    # A hand-driven loop can be cancelled before a reply arrives, which has a
+    # reason and no message. ToolRunner never reaches that state.
+    span = Tracing.start_conversation(@params, session: "chat-cancelled")
+    Tracing.end_conversation(span, nil, :cancelled)
+
+    assert_receive {:span, recorded}, 2_000
+    assert attributes(recorded)["claudex.stop"] == "cancelled"
+    assert attributes(recorded)["session.id"] == "chat-cancelled"
+  end
+
+  test "a conversation with no turn limit records no turn limit" do
+    # ToolRunner always has one. A loop somebody drives by hand need not.
+    span = Tracing.start_conversation(@params)
+    Tracing.end_conversation(span)
+
+    assert_receive {:span, recorded}, 2_000
+    refute Map.has_key?(attributes(recorded), "claudex.turn.max")
+    refute Map.has_key?(attributes(recorded), "claudex.stop")
+  end
+
+  test "set_session/1 names spans built afterward, and nil clears it" do
+    assert Tracing.session_id() == nil
+
+    Tracing.set_session("chat-1")
+    assert Tracing.session_id() == "chat-1"
+
+    Tracing.set_session(nil)
+    assert Tracing.session_id() == nil
+  end
+
+  test "set_session(nil) clears the session key without touching other baggage" do
+    :otel_baggage.set("user.id", "u-1")
+    Tracing.set_session("chat-1")
+
+    Tracing.set_session(nil)
+
+    assert :otel_baggage.get_all() == %{"user.id" => {"u-1", []}}
+  end
+
+  test "a run started with :session restores whatever session was ambient before it" do
+    Tracing.set_session("outer-chat")
+    stream_reply(message())
+
+    assert {:ok, _turn} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator), session: "inner-chat")
+
+    # A tool that runs a conversation of its own must not erase the session
+    # the outer run was named with once its own run ends.
+    assert Tracing.session_id() == "outer-chat"
+  end
+
+  test "a request carries no session.id key when none is set" do
+    reply(message())
+
+    assert {:ok, _message} = Messages.create(client(), @params)
+    assert_receive {:span, recorded}, 2_000
+
+    refute Map.has_key?(attributes(recorded), "session.id")
+  end
+
+  test "a caller driving its own loop names a create/2 span with set_session/1" do
+    Tracing.set_session("chat-standalone")
+    reply(message())
+
+    assert {:ok, _message} = Messages.create(client(), @params)
+    assert_receive {:span, recorded}, 2_000
+
+    assert attributes(recorded)["session.id"] == "chat-standalone"
+  end
+
+  test "set_session/1 crosses into the process stream_to/3 spawns" do
+    # The forwarder runs the request in a process of its own. Only baggage
+    # attached through that spawn, not the process dictionary, would still be
+    # there when the span is built.
+    Tracing.set_session("chat-forwarded")
+    stream_reply(message())
+
+    {:ok, handle} = Messages.stream_to(client(), @params)
+    ref = handle.ref
+    assert_receive {:claudex, ^ref, :done}, 2_000
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert attributes(request)["session.id"] == "chat-forwarded"
   end
 
   test "every turn shares one span name, so a backend folds them into one node" do
