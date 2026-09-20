@@ -145,8 +145,6 @@ defmodule Claudex.Tracing.Messages do
   defp part(%{"type" => "tool_result", "tool_use_id" => id} = block),
     do: %{type: "tool_call_response", id: id, response: block["content"]}
 
-  # A block type the conventions have no part for (thinking, a server tool, an
-  # image) goes through under its own name.
   defp part(%{type: type} = block), do: %{type: type, content: block}
   defp part(%{"type" => type} = block), do: %{type: type, content: block}
   defp part(block), do: %{type: "text", content: block}

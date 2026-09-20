@@ -80,8 +80,6 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     Mix.shell().info([:green, "* injecting ", :reset, @config_path])
   end
 
-  # Without this the SDK names every trace `unknown_service:erl`, and a backend
-  # holding several services cannot tell them apart.
   defp service_name do
     """
 

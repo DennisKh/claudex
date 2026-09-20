@@ -115,8 +115,6 @@ defmodule Claudex.ReplayTest do
     assert [%{"type" => "text"} | _rest] = result.content
     assert ContentBlock.MCPToolResult.text(result) =~ "Available pages for elixir-lang/elixir"
 
-    # The API ran the call before it replied, so neither block is work for the
-    # local runner to pick up.
     assert Message.tool_uses(message) == []
 
     assert ContentBlock.to_param(call) == call.raw
@@ -133,9 +131,6 @@ defmodule Claudex.ReplayTest do
 
       call = Enum.find(message.content, &match?(%ContentBlock.MCPToolUse{}, &1))
 
-      # content_block_start carries an empty input: the arguments arrive as
-      # input_json_delta fragments, so a block the accumulator doesn't fold
-      # them onto replays with no arguments at all.
       assert call.input == %{"repoName" => "elixir-lang/elixir"}
       assert ContentBlock.to_param(call)["input"] == call.input
     end

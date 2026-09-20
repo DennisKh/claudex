@@ -283,7 +283,6 @@ defmodule Claudex.TelemetryTest do
     assert metadata.path == "/v1/messages"
     assert is_integer(measurements.duration)
 
-    # The documented shape is one or the other, the way the unary path reports.
     refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, _metadata}
   end
 

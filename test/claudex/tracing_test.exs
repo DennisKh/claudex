@@ -260,17 +260,11 @@ defmodule Claudex.TracingTest do
 
     assert attributes(root)["session.id"] == "chat-018f3c21"
 
-    # Baggage rides every request the run makes, because that is the only way
-    # for a caller driving its own loop to reach the same spans. The turn
-    # grouping them is not a request and carries none.
     assert attributes(request)["session.id"] == "chat-018f3c21"
     refute Map.has_key?(attributes(turn), "session.id")
   end
 
   test "two runs interleaved in one process keep their own session and leave none behind" do
-    # A run carries its session down the call chain rather than parking it in
-    # the process, so overlapping runs cannot overwrite each other's or leave
-    # one behind for whatever the process does next.
     stream_reply(message())
 
     a = ToolRunner.stream(client(), @params, session: "chat-a")
@@ -423,8 +417,6 @@ defmodule Claudex.TracingTest do
   end
 
   test "a row id becomes a session id rather than being dropped" do
-    # `session: chat.id` is an integer in any Ecto-backed app, which is the
-    # example the docs give.
     assert Tracing.set_session(12_345) == :ok
     assert Tracing.session_id() == "12345"
   end
@@ -436,7 +428,6 @@ defmodule Claudex.TracingTest do
     assert Tracing.set_session(%{id: 1}) == :ok
     assert Tracing.session_id() == "chat-kept"
 
-    # The flow this protects: whatever an app hands ToolRunner, the run finishes.
     assert {:ok, _turn} =
              ToolRunner.run(client(), Map.put(@params, :tools, Calculator), session: %{id: 1})
   end
@@ -462,8 +453,6 @@ defmodule Claudex.TracingTest do
   end
 
   test "the conversation span picks up the session named for the process" do
-    # Every other builder falls back to the ambient session. The root span is
-    # the one a backend groups a session by, so it cannot be the exception.
     stream_reply(message())
     Tracing.set_session("chat-ambient-root")
 
@@ -493,8 +482,6 @@ defmodule Claudex.TracingTest do
   end
 
   test "a conversation that ended before any content still records why" do
-    # A hand-driven loop can be cancelled before a reply arrives, which has a
-    # reason and no message. ToolRunner never reaches that state.
     span = Tracing.start_conversation(@params, session: "chat-cancelled")
     Tracing.end_conversation(span, nil, :cancelled)
 
@@ -504,7 +491,6 @@ defmodule Claudex.TracingTest do
   end
 
   test "a conversation with no turn limit records no turn limit" do
-    # ToolRunner always has one. A loop somebody drives by hand need not.
     span = Tracing.start_conversation(@params)
     Tracing.end_conversation(span)
 
@@ -539,8 +525,6 @@ defmodule Claudex.TracingTest do
     assert {:ok, _turn} =
              ToolRunner.run(client(), Map.put(@params, :tools, Calculator), session: "inner-chat")
 
-    # A tool that runs a conversation of its own must not erase the session
-    # the outer run was named with once its own run ends.
     assert Tracing.session_id() == "outer-chat"
   end
 
@@ -564,9 +548,6 @@ defmodule Claudex.TracingTest do
   end
 
   test "set_session/1 crosses into the process stream_to/3 spawns" do
-    # The forwarder runs the request in a process of its own. Only baggage
-    # attached through that spawn, not the process dictionary, would still be
-    # there when the span is built.
     Tracing.set_session("chat-forwarded")
     stream_reply(message())
 
