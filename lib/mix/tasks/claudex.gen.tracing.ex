@@ -158,6 +158,10 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
         {:opentelemetry, "~> 1.7"},
         {:opentelemetry_exporter, "~> 1.10"}
 
+    The block is guarded with `if config_env() == :prod do`, because
+    config/runtime.exs runs in every environment. Widen it by hand to trace a
+    development run.
+
     Then run. See Claudex.Tracing for what each span carries, and turn on
     `config :claudex, trace_content: true` when you want prompts, completions
     and tool arguments on the spans as well.

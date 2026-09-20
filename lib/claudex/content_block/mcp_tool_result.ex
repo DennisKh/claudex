@@ -34,7 +34,7 @@ defmodule Claudex.ContentBlock.MCPToolResult do
   later API adds reads as no text rather than raising.
 
       Claudex.ContentBlock.MCPToolResult.text(block)
-      #=> "Available pages for elixir-lang/elixir"
+      #=> "Here is the result of the MCP tool"
   """
   @spec text(t()) :: String.t()
   def text(%__MODULE__{content: content}) when is_binary(content), do: content

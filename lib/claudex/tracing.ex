@@ -80,9 +80,11 @@ defmodule Claudex.Tracing do
   it, because only your app knows what a conversation belongs to:
 
       Claudex.Messages.create(client, params, session: chat.id)
+      Claudex.Messages.stream!(client, params, session: chat.id)
       Claudex.Messages.stream_to(client, params, to: self(), session: chat.id)
       Claudex.Messages.count_tokens(client, params, session: chat.id)
       Claudex.Tool.call(MyApp.Tools, name, input, session: chat.id)
+      Claudex.Files.upload(client, path, session: chat.id)
       Claudex.ToolRunner.run(client, params, session: chat.id)
 
   That puts `session.id` on the request's span, and on a run's conversation,
