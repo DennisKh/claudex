@@ -146,9 +146,6 @@ defmodule Claudex.ContentBlockTest do
     end
   end
 
-  # Shapes taken from the beta Messages types in the TypeScript SDK
-  # (BetaMCPToolUseBlock, BetaMCPToolResultBlock), which is the only place the
-  # connector is specified; test/fixtures/mcp_connector.json records a real one.
   describe "MCP connector blocks" do
     test "decodes an mcp_tool_use block, keeping the server it went to" do
       json = %{
@@ -224,15 +221,12 @@ defmodule Claudex.ContentBlockTest do
     end
 
     test "text/1 reads a payload it has no text for as no text" do
-      # A result type a later API adds must not take the caller down.
       assert MCPToolResult.text(%MCPToolResult{content: %{"structured" => true}}) == ""
       assert MCPToolResult.text(%MCPToolResult{content: nil}) == ""
       assert MCPToolResult.text(%MCPToolResult{content: []}) == ""
     end
 
     test "a call Claude has not finished streaming replays with the arguments it ended with" do
-      # content_block_start carries an empty input; the real arguments arrive as
-      # input_json_delta fragments and are written onto the struct, not onto raw.
       start = %{
         "type" => "mcp_tool_use",
         "id" => "mcptoolu_1",
