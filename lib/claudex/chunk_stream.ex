@@ -125,9 +125,6 @@ defmodule Claudex.ChunkStream do
     end
   end
 
-  # The error is raised here rather than where it arrives, so the events stay
-  # what `Claudex.Telemetry` documents: one request reports a stop or an
-  # exception, never both. Stream.resource runs this on the way out either way.
   defp disconnect(%{failure: nil} = state) do
     close(state)
 

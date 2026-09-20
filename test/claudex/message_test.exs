@@ -87,9 +87,6 @@ defmodule Claudex.MessageTest do
     end
 
     test "a turn that only ran tools is not empty" do
-      # A web search or an MCP call answers with no text of its own. Reading
-      # that as empty drops the turn, and the conversation cannot resume
-      # without the blocks it held.
       blocks = [
         %ContentBlock.ServerToolUse{id: "srvtoolu_1", name: "web_search", input: %{}},
         %ContentBlock.ServerToolResult{tool_use_id: "srvtoolu_1", tool: :web_search},
@@ -104,8 +101,6 @@ defmodule Claudex.MessageTest do
     end
 
     test "a block this version doesn't model is not empty" do
-      # Unknown exists so a new block type still round-trips. Reading it as
-      # empty throws the turn away before `raw` reaches anyone's storage.
       refute Message.empty?(%Message{
                content: [%ContentBlock.Unknown{type: "compaction", raw: %{}}]
              })
@@ -114,8 +109,6 @@ defmodule Claudex.MessageTest do
     end
 
     test "a history from append/2 can be filtered without decoding it again" do
-      # append/2 hands back plain maps, which is the shape that goes to storage
-      # and comes back, so the natural call is on a map rather than a struct.
       history =
         []
         |> Message.append(Message.user("hi"))

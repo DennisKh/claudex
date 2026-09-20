@@ -139,8 +139,6 @@ defmodule Claudex.Live.TracingTest do
 
       [request] = named(collect([]), "chat " <> @unknown_model)
 
-      # create/2 reads its status off the response body, so this is the path
-      # that was already right.
       assert {:status, :error, message} = span(request, :status)
       assert message =~ "model"
       assert attributes(request)["http.response.status_code"] == error.status
@@ -156,9 +154,6 @@ defmodule Claudex.Live.TracingTest do
 
       [request] = named(collect([]), "chat " <> @unknown_model)
 
-      # A stream has no response body to read a status from, and the runner
-      # always streams: without this every failed tool conversation would end
-      # green.
       assert {:status, :error, message} = span(request, :status)
       assert message != ""
     end
@@ -180,7 +175,6 @@ defmodule Claudex.Live.TracingTest do
       assert {:status, :error, message} = span(call, :status)
       assert message =~ "cannot divide by zero"
 
-      # A refusal is an answer, not a failure of the run.
       assert [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
       assert attributes(root)["claudex.stop"] == "completed"
       assert turn.stop == :completed

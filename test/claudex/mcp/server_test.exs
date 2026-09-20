@@ -18,8 +18,6 @@ defmodule Claudex.MCP.ServerTest do
   end
 
   test "the token stays hidden however the struct is nested" do
-    # A server reaches inspect through config, an assign, or a crash report,
-    # never on its own.
     refute inspect(%{mcp_servers: [@server]}) =~ "ghp_secret_value"
   end
 
