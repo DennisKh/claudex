@@ -9,27 +9,40 @@ defmodule Claudex.API do
   the decoded body on a 2xx, a `Claudex.Error` on anything else, including a
   transport failure.
 
-  `options` reach `Req.request/2` unchanged, so any Req option works. `:method`
-  is the only one required, and a call without it raises. The rest are whatever
-  the endpoint needs: `:url`, `:params`, `:json`, `:form_multipart` and
-  `:decode_body` are the ones used here.
+  `request_options` reach `Req.request/2` unchanged, so any Req option works.
+  `:method` is the only one required, and a call without it raises. The rest
+  are whatever the endpoint needs: `:url`, `:params`, `:json`,
+  `:form_multipart` and `:decode_body` are the ones used here.
 
   `:method`, `:url` and a `:model` inside the `:json` body are also read for the
   telemetry metadata and the span, so an endpoint that names its model in the
   body gets it recorded without passing it twice.
 
+  `opts` are Claudex's own and reach neither Req nor the telemetry metadata.
+  A caller passing its own options through sends the whole list; anything but
+  the key below is ignored.
+
+  ## Options
+
+    * `:session` - names the conversation the request belongs to, as
+      `t:Claudex.Tracing.session_option/0` describes.
+
   Wraps the call in the `[:claudex, :request, ...]` telemetry events and an
   OpenTelemetry span, which is a no-op unless the app traces.
   """
   @spec request(Client.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
-  def request(%Client{} = client, options) do
+  @spec request(Client.t(), keyword(), keyword()) :: {:ok, term()} | {:error, Error.t()}
+  def request(%Client{} = client, request_options, opts \\ []) do
     metadata =
-      %{method: Keyword.fetch!(options, :method), path: Keyword.get(options, :url)}
-      |> put_model(options)
+      %{
+        method: Keyword.fetch!(request_options, :method),
+        path: Keyword.get(request_options, :url)
+      }
+      |> put_model(request_options)
 
     Tracing.span(
-      fn -> Attributes.request(metadata, options) end,
-      fn span -> traced(client, options, metadata, span) end
+      fn -> Attributes.request(metadata, request_options, opts) end,
+      fn span -> traced(client, request_options, metadata, span) end
     )
   end
 
@@ -73,10 +86,12 @@ defmodule Claudex.API do
     request(client, method: :get, url: url, params: params)
   end
 
-  @doc "POSTs `body` to `url` as JSON."
+  @doc "POSTs `body` to `url` as JSON. `opts` are `request/3`'s."
   @spec post(Client.t(), String.t(), map()) :: {:ok, term()} | {:error, Error.t()}
-  def post(%Client{} = client, url, body) do
-    request(client, method: :post, url: url, json: body)
+  @spec post(Client.t(), String.t(), map(), keyword()) ::
+          {:ok, term()} | {:error, Error.t()}
+  def post(%Client{} = client, url, body, opts \\ []) do
+    request(client, [method: :post, url: url, json: body], opts)
   end
 
   @doc "DELETEs `url`."

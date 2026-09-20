@@ -19,10 +19,33 @@ defmodule Claudex.ContentBlock.MCPToolResult do
 
   @type t :: %__MODULE__{
           tool_use_id: String.t(),
-          content: String.t() | list(),
+          content: String.t() | list() | nil,
           is_error: boolean(),
           raw: map()
         }
+
+  @doc """
+  Joins the text of an MCP result into one string.
+
+  `content` is a string for a plain answer, or a list of blocks. A string comes
+  back as it is; blocks that are not text are skipped and the rest are joined
+  with a newline, since a server sends them as separate items rather than as
+  fragments of one. A payload shaped some other way is `""`, so a result type a
+  later API adds reads as no text rather than raising.
+
+      Claudex.ContentBlock.MCPToolResult.text(block)
+      #=> "Here is the result of the MCP tool"
+  """
+  @spec text(t()) :: String.t()
+  def text(%__MODULE__{content: content}) when is_binary(content), do: content
+
+  def text(%__MODULE__{content: content}) when is_list(content) do
+    content
+    |> Enum.filter(&match?(%{"type" => "text"}, &1))
+    |> Enum.map_join("\n", & &1["text"])
+  end
+
+  def text(%__MODULE__{}), do: ""
 
   @doc """
   Returns the map the API sent, unchanged.

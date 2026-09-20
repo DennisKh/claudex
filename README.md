@@ -403,7 +403,9 @@ The toolset needs nothing but the server's name, and enables every tool that ser
 
 On a server with a large catalogue, `default_config: %{defer_loading: true}` alongside the tool search tool keeps the descriptions out of the prompt until Claude looks one up.
 
-`authorization_token` is whatever that server's own OAuth or token scheme issues, obtained and refreshed by you. `Claudex.MCP.Server` keeps it out of `inspect/1`, so a server sitting in a config or an assign doesn't print the token in a log or a crash report; a plain map works here too and passes through as written. Every server must be referenced by exactly one toolset, and the URL has to be reachable from Anthropic's side, so a local stdio server cannot be connected this way. Claude's call arrives as `Claudex.ContentBlock.MCPToolUse` carrying the `server_name` it went to, and the answer as `Claudex.ContentBlock.MCPToolResult`, paired by `tool_use_id`. A call that failed is still a 200 with `is_error` set. The API runs both before it replies, so `Claudex.Message.tool_uses/1` leaves them out and there is nothing to dispatch.
+`authorization_token` is whatever that server's own OAuth or token scheme issues, obtained and refreshed by you. `Claudex.MCP.Server` keeps it out of `inspect/1`, so a server sitting in a config or an assign doesn't print the token in a log or a crash report; a plain map works here too and passes through as written. Every server must be referenced by exactly one toolset, and the URL has to be reachable from Anthropic's side, so a local stdio server cannot be connected this way. Claude's call arrives as `Claudex.ContentBlock.MCPToolUse` carrying the `server_name` it went to, and the answer as `Claudex.ContentBlock.MCPToolResult`, paired by `tool_use_id`. A call that failed is still a 200 with `is_error` set, and
+`Claudex.ContentBlock.MCPToolResult.text/1` joins whatever text the server
+answered with. The API runs both before it replies, so `Claudex.Message.tool_uses/1` leaves them out and there is nothing to dispatch.
 
 Data exchanged with an MCP server is not covered by zero data retention.
 
@@ -542,6 +544,11 @@ That survives block types this version of Claudex doesn't model yet, because
 `Claudex.ContentBlock.Unknown` keeps the raw map and replays it untouched, so a
 compaction block round-trips without an SDK upgrade.
 
+`Claudex.Message.empty?/1` answers whether a turn is worth storing at all. A
+reply that only ran a web search or an MCP tool carries no text and still has
+to be kept, so classifying blocks by hand to decide is how a turn goes
+missing.
+
 Results for one reply go back together. If a reply asked for two tools, the
 next message has to answer both:
 
@@ -611,7 +618,7 @@ Tracing is off until you ask for it with `config :claudex, tracing: true`, and n
 {:opentelemetry_exporter, "~> 1.10"}
 ```
 
-`mix claudex.gen.tracing` writes the config below into your `config/runtime.exs`; `mix claudex.gen.tracing langfuse` writes the Langfuse-shaped one.
+`mix claudex.gen.tracing` writes the config below into your `config/runtime.exs`; `mix claudex.gen.tracing langfuse` writes the Langfuse-shaped one. That file runs in every environment, so the task guards what it writes with `if config_env() == :prod do`. Widen the guard by hand to trace a development run, and leave `:test` out of it unless you want your suite exporting.
 
 Sending to Langfuse is three lines in your own `runtime.exs`, because Langfuse reads OTLP and Claudex doesn't know it exists:
 
@@ -636,6 +643,32 @@ config :opentelemetry_exporter,
 
 Point the endpoint and header elsewhere for Honeycomb, Datadog, Phoenix/Arize or Braintrust. Prompts, completions and tool arguments stay off a span unless you ask for them with `config :claudex, trace_content: true` — that setting is what fills the input and output panels of a tracing UI.
 
+### Naming a conversation
+
+A trace is one run. Grouping several of them under a chat, a ticket or a user is what `session.id` does, and every call that makes a span takes it:
+
+```elixir
+Claudex.Messages.create(client, params, session: chat.id)
+Claudex.Messages.stream_to(client, params, to: self(), session: chat.id)
+Claudex.Tool.call(MyApp.Tools, name, input, session: chat.id)
+Claudex.Files.upload(client, path, session: chat.id)
+Claudex.ToolRunner.run(client, params, session: chat.id)
+```
+
+A span inherits no attributes from its parent, so a tool call needs its own even when it runs inside a conversation. `Claudex.Tracing.set_session/1` names one for every span the calling process builds after it, which suits a LiveView holding a single chat; a process serving several clears it with `set_session(nil)` between them. A row id becomes a string, so `session: chat.id` works whatever the column type is.
+
+An app driving its own tool loop can open the span `Claudex.ToolRunner` opens for a run, so its requests and tool calls land in one trace instead of one each:
+
+```elixir
+span = Claudex.Tracing.start_conversation(params, session: chat.id)
+
+{:ok, message} = Claudex.Messages.create(client, params, session: chat.id)
+
+Claudex.Tracing.end_conversation(span, message, :completed)
+```
+
+The span stays open and unexported until `end_conversation/3` runs, so every way out of an exchange has to end it, including the errors and the abandoned ones.
+
 ### Running Langfuse locally
 
 `docker-compose.langfuse.yml` brings up the whole stack — web, worker, Postgres, ClickHouse, Redis and MinIO — so you can see your traces without sending them anywhere:
@@ -654,12 +687,6 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 ```
 
 Only port 3000 and the MinIO console on 9090 are exposed; everything else stays on the compose network. `docker compose -f docker-compose.langfuse.yml down -v` removes the volumes and starts over. `.env.langfuse` is gitignored, because that is where real keys end up.
-
-Name a conversation to group its trace with others — a chat id, or whatever the user called it:
-
-```elixir
-Claudex.ToolRunner.run(client, params, session: chat.id)
-```
 
 ![Langfuse session view](assets/langfuse-trace-2.png)
 

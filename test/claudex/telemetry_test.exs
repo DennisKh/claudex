@@ -261,6 +261,32 @@ defmodule Claudex.TelemetryTest do
     assert_receive {:telemetry, [:claudex, :tool_runner, :stop], %{turns: 2}, %{stop: :max_turns}}
   end
 
+  test "a streamed request that fails reports an exception, not a stop" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      conn
+      |> Plug.Conn.put_status(529)
+      |> Req.Test.json(%{
+        "type" => "error",
+        "error" => %{"type" => "overloaded_error", "message" => "Overloaded"}
+      })
+    end)
+
+    assert_raise Claudex.Error, "Overloaded", fn ->
+      client() |> Messages.stream!(@params) |> Enum.to_list()
+    end
+
+    assert_receive {:telemetry, [:claudex, :request, :exception], measurements, metadata}
+
+    assert metadata.kind == :error
+    assert metadata.error == Claudex.Error
+    assert metadata.method == :post
+    assert metadata.path == "/v1/messages"
+    assert is_integer(measurements.duration)
+
+    # The documented shape is one or the other, the way the unary path reports.
+    refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, _metadata}
+  end
+
   test "attach_default_logger/1 is idempotent and detaches cleanly" do
     assert Telemetry.attach_default_logger() == :ok
     assert Telemetry.attach_default_logger() == :ok

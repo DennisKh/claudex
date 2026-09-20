@@ -24,10 +24,23 @@ defmodule Claudex.Tracing.Attributes do
   @execute_tool "execute_tool"
   @invoke_agent "invoke_agent"
 
-  @doc "Names a request's span and builds its attributes, from the telemetry metadata."
+  @doc """
+  Names a request's span and builds its attributes, from the telemetry
+  metadata.
+
+  `opts` takes `:session`, naming the conversation the request belongs to. It
+  falls back to `Claudex.Tracing.set_session/1`'s value, so a caller can name
+  one per call or once for the process.
+  """
   @spec request(map(), keyword()) :: {String.t(), map()}
-  def request(metadata, options) do
-    {name(metadata), base(metadata) |> put_request(metadata, Keyword.get(options, :json))}
+  @spec request(map(), keyword(), [Tracing.session_option()]) :: {String.t(), map()}
+  def request(metadata, request_options, opts \\ []) do
+    attributes =
+      base(metadata)
+      |> put_session(session(opts))
+      |> put_request(metadata, Keyword.get(request_options, :json))
+
+    {name(metadata), attributes}
   end
 
   @doc "Builds the attributes a response body and status add to a request's span."
@@ -61,18 +74,15 @@ defmodule Claudex.Tracing.Attributes do
   reaches its answer after the loop ends, so the run is the invocation and the
   turns are steps within it.
   """
-  @spec conversation(map(), pos_integer(), String.t() | nil) :: {String.t(), map()}
+  @spec conversation(map(), pos_integer() | nil, String.t() | nil) :: {String.t(), map()}
   def conversation(params, max_turns, session) do
     model = params[:model]
 
     attributes =
-      %{
-        "gen_ai.system" => @system,
-        "gen_ai.operation.name" => @invoke_agent,
-        "claudex.turn.max" => max_turns
-      }
+      %{"gen_ai.system" => @system, "gen_ai.operation.name" => @invoke_agent}
+      |> put_present("claudex.turn.max", max_turns)
       |> put_model(model)
-      |> put_session(session)
+      |> put_session(session || Tracing.session_id())
       |> put_content("gen_ai.input.messages", fn -> Messages.input(params[:messages]) end)
       |> put_content("gen_ai.system_instructions", fn -> Messages.system(params[:system]) end)
       |> put_content("gen_ai.tool.definitions", fn -> Messages.definitions(params[:tools]) end)
@@ -89,8 +99,8 @@ defmodule Claudex.Tracing.Attributes do
   A trace's input and output are the run's, not the last request's: what was
   asked at the start and what came back at the end.
   """
-  @spec conversation_result(Message.t(), atom() | nil) :: map()
-  def conversation_result(%Message{} = message, stop) do
+  @spec conversation_result(Message.t() | nil, atom() | nil) :: map()
+  def conversation_result(message, stop) do
     %{}
     |> put_present("claudex.stop", stop && to_string(stop))
     |> put_reply_content(message)
@@ -108,9 +118,17 @@ defmodule Claudex.Tracing.Attributes do
     {"turn", %{"claudex.turn.index" => index}}
   end
 
-  @doc "Names a tool call's span and builds its attributes, including its arguments."
+  @doc """
+  Names a tool call's span and builds its attributes, including its arguments.
+
+  `opts` takes `:session`, naming the conversation the call belongs to, and
+  falls back to `Claudex.Tracing.set_session/1`'s value. A span inherits no
+  attributes from its parent, so a tool call inside a conversation still needs
+  its own.
+  """
   @spec tool(String.t(), map()) :: {String.t(), map()}
-  def tool(name, input) do
+  @spec tool(String.t(), map(), [Tracing.session_option()]) :: {String.t(), map()}
+  def tool(name, input, opts \\ []) do
     attributes =
       %{
         "gen_ai.system" => @system,
@@ -118,6 +136,7 @@ defmodule Claudex.Tracing.Attributes do
         "gen_ai.tool.name" => name,
         "gen_ai.tool.type" => "function"
       }
+      |> put_session(session(opts))
       |> put_content("gen_ai.tool.call.arguments", fn -> input end)
       |> put_content("gen_ai.prompt", fn -> input end)
 
@@ -215,6 +234,8 @@ defmodule Claudex.Tracing.Attributes do
 
   defp put_usage(attributes, _usage), do: attributes
 
+  defp put_reply_content(attributes, nil), do: attributes
+
   defp put_reply_content(attributes, message) do
     if Tracing.trace_content?() do
       content = Message.to_param(message).content
@@ -252,10 +273,14 @@ defmodule Claudex.Tracing.Attributes do
 
   defp put_model(attributes, _model), do: attributes
 
-  defp put_session(attributes, session) when is_binary(session),
-    do: Map.put(attributes, "session.id", session)
+  defp session(opts), do: Keyword.get(opts, :session) || Tracing.session_id()
 
-  defp put_session(attributes, _session), do: attributes
+  defp put_session(attributes, session) do
+    case Tracing.normalize_session(session) do
+      nil -> attributes
+      session_id -> Map.put(attributes, "session.id", session_id)
+    end
+  end
 
   defp put_content(attributes, key, build) do
     if Tracing.trace_content?(), do: put_built(attributes, key, build.()), else: attributes

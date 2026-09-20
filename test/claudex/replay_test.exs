@@ -113,6 +113,7 @@ defmodule Claudex.ReplayTest do
     assert result.tool_use_id == call.id
     refute result.is_error
     assert [%{"type" => "text"} | _rest] = result.content
+    assert ContentBlock.MCPToolResult.text(result) =~ "Available pages for elixir-lang/elixir"
 
     # The API ran the call before it replied, so neither block is work for the
     # local runner to pick up.

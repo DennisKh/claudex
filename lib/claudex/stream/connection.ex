@@ -9,13 +9,14 @@ defmodule Claudex.Stream.Connection do
   Returns a lazy stream of events for a streaming Messages request.
 
   The transport is `Claudex.ChunkStream`; this only turns the bytes it yields
-  into typed events.
+  into typed events. `opts` go through untouched, described under "Options" in
+  `Claudex.ChunkStream.stream/3`.
   """
   @spec stream(Client.t(), map()) :: Enumerable.t()
-  @spec stream(Client.t(), map(), reference()) :: Enumerable.t()
-  def stream(%Client{} = client, body, cancel_ref \\ make_ref()) do
+  @spec stream(Client.t(), map(), [ChunkStream.option()]) :: Enumerable.t()
+  def stream(%Client{} = client, body, opts \\ []) do
     client
-    |> ChunkStream.stream([method: :post, url: "/v1/messages", json: body], cancel_ref)
+    |> ChunkStream.stream([method: :post, url: "/v1/messages", json: body], opts)
     |> Stream.transform(&SSE.new/0, &decode_chunk/2, &flush/1, fn _decoder -> :ok end)
     |> Stream.transform(&recorder/0, &record/2, fn _recorder -> :ok end)
   end

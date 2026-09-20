@@ -13,24 +13,25 @@ defmodule Claudex.Messages do
   request at a time.
   """
 
-  alias Claudex.{API, Client, Error, MCP, Message, OutputFormat, Tool}
+  alias Claudex.{API, Client, Error, MCP, Message, OutputFormat, Tool, Tracing}
   alias Claudex.Stream.{Connection, Forwarder, Handle}
 
   @required_params [:model, :messages, :max_tokens]
   @count_tokens_required_params [:model, :messages]
 
   @typedoc """
-  An option for `stream!/3`.
-
-    * `:cancel_ref` - tags the request with a reference, so a
-      `Claudex.Stream.Handle` carrying the same one stops it part-way.
+  An option for `stream!/3`, described under "Options" there.
   """
-  @type stream_option :: {:cancel_ref, reference()}
+  @type stream_option :: {:cancel_ref, reference()} | Tracing.session_option()
 
   @typedoc """
   An option for `stream_to/3`, described under "Options" there.
   """
-  @type stream_to_option :: {:to, pid()} | {:ref, reference()} | {:monitor, boolean()}
+  @type stream_to_option ::
+          {:to, pid()}
+          | {:ref, reference()}
+          | {:monitor, boolean()}
+          | Tracing.session_option()
 
   @doc """
   Sends a request to `POST /v1/messages` and returns the completed message.
@@ -54,14 +55,21 @@ defmodule Claudex.Messages do
   returns `{:error, %Claudex.Error{type: :bad_request}}`,
   use `stream!/2` or `stream_to/3` instead.
 
+  `opts` takes `:session`, which names the conversation this request belongs
+  to for tracing and never reaches the API. See
+  `t:Claudex.Tracing.session_option/0`.
+
   Returns `{:error, %Claudex.Error{}}` for a non-2xx response, a timeout, or
   a connection failure.
   """
   @spec create(Client.t(), map() | keyword()) :: {:ok, Message.t()} | {:error, Error.t()}
-  def create(%Client{} = client, params) do
+  @spec create(Client.t(), map() | keyword(), [Tracing.session_option()]) ::
+          {:ok, Message.t()} | {:error, Error.t()}
+  def create(%Client{} = client, params, opts \\ []) do
     with {:ok, body} <- build_body(params),
          :ok <- validate_not_streaming(body),
-         {:ok, response} <- API.post(client, "/v1/messages", Map.put(body, :stream, false)) do
+         {:ok, response} <-
+           API.post(client, "/v1/messages", Map.put(body, :stream, false), opts) do
       {:ok, Message.decode(response)}
     end
   end
@@ -89,12 +97,17 @@ defmodule Claudex.Messages do
   accepts a given server tool.
 
   The number is an estimate; a real request can come out a little different.
+
+  `opts` takes `:session`, the same as `create/2`.
   """
   @spec count_tokens(Client.t(), map() | keyword()) ::
           {:ok, non_neg_integer()} | {:error, Error.t()}
-  def count_tokens(%Client{} = client, params) do
+  @spec count_tokens(Client.t(), map() | keyword(), [Tracing.session_option()]) ::
+          {:ok, non_neg_integer()} | {:error, Error.t()}
+  def count_tokens(%Client{} = client, params, opts \\ []) do
     with {:ok, body} <- build_body(params, @count_tokens_required_params),
-         {:ok, response} <- API.post(client, "/v1/messages/count_tokens", body) do
+         {:ok, response} <-
+           API.post(client, "/v1/messages/count_tokens", body, opts) do
       case response do
         %{"input_tokens" => count} when is_integer(count) ->
           {:ok, count}
@@ -132,16 +145,22 @@ defmodule Claudex.Messages do
   Raises `Claudex.Error` on a missing parameter, a failed request, or an
   error the API sends part-way through the stream. Use `stream_to/3` if
   you'd rather have errors delivered as messages than raised.
+
+  ## Options
+
+    * `:cancel_ref` - tags the request with a reference, so a
+      `Claudex.Stream.Handle` carrying the same one stops it part-way.
+    * `:session` - names the conversation for tracing, as
+      `t:Claudex.Tracing.session_option/0` describes.
   """
   @spec stream!(Client.t(), map() | keyword()) :: Enumerable.t()
   @spec stream!(Client.t(), map() | keyword(), [stream_option()]) :: Enumerable.t()
   def stream!(%Client{} = client, params, opts \\ []) do
     case build_body(params) do
       {:ok, body} ->
-        Connection.stream(
-          client,
-          Map.put(body, :stream, true),
-          Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
+        Connection.stream(client, Map.put(body, :stream, true),
+          cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0),
+          session: Keyword.get(opts, :session)
         )
 
       {:error, error} ->
@@ -188,6 +207,8 @@ defmodule Claudex.Messages do
       to finish. Nothing is sent when it stops, because the process the
       messages were for is the one that has gone; a caller that needs to know
       monitors the handle's `pid`.
+    * `:session` - names the conversation for tracing, as
+      `t:Claudex.Tracing.session_option/0` describes.
 
   `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
   way, adding a message per completed turn.

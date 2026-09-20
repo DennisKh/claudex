@@ -13,6 +13,10 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
   second half into `config/runtime.exs`, creating it if it isn't there, and
   prints the two dependencies to add.
 
+  `config/runtime.exs` runs in every environment, so the block it writes is
+  guarded with `if config_env() == :prod do`. Widen or drop that guard by
+  hand if you want traces from `:dev` too.
+
   The backend is `otlp` unless you name one. That reads the standard
   `OTEL_EXPORTER_OTLP_*` variables and needs no Claudex-specific setup, which
   is the shape every OTLP backend accepts. `langfuse` writes the endpoint and
@@ -92,26 +96,33 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
 
     # Claudex's spans, sent to Langfuse over OTLP. Langfuse reads the GenAI
     # semantic conventions, so nothing in Claudex knows this is where they go.
-    langfuse_auth =
-      Base.encode64(
-        System.fetch_env!("LANGFUSE_PUBLIC_KEY") <> ":" <> System.fetch_env!("LANGFUSE_SECRET_KEY")
-      )
+    #
+    # config/runtime.exs runs in every environment, so this stays behind the
+    # :prod guard. Add config_env() == :dev here too, or drop the guard
+    # entirely, to send traces from other environments as well.
+    if config_env() == :prod do
+      langfuse_auth =
+        Base.encode64(
+          System.fetch_env!("LANGFUSE_PUBLIC_KEY") <>
+            ":" <> System.fetch_env!("LANGFUSE_SECRET_KEY")
+        )
 
-    config :opentelemetry_exporter,
-      otlp_protocol: :http_protobuf,
-      otlp_endpoint:
-        System.get_env("LANGFUSE_HOST", "https://cloud.langfuse.com") <> "/api/public/otel",
-      otlp_headers: [
-        {"authorization", "Basic " <> langfuse_auth},
-        {"x-langfuse-ingestion-version", "4"}
-      ]
+      config :opentelemetry_exporter,
+        otlp_protocol: :http_protobuf,
+        otlp_endpoint:
+          System.get_env("LANGFUSE_HOST", "https://cloud.langfuse.com") <> "/api/public/otel",
+        otlp_headers: [
+          {"authorization", "Basic " <> langfuse_auth},
+          {"x-langfuse-ingestion-version", "4"}
+        ]
 
-    # Claudex records nothing until this is on.
-    config :claudex, tracing: true
+      # Claudex records nothing until this is on.
+      config :claudex, tracing: true
 
-    # Prompts and completions stay off a span unless you turn this on too. A
-    # span goes wherever the exporter sends it, so decide that deliberately.
-    config :claudex, trace_content: false
+      # Prompts and completions stay off a span unless you turn this on too. A
+      # span goes wherever the exporter sends it, so decide that deliberately.
+      config :claudex, trace_content: false
+    end
     """ <> service_name()
   end
 
@@ -121,14 +132,20 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     # Claudex's spans, sent wherever OTEL_EXPORTER_OTLP_ENDPOINT points. The
     # exporter reads the standard OTEL_EXPORTER_OTLP_* variables itself, so
     # this only has to name the protocol.
-    config :opentelemetry_exporter, otlp_protocol: :http_protobuf
+    #
+    # config/runtime.exs runs in every environment, so this stays behind the
+    # :prod guard. Add config_env() == :dev here too, or drop the guard
+    # entirely, to send traces from other environments as well.
+    if config_env() == :prod do
+      config :opentelemetry_exporter, otlp_protocol: :http_protobuf
 
-    # Claudex records nothing until this is on.
-    config :claudex, tracing: true
+      # Claudex records nothing until this is on.
+      config :claudex, tracing: true
 
-    # Prompts and completions stay off a span unless you turn this on too. A
-    # span goes wherever the exporter sends it, so decide that deliberately.
-    config :claudex, trace_content: false
+      # Prompts and completions stay off a span unless you turn this on too. A
+      # span goes wherever the exporter sends it, so decide that deliberately.
+      config :claudex, trace_content: false
+    end
     """ <> service_name()
   end
 
@@ -140,6 +157,10 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
 
         {:opentelemetry, "~> 1.7"},
         {:opentelemetry_exporter, "~> 1.10"}
+
+    The block is guarded with `if config_env() == :prod do`, because
+    config/runtime.exs runs in every environment. Widen it by hand to trace a
+    development run.
 
     Then run. See Claudex.Tracing for what each span carries, and turn on
     `config :claudex, trace_content: true` when you want prompts, completions
