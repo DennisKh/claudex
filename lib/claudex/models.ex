@@ -3,8 +3,8 @@ defmodule Claudex.Models do
   The Models API — find out which models your key can use and what each one
   supports.
 
-  Useful for resolving an alias like `"claude-opus-latest"` to the model id it
-  currently points at. Each entry is a `Claudex.Model`, and `list/2` returns a
+  Resolves an alias like `"claude-opus-4-5"` to the dated model id it currently
+  points at. Each entry is a `Claudex.Model`, and `list/2` returns a
   `Claudex.Page` of them.
   """
 

@@ -701,8 +701,8 @@ See `Claudex.Tracing` for the span tree and what each one carries.
 Enum.map(page.data, & &1.id)
 #=> ["claude-opus-5", "claude-sonnet-5", ...]
 
-{:ok, model} = Claudex.Models.retrieve(client, "claude-opus-latest")
-model.id           #=> "claude-opus-5"
+{:ok, model} = Claudex.Models.retrieve(client, "claude-opus-4-5")
+model.id           #=> "claude-opus-4-5-20251101"
 model.max_tokens   #=> 128000
 ```
 

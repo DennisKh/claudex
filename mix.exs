@@ -3,7 +3,7 @@ defmodule Claudex.MixProject do
 
   @version "0.9.1"
   @source_url "https://github.com/DennisKh/claudex"
-  @description "An Elixir SDK for the Claude API that runs the whole tool conversation, streams with backpressure, and derives JSON schemas from your typespecs. Messages, tools, structured outputs, files and batches."
+  @description "An Elixir SDK for the Claude API that runs the whole tool conversation, streams with backpressure, and derives JSON schemas from your typespecs. Messages, tools, MCP servers, structured outputs, files, batches and OpenTelemetry tracing."
 
   def cli do
     [preferred_envs: ["test.live": :test, "test.record": :test]]
