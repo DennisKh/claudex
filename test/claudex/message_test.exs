@@ -107,7 +107,7 @@ defmodule Claudex.MessageTest do
     end
 
     test "round-trips a block type Claudex does not model" do
-      raw = %{"type" => "mcp_tool_use", "id" => "mcptoolu_1", "name" => "search_docs"}
+      raw = %{"type" => "compaction", "id" => "compact_1", "compacted_tokens" => 2048}
       message = %Message{role: "assistant", content: [ContentBlock.decode(raw)]}
 
       assert Message.to_param(message) == %{role: "assistant", content: [raw]}

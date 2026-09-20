@@ -98,6 +98,48 @@ defmodule Claudex.ReplayTest do
     end
   end
 
+  test "a recorded MCP connector reply decodes into blocks that round-trip" do
+    stub_json("mcp_connector")
+
+    assert {:ok, message} = Messages.create(client(), @params)
+
+    call = Enum.find(message.content, &match?(%ContentBlock.MCPToolUse{}, &1))
+    result = Enum.find(message.content, &match?(%ContentBlock.MCPToolResult{}, &1))
+
+    assert call.name == "read_wiki_structure"
+    assert call.server_name == "deepwiki"
+    assert call.input == %{"repoName" => "elixir-lang/elixir"}
+
+    assert result.tool_use_id == call.id
+    refute result.is_error
+    assert [%{"type" => "text"} | _rest] = result.content
+
+    # The API ran the call before it replied, so neither block is work for the
+    # local runner to pick up.
+    assert Message.tool_uses(message) == []
+
+    assert ContentBlock.to_param(call) == call.raw
+    assert ContentBlock.to_param(result) == result.raw
+  end
+
+  test "a recorded MCP stream assembles the call's arguments, however it is chunked" do
+    for chunk_size <- [1, 7, 4096] do
+      stub_sse("mcp_connector_stream", chunk_size)
+
+      events = client() |> Messages.stream!(@params) |> Enum.to_list()
+
+      assert {:ok, message} = Stream.final_message(events)
+
+      call = Enum.find(message.content, &match?(%ContentBlock.MCPToolUse{}, &1))
+
+      # content_block_start carries an empty input: the arguments arrive as
+      # input_json_delta fragments, so a block the accumulator doesn't fold
+      # them onto replays with no arguments at all.
+      assert call.input == %{"repoName" => "elixir-lang/elixir"}
+      assert ContentBlock.to_param(call)["input"] == call.input
+    end
+  end
+
   test "a recorded stream carries the ping the API really sends" do
     raw = Fixtures.sse!("message_stream")
 

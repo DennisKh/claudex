@@ -7,10 +7,10 @@ None of these were hand-written. `test/claudex/replay_test.exs` replays them
 back through the decoders, so a fixture going stale shows up there as a
 failing decode.
 
-All but `server_tools.json` were added in one commit, `88bf1b5` (2026-09-08,
+Thirteen of them were added in one commit, `88bf1b5` (2026-09-08,
 "test: replay recorded API payloads in the offline suite (#19)"); git history
-carries no earlier or later capture for any of them; `server_tools.json` was
-captured later and is dated exactly. A few fixtures embed
+carries no earlier or later capture for any of those. The two MCP connector
+fixtures were recorded on 2026-09-17. A few fixtures embed
 their own `created_at`, which is the request's real timestamp rather than a
 guess; the rest carry no timestamp of their own, so the commit date is the
 only dated record of when they entered the repo. Every one of those names `claude-haiku-4-5-20251001` as `model` (or, for the
@@ -34,10 +34,13 @@ resolving to `claude-haiku-4-5` at the time of capture. `server_tools.json` is
 | `files_page.json` | `GET /v1/files` | `live/files_live_test.exs` — "lists files with the cursor the Files API actually uses" | `created_at` in the fixture: `2026-09-04T23:23:04.285973Z` (same uploaded file) |
 | `server_tools.json` | `POST /v1/messages`, with the `web_search_20260209` tool | `live/server_tools_live_test.exs` — "web search comes back as server tool blocks" | 2026-09-17, recorded for this file |
 | `batch.json` | `POST /v1/messages/batches` | `live/batches_live_test.exs` — "submits a batch, reads it back, and cancels it" | `created_at` in the fixture: `2026-09-04T23:19:44.604104+00:00` |
+| `mcp_connector.json` | `POST /v1/messages`, with `mcp_servers` and an `mcp_toolset` | `live/mcp_connector_live_test.exs` — "a connector call comes back as MCP blocks" | 2026-09-17, recorded for the connector blocks |
+| `mcp_connector_stream.sse` | `POST /v1/messages` (`stream: true`), same request | `live/mcp_connector_live_test.exs` — "a streamed connector call carries its arguments in deltas" | 2026-09-17, recorded for the connector blocks |
 
 "Commit date only" means the fixture carries no timestamp of its own; the
 earliest and only record of when it was captured is `88bf1b5`'s commit date,
 2026-09-08. The three files with an embedded `created_at` were captured a few
 days before that commit landed, which is consistent with local iteration
 before the PR was opened — but that is what the data shows, not something
-this file asserts beyond it.
+this file asserts beyond it. The two dated 2026-09-17 were recorded the day
+they were committed, against DeepWiki's public MCP server.
