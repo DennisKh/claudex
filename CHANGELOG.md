@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0](https://github.com/DennisKh/claudex/compare/v0.9.1...v0.10.0) (2026-09-20)
+
+
+### Features
+
+* **mcp:** support the MCP connector ([#70](https://github.com/DennisKh/claudex/issues/70)) ([fb46876](https://github.com/DennisKh/claudex/commit/fb46876a32430c5d1f54b4cb93525fa3bb47350f))
+* session ids on spans, and two content-block accessors ([#72](https://github.com/DennisKh/claudex/issues/72)) ([8b5b58b](https://github.com/DennisKh/claudex/commit/8b5b58b33a38bcf03eb2d362b5ba4cd00d535dfd))
+* **tracing:** emit OpenTelemetry spans ([#65](https://github.com/DennisKh/claudex/issues/65)) ([4c56a4b](https://github.com/DennisKh/claudex/commit/4c56a4bae23ea10ada665ffd2331cb2649131228))
+
 ## [0.9.1](https://github.com/DennisKh/claudex/compare/v0.9.0...v0.9.1) (2026-09-15)
 
 
