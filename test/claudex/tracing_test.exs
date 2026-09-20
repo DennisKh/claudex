@@ -10,7 +10,9 @@ defmodule Claudex.TracingTest do
   require Record
 
   alias Claudex.{Client, Files, Messages, Tool, ToolRunner, Tracing}
+  alias Claudex.{Client, Files, Messages, Tool, ToolRunner, Tracing}
   alias Claudex.Stream.Event
+  alias Claudex.TestSupport.{Fixtures, MessageStream}
   alias Claudex.TestSupport.{Fixtures, MessageStream}
   alias Claudex.Tracing.Attributes
 
@@ -246,6 +248,7 @@ defmodule Claudex.TracingTest do
   end
 
   test "a named session lands on the conversation span and every request inside it" do
+  test "a named session lands on the conversation span and every request inside it" do
     stream_reply(message())
 
     assert {:ok, _turn} =
@@ -255,6 +258,8 @@ defmodule Claudex.TracingTest do
 
     spans = collect_spans([])
     [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
+    [request] = named(spans, "chat claude-haiku-4-5")
+    [turn] = named(spans, "turn")
     [request] = named(spans, "chat claude-haiku-4-5")
     [turn] = named(spans, "turn")
 
@@ -1151,6 +1156,7 @@ defmodule Claudex.TracingTest do
     # span" is written to theirs.
     Tracer.with_span "my_app.work" do
       assert {:error, _error} = Messages.create(client(), @params)
+      assert {:ok, 3} = Tool.call(Adder, "add", %{"a" => 1, "b" => 2})
       assert {:ok, 3} = Tool.call(Adder, "add", %{"a" => 1, "b" => 2})
     end
 

@@ -9,6 +9,11 @@ defmodule Claudex.ChunkStream do
   """
   @type option :: {:cancel_ref, reference()} | Tracing.session_option()
 
+  @typedoc """
+  An option for `stream/3`, described under "Options" there.
+  """
+  @type option :: {:cancel_ref, reference()} | Tracing.session_option()
+
   @doc """
   Streams a response body as raw binary chunks.
 
@@ -16,6 +21,9 @@ defmodule Claudex.ChunkStream do
   at a time, waiting for the consumer to ask for the next. That wait is the
   backpressure: at most one chunk is read ahead of the consumer, and the socket
   stalls behind it.
+
+  `request_options` reach `Req.request/2`. `opts` are this function's own, and
+  are read when enumeration starts rather than here.
 
   `request_options` reach `Req.request/2`. `opts` are this function's own, and
   are read when enumeration starts rather than here.
@@ -30,19 +38,33 @@ defmodule Claudex.ChunkStream do
       nothing can cancel a stream whose reference the caller never saw.
     * `:session` - names the conversation for tracing, as
       `t:Claudex.Tracing.session_option/0` describes.
+
+  ## Options
+
+    * `:cancel_ref` - the reference a `{:claudex_cancel, ref}` message carries
+      to stop the stream part-way. One is made for you when it is absent, and
+      nothing can cancel a stream whose reference the caller never saw.
+    * `:session` - names the conversation for tracing, as
+      `t:Claudex.Tracing.session_option/0` describes.
   """
   @spec stream(Client.t(), keyword()) :: Enumerable.t()
   @spec stream(Client.t(), keyword(), [option()]) :: Enumerable.t()
   def stream(%Client{} = client, request_options, opts \\ []) do
     cancel_ref = Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
 
+  @spec stream(Client.t(), keyword(), [option()]) :: Enumerable.t()
+  def stream(%Client{} = client, request_options, opts \\ []) do
+    cancel_ref = Keyword.get_lazy(opts, :cancel_ref, &make_ref/0)
+
     Stream.resource(
+      fn -> connect(client, request_options, cancel_ref, opts) end,
       fn -> connect(client, request_options, cancel_ref, opts) end,
       &next/1,
       &disconnect/1
     )
   end
 
+  defp connect(client, request_options, cancel_ref, opts) do
   defp connect(client, request_options, cancel_ref, opts) do
     consumer = self()
     producer_ref = make_ref()
@@ -76,8 +98,10 @@ defmodule Claudex.ChunkStream do
       producer_ref: producer_ref,
       done?: false,
       failure: nil,
+      failure: nil,
       metadata: metadata,
       cancel_ref: cancel_ref,
+      span: start_span(metadata, request_options, opts),
       span: start_span(metadata, request_options, opts),
       first_chunk: nil,
       chunks: 0,
@@ -117,8 +141,12 @@ defmodule Claudex.ChunkStream do
 
       {^producer_ref, {:error, error}} ->
         {:halt, %{state | failure: error}}
+        {:halt, %{state | failure: error}}
 
       {:DOWN, ^producer_monitor, :process, _producer, reason} ->
+        error = Error.stream_error("the process running the request exited: #{inspect(reason)}")
+
+        {:halt, %{state | failure: error}}
         error = Error.stream_error("the process running the request exited: #{inspect(reason)}")
 
         {:halt, %{state | failure: error}}
@@ -172,13 +200,27 @@ defmodule Claudex.ChunkStream do
       bytes: state.bytes
     }
   end
+    :ok
+  end
 
+  defp telemetry_measurements(state) do
+    %{
+      duration: System.monotonic_time() - state.started,
+      chunks: state.chunks,
+      bytes: state.bytes
+    }
+  end
+
+  defp record_span(state) do
+    Tracing.set_attributes(state.span, Attributes.stream(span_measurements(state)))
   defp record_span(state) do
     Tracing.set_attributes(state.span, Attributes.stream(span_measurements(state)))
     record_failure(state)
     Tracing.end_span(state.span)
   end
 
+  defp start_span(metadata, request_options, opts) do
+    Tracing.start_span(fn -> Attributes.request(metadata, request_options, opts) end)
   defp start_span(metadata, request_options, opts) do
     Tracing.start_span(fn -> Attributes.request(metadata, request_options, opts) end)
   end
@@ -191,12 +233,17 @@ defmodule Claudex.ChunkStream do
     Tracing.set_error(state.span, Exception.message(error))
   end
 
+  defp record_failure(%{failure: error} = state) when not is_nil(error) do
+    Tracing.set_error(state.span, Exception.message(error))
+  end
+
   defp record_failure(%{done?: false} = state) do
     Tracing.set_error(state.span, "the stream ended early")
   end
 
   defp record_failure(_state), do: :ok
 
+  defp span_measurements(state) do
   defp span_measurements(state) do
     %{
       chunks: state.chunks,
