@@ -220,9 +220,7 @@ defmodule Claudex.Tool do
   @spec call(module(), String.t(), map(), [Tracing.session_option()]) ::
           {:ok, term()} | {:error, CallError.t()}
   def call(module, name, input, opts \\ []) when is_atom(module) and is_map(input) do
-    session = Keyword.get(opts, :session)
-
-    Tracing.span(fn -> Attributes.tool(name, input, session) end, fn span ->
+    Tracing.span(fn -> Attributes.tool(name, input, opts) end, fn span ->
       :telemetry.span([:claudex, :tool], %{tool: name}, fn ->
         result = module.__call_tool__(name, input)
 

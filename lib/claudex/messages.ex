@@ -20,12 +20,7 @@ defmodule Claudex.Messages do
   @count_tokens_required_params [:model, :messages]
 
   @typedoc """
-  An option for `stream!/3`.
-
-    * `:cancel_ref` - tags the request with a reference, so a
-      `Claudex.Stream.Handle` carrying the same one stops it part-way.
-    * `:session` - names the conversation, as `t:Claudex.Tracing.session_option/0`
-      describes.
+  An option for `stream!/3`, described under "Options" there.
   """
   @type stream_option :: {:cancel_ref, reference()} | Tracing.session_option()
 
@@ -74,7 +69,7 @@ defmodule Claudex.Messages do
     with {:ok, body} <- build_body(params),
          :ok <- validate_not_streaming(body),
          {:ok, response} <-
-           API.post(client, "/v1/messages", Map.put(body, :stream, false), session(opts)) do
+           API.post(client, "/v1/messages", Map.put(body, :stream, false), opts) do
       {:ok, Message.decode(response)}
     end
   end
@@ -112,7 +107,7 @@ defmodule Claudex.Messages do
   def count_tokens(%Client{} = client, params, opts \\ []) do
     with {:ok, body} <- build_body(params, @count_tokens_required_params),
          {:ok, response} <-
-           API.post(client, "/v1/messages/count_tokens", body, session(opts)) do
+           API.post(client, "/v1/messages/count_tokens", body, opts) do
       case response do
         %{"input_tokens" => count} when is_integer(count) ->
           {:ok, count}
@@ -150,6 +145,13 @@ defmodule Claudex.Messages do
   Raises `Claudex.Error` on a missing parameter, a failed request, or an
   error the API sends part-way through the stream. Use `stream_to/3` if
   you'd rather have errors delivered as messages than raised.
+
+  ## Options
+
+    * `:cancel_ref` - tags the request with a reference, so a
+      `Claudex.Stream.Handle` carrying the same one stops it part-way.
+    * `:session` - names the conversation for tracing, as
+      `t:Claudex.Tracing.session_option/0` describes.
   """
   @spec stream!(Client.t(), map() | keyword()) :: Enumerable.t()
   @spec stream!(Client.t(), map() | keyword(), [stream_option()]) :: Enumerable.t()
@@ -158,7 +160,7 @@ defmodule Claudex.Messages do
       {:ok, body} ->
         Connection.stream(client, Map.put(body, :stream, true),
           cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0),
-          session: session(opts)
+          session: Keyword.get(opts, :session)
         )
 
       {:error, error} ->
@@ -220,8 +222,6 @@ defmodule Claudex.Messages do
       Forwarder.events(client, Map.put(body, :stream, true), opts)
     end
   end
-
-  defp session(opts), do: Keyword.get(opts, :session)
 
   defp build_body(params, required \\ @required_params) do
     body =

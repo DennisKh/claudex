@@ -28,17 +28,17 @@ defmodule Claudex.Tracing.Attributes do
   Names a request's span and builds its attributes, from the telemetry
   metadata.
 
-  `session` names the conversation the request belongs to. Falls back to
-  `Claudex.Tracing.set_session/1`'s value when it is nil, so a caller can name
+  `opts` takes `:session`, naming the conversation the request belongs to. It
+  falls back to `Claudex.Tracing.set_session/1`'s value, so a caller can name
   one per call or once for the process.
   """
   @spec request(map(), keyword()) :: {String.t(), map()}
-  @spec request(map(), keyword(), String.t() | nil) :: {String.t(), map()}
-  def request(metadata, options, session \\ nil) do
+  @spec request(map(), keyword(), [Tracing.session_option()]) :: {String.t(), map()}
+  def request(metadata, request_options, opts \\ []) do
     attributes =
       base(metadata)
-      |> put_session(session || Tracing.session_id())
-      |> put_request(metadata, Keyword.get(options, :json))
+      |> put_session(session(opts))
+      |> put_request(metadata, Keyword.get(request_options, :json))
 
     {name(metadata), attributes}
   end
@@ -121,13 +121,14 @@ defmodule Claudex.Tracing.Attributes do
   @doc """
   Names a tool call's span and builds its attributes, including its arguments.
 
-  `session` names the conversation the call belongs to, falling back to
-  `Claudex.Tracing.set_session/1`'s value. A span inherits no attributes from
-  its parent, so a tool call inside a conversation still needs its own.
+  `opts` takes `:session`, naming the conversation the call belongs to, and
+  falls back to `Claudex.Tracing.set_session/1`'s value. A span inherits no
+  attributes from its parent, so a tool call inside a conversation still needs
+  its own.
   """
   @spec tool(String.t(), map()) :: {String.t(), map()}
-  @spec tool(String.t(), map(), String.t() | nil) :: {String.t(), map()}
-  def tool(name, input, session \\ nil) do
+  @spec tool(String.t(), map(), [Tracing.session_option()]) :: {String.t(), map()}
+  def tool(name, input, opts \\ []) do
     attributes =
       %{
         "gen_ai.system" => @system,
@@ -135,7 +136,7 @@ defmodule Claudex.Tracing.Attributes do
         "gen_ai.tool.name" => name,
         "gen_ai.tool.type" => "function"
       }
-      |> put_session(session || Tracing.session_id())
+      |> put_session(session(opts))
       |> put_content("gen_ai.tool.call.arguments", fn -> input end)
       |> put_content("gen_ai.prompt", fn -> input end)
 
@@ -271,6 +272,8 @@ defmodule Claudex.Tracing.Attributes do
     do: Map.put(attributes, "gen_ai.request.model", model)
 
   defp put_model(attributes, _model), do: attributes
+
+  defp session(opts), do: Keyword.get(opts, :session) || Tracing.session_id()
 
   defp put_session(attributes, session) do
     case Tracing.normalize_session(session) do

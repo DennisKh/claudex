@@ -29,7 +29,13 @@ defmodule Claudex.Telemetry do
   `:status`, `:request_id`, and — when the response carries usage —
   `:input_tokens`, `:output_tokens`, and the cache counters
   `:cache_creation_input_tokens` and `:cache_read_input_tokens` when caching
-  was in play. `:request_id` is the id Anthropic support asks for.
+  was in play. `:request_id` is the id Anthropic support asks for. On
+  `:exception` it has `:kind` and the `:error` module instead, and a request
+  reports one or the other, never both.
+
+  A streamed request reports the same events from the process reading it, and
+  its `:stop` and `:exception` measurements carry `:chunks` and `:bytes`
+  alongside `:duration`.
 
   ### `[:claudex, :retry, :declined]`
 
@@ -38,7 +44,7 @@ defmodule Claudex.Telemetry do
 
   ### `[:claudex, :tool, :start | :stop | :exception]`
 
-  A span around one tool call, from `Claudex.Tool.call/3`, so a loop you drive
+  A span around one tool call, from `Claudex.Tool.call/4`, so a loop you drive
   yourself reports the same as `Claudex.ToolRunner` does. `:stop` metadata has
   `:tool` and an `:outcome` of `:ok`, `:refused`, `:denied`, `:failed`, or
   `:unknown_tool`. `:denied` and `:unknown_tool` come from the runner instead,

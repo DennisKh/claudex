@@ -9,9 +9,9 @@ defmodule Claudex.TracingTest do
 
   require Record
 
-  alias Claudex.{Client, Messages, ToolRunner, Tracing}
+  alias Claudex.{Client, Files, Messages, Tool, ToolRunner, Tracing}
   alias Claudex.Stream.Event
-  alias Claudex.TestSupport.MessageStream
+  alias Claudex.TestSupport.{Fixtures, MessageStream}
   alias Claudex.Tracing.Attributes
 
   @fields Record.extract(:span, from_lib: "opentelemetry/include/otel_span.hrl")
@@ -403,9 +403,7 @@ defmodule Claudex.TracingTest do
     span = Tracing.start_conversation(@params, session: "chat-hand-tools")
 
     assert {:ok, 3} =
-             Claudex.Tool.call(Calculator, "add", %{"a" => 1, "b" => 2},
-               session: "chat-hand-tools"
-             )
+             Tool.call(Calculator, "add", %{"a" => 1, "b" => 2}, session: "chat-hand-tools")
 
     Tracing.end_conversation(span)
 
@@ -417,7 +415,7 @@ defmodule Claudex.TracingTest do
     Tracing.set_session("chat-ambient")
 
     assert {:ok, 3} =
-             Claudex.Tool.call(Calculator, "add", %{"a" => 1, "b" => 2}, session: "chat-explicit")
+             Tool.call(Calculator, "add", %{"a" => 1, "b" => 2}, session: "chat-explicit")
 
     assert_receive {:span, recorded}, 2_000
     assert attributes(recorded)["session.id"] == "chat-explicit"
@@ -441,6 +439,17 @@ defmodule Claudex.TracingTest do
     # The flow this protects: whatever an app hands ToolRunner, the run finishes.
     assert {:ok, _turn} =
              ToolRunner.run(client(), Map.put(@params, :tools, Calculator), session: %{id: 1})
+  end
+
+  test "an upload names the conversation the attachment belongs to" do
+    reply(Fixtures.json!("file"))
+
+    assert {:ok, _file} =
+             Files.upload(client(), {"hello", "note.txt"}, session: "chat-attached")
+
+    assert_receive {:span, recorded}, 2_000
+    assert span(recorded, :name) == "POST /v1/files"
+    assert attributes(recorded)["session.id"] == "chat-attached"
   end
 
   test "an integer session on a call reaches the span as a string" do
@@ -1161,7 +1170,7 @@ defmodule Claudex.TracingTest do
     # span" is written to theirs.
     Tracer.with_span "my_app.work" do
       assert {:error, _error} = Messages.create(client(), @params)
-      assert {:ok, 3} = Claudex.Tool.call(Adder, "add", %{"a" => 1, "b" => 2})
+      assert {:ok, 3} = Tool.call(Adder, "add", %{"a" => 1, "b" => 2})
     end
 
     [app_span] = collect_spans([])

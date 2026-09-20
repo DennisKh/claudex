@@ -27,12 +27,15 @@ defmodule Claudex.Files do
   them in a `Claudex.Page`.
   """
 
-  alias Claudex.{API, Client, Error, FileMetadata, Page}
+  alias Claudex.{API, Client, Error, FileMetadata, Page, Tracing}
 
   @typedoc """
   An option for `upload/3`, described under "Options" there.
   """
-  @type upload_option :: {:content_type, String.t()} | {:expires_in_seconds, pos_integer()}
+  @type upload_option ::
+          {:content_type, String.t()}
+          | {:expires_in_seconds, pos_integer()}
+          | Tracing.session_option()
 
   @typedoc """
   A paging option for `list/2` and `stream!/2`. Files paginate with an opaque
@@ -50,6 +53,8 @@ defmodule Claudex.Files do
     * `:expires_in_seconds` - delete the file automatically after this long.
       Between 3600 (an hour) and 7_776_000 (90 days); without it the file
       lives until you delete it.
+    * `:session` - names the conversation an attachment belongs to, as
+      `t:Claudex.Tracing.session_option/0` describes.
 
   Raises if a path can't be read — that's a problem with your filesystem
   rather than with the API.
@@ -68,7 +73,11 @@ defmodule Claudex.Files do
     fields = [{:file, {content, part_options(filename, opts)}}] ++ expiry_field(opts)
 
     with {:ok, body} <-
-           API.request(client, method: :post, url: "/v1/files", form_multipart: fields) do
+           API.request(
+             client,
+             [method: :post, url: "/v1/files", form_multipart: fields],
+             opts
+           ) do
       {:ok, FileMetadata.decode(body)}
     end
   end
