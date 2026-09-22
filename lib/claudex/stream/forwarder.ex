@@ -54,12 +54,50 @@ defmodule Claudex.Stream.Forwarder do
   @spec events(Client.t(), map(), keyword()) :: {:ok, Handle.t()}
   def events(%Client{} = client, body, opts) do
     session = Keyword.get(opts, :session)
+    every = Keyword.get(opts, :every)
 
     start(opts, fn sink ->
-      client
-      |> Connection.stream(body, cancel_ref: sink.ref, session: session)
-      |> forward_each(sink, :event)
+      stream = Connection.stream(client, body, cancel_ref: sink.ref, session: session)
+
+      case every do
+        every when is_integer(every) and every > 0 -> forward_batched(stream, sink, every)
+        _no_window_or_invalid -> forward_each(stream, sink, :event)
+      end
     end)
+  end
+
+  defp forward_batched(enumerable, sink, every) do
+    window = System.convert_time_unit(every, :millisecond, :native)
+
+    enumerable
+    |> Enum.reduce_while(
+      {:running, [], System.monotonic_time()},
+      fn event, {:running, buffered, opened} ->
+        case halt_reason(sink) do
+          nil -> {:cont, batch(sink, event, buffered, opened, window)}
+          reason -> {:halt, {reason, buffered, opened}}
+        end
+      end
+    )
+    |> flush(sink)
+  end
+
+  defp batch(sink, event, buffered, opened, window) do
+    if buffered != [] and System.monotonic_time() - opened >= window do
+      deliver(sink, {:events, Enum.reverse(buffered)})
+
+      {:running, [event], System.monotonic_time()}
+    else
+      {:running, [event | buffered], opened}
+    end
+  end
+
+  defp flush({outcome, [], _opened}, _sink), do: outcome
+
+  defp flush({outcome, buffered, _opened}, sink) do
+    deliver(sink, {:events, Enum.reverse(buffered)})
+
+    outcome
   end
 
   @doc false

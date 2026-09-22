@@ -31,6 +31,7 @@ defmodule Claudex.Messages do
           {:to, pid()}
           | {:ref, reference()}
           | {:monitor, boolean()}
+          | {:every, pos_integer()}
           | Tracing.session_option()
 
   @doc """
@@ -182,12 +183,26 @@ defmodule Claudex.Messages do
       def handle_info({:claudex, ref, {:event, event}}, %{assigns: %{ref: ref}} = socket)
       def handle_info({:claudex, ref, :done}, %{assigns: %{ref: ref}} = socket)
 
+  With `:every`, events arrive in lists instead, and a cancel sends whatever
+  the open batch had collected before it sends `:cancelled`:
+
+      {:ok, handle} = Claudex.Messages.stream_to(client, params, to: self(), every: 100)
+
+      #=> {:claudex, ref, {:events, [%Event.MessageStart{}, %Event.ContentBlockStart{}]}}
+      #=> {:claudex, ref, {:events, [%Event.ContentBlockDelta{}, %Event.ContentBlockDelta{}]}}
+
+      Claudex.Stream.cancel(handle)
+
+      #=> {:claudex, ref, {:events, [%Event.ContentBlockDelta{}]}}
+      #=> {:claudex, ref, :cancelled}
+
   `params` takes exactly what `create/2` takes; `stream: true` is set for you.
 
   Returns `{:ok, handle}`, a `Claudex.Stream.Handle` carrying the `ref` every
   message is tagged with, and then sends:
 
-    * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`
+    * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`, or
+      `{:claudex, ref, {:events, [event]}}` when `:every` is set
     * `{:claudex, ref, {:error, %Claudex.Error{}}}` if the request fails
     * `{:claudex, ref, :done}` when the reply is complete
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
@@ -209,6 +224,11 @@ defmodule Claudex.Messages do
       monitors the handle's `pid`.
     * `:session` - names the conversation for tracing, as
       `t:Claudex.Tracing.session_option/0` describes.
+    * `:every` - milliseconds to batch events over. Messages arrive as
+      `{:claudex, ref, {:events, [event]}}` instead of one per event, which is
+      a render per batch rather than per token for a reader that would
+      otherwise fall behind. A batch goes out when the first event after the
+      window arrives, or when the reply ends.
 
   `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
   way, adding a message per completed turn.
