@@ -35,6 +35,38 @@ defmodule Claudex.Stream.ForwarderTest do
     end
   end
 
+  defmodule PacedTransport do
+    @moduledoc """
+    Delivers its two events 20ms apart, so a batching window shorter than that
+    closes between them.
+    """
+
+    @first """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    """
+
+    @second """
+    event: message_stop
+    data: {"type":"message_stop"}
+
+    """
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @first}, {request, Req.Response.new(status: 200)})
+
+      Process.sleep(20)
+
+      case request.into.({:data, @second}, acc) do
+        {:cont, acc} -> acc
+        {:halt, acc} -> acc
+      end
+    end
+  end
+
   defmodule StallingTransport do
     @moduledoc """
     Delivers one complete event, then stalls the way the API does while the
@@ -109,6 +141,43 @@ defmodule Claudex.Stream.ForwarderTest do
 
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStop{}}}, 2_000
+    assert_receive {:claudex, ^ref, :done}, 2_000
+  end
+
+  test "events/3 batches a window's events into one message" do
+    assert {:ok, %Handle{ref: ref}} =
+             Forwarder.events(client(), @params, to: self(), every: 1_000)
+
+    assert_receive {:claudex, ^ref, {:events, events}}, 2_000
+    assert [%Event.MessageStart{}, %Event.MessageStop{}] = events
+
+    assert_receive {:claudex, ^ref, :done}, 2_000
+    refute_received {:claudex, ^ref, {:events, _more}}
+    refute_received {:claudex, ^ref, {:event, _one}}
+  end
+
+  test "a cancel mid-window still delivers what the batch had buffered" do
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: PacedTransport])
+
+    assert {:ok, %Handle{ref: ref} = handle} =
+             Forwarder.events(client, @params, to: self(), every: 10_000)
+
+    Process.sleep(10)
+    Claudex.Stream.cancel(handle)
+
+    assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 2_000
+    assert_receive {:claudex, ^ref, :cancelled}, 2_000
+  end
+
+  test "events/3 closes a window mid-stream, keeping every event in order" do
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: PacedTransport])
+
+    assert {:ok, %Handle{ref: ref}} = Forwarder.events(client, @params, to: self(), every: 5)
+
+    assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 2_000
+    assert_receive {:claudex, ^ref, {:events, [%Event.MessageStop{}]}}, 2_000
     assert_receive {:claudex, ^ref, :done}, 2_000
   end
 
