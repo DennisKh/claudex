@@ -1,6 +1,8 @@
 defmodule Claudex.ContentBlockTest do
   use ExUnit.Case, async: true
 
+  doctest Claudex.ContentBlock
+
   alias Claudex.ContentBlock
 
   alias Claudex.ContentBlock.{

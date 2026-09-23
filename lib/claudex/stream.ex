@@ -20,6 +20,14 @@ defmodule Claudex.Stream do
   @doc """
   Consumes a stream and returns the message it describes.
 
+      {:ok, message} =
+        client
+        |> Claudex.Messages.stream!(params)
+        |> Claudex.Stream.final_message()
+
+      Claudex.Message.text(message)
+      message.usage.output_tokens
+
   Returns `{:error, %Claudex.Error{}}` if the request fails, if the API sends
   an error part-way through, or if the stream ends without ever starting a
   message.
@@ -37,7 +45,12 @@ defmodule Claudex.Stream do
     error in Error -> {:error, error}
   end
 
-  @doc "Consumes a stream and returns just the reply text."
+  @doc """
+  Consumes a stream and returns just the reply text.
+
+      {:ok, "Hello, world"} =
+        client |> Claudex.Messages.stream!(params) |> Claudex.Stream.text()
+  """
   @spec text(Enumerable.t()) :: {:ok, String.t()} | {:error, Error.t()}
   def text(events) do
     with {:ok, message} <- final_message(events), do: {:ok, Message.text(message)}
@@ -45,6 +58,13 @@ defmodule Claudex.Stream do
 
   @doc """
   Stops a stream started with `Claudex.Messages.stream_to/3`.
+
+      {:ok, handle} = Claudex.Messages.stream_to(client, params)
+
+      Claudex.Stream.cancel(handle)
+      #=> :ok
+
+      # {:claudex, ref, :cancelled} arrives in the mailbox
 
   The request is closed straight away, without waiting for the next event, and
   `{:claudex, ref, :cancelled}` follows.

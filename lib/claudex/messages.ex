@@ -37,6 +37,20 @@ defmodule Claudex.Messages do
   @doc """
   Sends a request to `POST /v1/messages` and returns the completed message.
 
+      {:ok, message} =
+        Claudex.Messages.create(client, %{
+          model: "claude-opus-5",
+          max_tokens: 1024,
+          system: "Answer in one sentence.",
+          messages: [Claudex.Message.user("Why is the sky blue?")]
+        })
+
+      Claudex.Message.text(message)
+      #=> "Sunlight scatters off air molecules, and blue scatters most."
+
+      message.stop_reason  #=> "end_turn"
+      message.usage.output_tokens
+
   `params` must include `:model`, `:messages`, and `:max_tokens`. Everything
   else the Messages API accepts (`:system`, `:temperature`, `:thinking`,
   ...) is optional and passed straight through, so any parameter the API
@@ -188,6 +202,7 @@ defmodule Claudex.Messages do
 
       {:ok, handle} = Claudex.Messages.stream_to(client, params, to: self(), every: 100)
 
+      # arriving in the mailbox, in this order:
       #=> {:claudex, ref, {:events, [%Event.MessageStart{}, %Event.ContentBlockStart{}]}}
       #=> {:claudex, ref, {:events, [%Event.ContentBlockDelta{}, %Event.ContentBlockDelta{}]}}
 
@@ -228,7 +243,8 @@ defmodule Claudex.Messages do
       `{:claudex, ref, {:events, [event]}}` instead of one per event, which is
       a render per batch rather than per token for a reader that would
       otherwise fall behind. A batch goes out when the first event after the
-      window arrives, or when the reply ends.
+      window arrives, and whatever is buffered goes out when the stream ends,
+      cancelled included.
 
   `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
   way, adding a message per completed turn.

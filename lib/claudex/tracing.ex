@@ -226,6 +226,11 @@ defmodule Claudex.Tracing do
   `nil` to clear it, for a process a pool reuses across conversations. Does
   nothing while `enabled?/0` is false.
 
+      Claudex.Tracing.set_session(chat.id)
+
+      Claudex.Messages.create(client, params)
+      Claudex.Tool.call(MyApp.Tools, name, input)
+
   A row id or any other value `to_string/1` accepts becomes a string, so
   `session: chat.id` works whatever the column type is. A value with no string
   form leaves the current session alone rather than raising, since a tracing id

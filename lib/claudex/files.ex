@@ -85,6 +85,11 @@ defmodule Claudex.Files do
   @doc """
   Lists the files in your workspace, newest first.
 
+      {:ok, page} = Claudex.Files.list(client, limit: 50)
+
+      Enum.map(page.data, & &1.filename)
+      #=> ["report.pdf", "notes.txt"]
+
   ## Options
 
     * `:limit` - how many per page, 1 to 1000. Defaults to 20.
@@ -132,6 +137,10 @@ defmodule Claudex.Files do
 
   @doc """
   Downloads a file's contents.
+
+      {:ok, bytes} = Claudex.Files.download(client, "file_011CQ...")
+
+      File.write!("chart.png", bytes)
 
   Only works on files Claude created — check `downloadable` on the metadata
   first. Returns the whole file in memory, so mind the 500 MB ceiling.

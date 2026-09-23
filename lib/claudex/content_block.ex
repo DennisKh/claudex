@@ -84,6 +84,15 @@ defmodule Claudex.ContentBlock do
   Decodes one content block. Falls back to `Claudex.ContentBlock.Unknown`
   for a block type not modeled yet, so a new block type from the API never
   breaks decoding — it just arrives un-typed.
+
+      iex> Claudex.ContentBlock.decode(%{"type" => "text", "text" => "42"})
+      %Claudex.ContentBlock.Text{text: "42", citations: []}
+
+      iex> Claudex.ContentBlock.decode(%{"type" => "compaction", "id" => "c_1"})
+      %Claudex.ContentBlock.Unknown{
+        type: "compaction",
+        raw: %{"type" => "compaction", "id" => "c_1"}
+      }
   """
   @spec decode(map()) :: t()
   for {type, module} <- @blocks do
@@ -95,6 +104,9 @@ defmodule Claudex.ContentBlock do
   @doc """
   Turns a decoded block back into the map the API expects in a request, so a
   reply can be sent straight back as conversation history.
+
+      iex> Claudex.ContentBlock.to_param(%Claudex.ContentBlock.Text{text: "42"})
+      %{type: "text", text: "42"}
 
   A map is passed through untouched, so hand-written blocks keep working.
   """
