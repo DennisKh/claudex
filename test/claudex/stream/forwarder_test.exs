@@ -37,8 +37,9 @@ defmodule Claudex.Stream.ForwarderTest do
 
   defmodule PacedTransport do
     @moduledoc """
-    Delivers its two events 20ms apart, so a batching window shorter than that
-    closes between them.
+    Delivers its two events 200ms apart, so a batching window shorter than that
+    closes between them, and a cancel sent in the meantime lands while the
+    first event is still buffered.
     """
 
     @first """
@@ -58,7 +59,7 @@ defmodule Claudex.Stream.ForwarderTest do
       {_action, acc} =
         request.into.({:data, @first}, {request, Req.Response.new(status: 200)})
 
-      Process.sleep(20)
+      Process.sleep(200)
 
       case request.into.({:data, @second}, acc) do
         {:cont, acc} -> acc
@@ -163,7 +164,7 @@ defmodule Claudex.Stream.ForwarderTest do
     assert {:ok, %Handle{ref: ref} = handle} =
              Forwarder.events(client, @params, to: self(), every: 10_000)
 
-    Process.sleep(10)
+    Process.sleep(20)
     Claudex.Stream.cancel(handle)
 
     assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 2_000
