@@ -74,6 +74,12 @@ defmodule Claudex.Message do
   @doc """
   Turns a decoded message back into the map the API expects in `messages`.
 
+      iex> Claudex.Message.to_param(%Claudex.Message{
+      ...>   role: "assistant",
+      ...>   content: [%Claudex.ContentBlock.Text{text: "42"}]
+      ...> })
+      %{role: "assistant", content: [%{type: "text", text: "42"}]}
+
   `Claudex.Messages.create/2` and friends run this for you, so a
   `%Claudex.Message{}` can go straight back into the conversation:
 
@@ -96,6 +102,9 @@ defmodule Claudex.Message do
 
   @doc """
   Adds one or more messages to the conversation.
+
+      iex> Claudex.Message.append([], Claudex.Message.user("hi"))
+      [%{role: "user", content: "hi"}]
 
       history = Message.append(history, Message.user("What is 12 plus 30?"))
       {:ok, reply} = Claudex.Messages.create(client, %{model: model, max_tokens: 1024, messages: history})
@@ -131,6 +140,14 @@ defmodule Claudex.Message do
   Builds an assistant message, for putting words in Claude's mouth when you're
   replaying a conversation you stored somewhere.
 
+      iex> Claudex.Message.assistant("Sure, here is the plan.")
+      %{role: "assistant", content: "Sure, here is the plan."}
+
+  Replaying a stored turn passes its blocks instead:
+
+      blocks = Enum.map(stored.content, &Claudex.ContentBlock.to_param/1)
+      Claudex.Message.assistant(blocks)
+
   You don't need this for a reply you just received — a `%Claudex.Message{}`
   goes back into `messages` as it is.
   """
@@ -140,7 +157,13 @@ defmodule Claudex.Message do
   @doc """
   Wraps tool results into the message that carries them back to Claude.
 
-      Claudex.Message.tool_results([Claudex.Tool.result(tool_use.id, "42")])
+      iex> Claudex.Message.tool_results([Claudex.Tool.result("toolu_1", "42")])
+      %{
+        role: "user",
+        content: [
+          %{type: "tool_result", content: "42", is_error: false, tool_use_id: "toolu_1"}
+        ]
+      }
 
   Results go back with `role: "user"`, because they're input to Claude, not
   something it said. One message answers one reply: if the reply asked for

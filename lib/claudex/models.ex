@@ -19,6 +19,11 @@ defmodule Claudex.Models do
   @doc """
   Lists the models available to your key, newest first.
 
+      {:ok, page} = Claudex.Models.list(client, limit: 5)
+
+      Enum.map(page.data, & &1.id)
+      #=> ["claude-opus-5", "claude-sonnet-5"]
+
   Options become query parameters. The API defines three:
 
     * `:limit` - how many to return per page, 1 to 1000. Defaults to 20.

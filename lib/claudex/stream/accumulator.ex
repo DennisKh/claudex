@@ -44,6 +44,11 @@ defmodule Claudex.Stream.Accumulator do
   @doc """
   Folds one event in.
 
+      accumulator =
+        Enum.reduce(events, Claudex.Stream.Accumulator.new(), fn event, accumulator ->
+          Claudex.Stream.Accumulator.add(accumulator, event)
+        end)
+
   Events that arrive before `message_start`, or that refer to a block index
   that never started, are ignored — a stream that never starts a message is
   reported by `Claudex.Stream.final_message/1` instead.
@@ -95,6 +100,14 @@ defmodule Claudex.Stream.Accumulator do
   @doc """
   Returns the message built so far, or `nil` if the stream hasn't started
   one yet.
+
+      iex> Claudex.Stream.Accumulator.message(Claudex.Stream.Accumulator.new())
+      nil
+
+      message = Claudex.Stream.Accumulator.message(accumulator)
+
+      message.stop_reason  #=> "end_turn"
+      message.content      #=> [%Claudex.ContentBlock.Text{text: "42"}]
   """
   @spec message(t()) :: Message.t() | nil
   def message(%__MODULE__{message: nil}), do: nil
@@ -111,6 +124,13 @@ defmodule Claudex.Stream.Accumulator do
   @doc """
   The text of the message built so far, or `""` if the stream hasn't started
   one yet.
+
+      iex> Claudex.Stream.Accumulator.text(Claudex.Stream.Accumulator.new())
+      ""
+
+      accumulator = Claudex.Stream.Accumulator.add(accumulator, event)
+
+      socket = assign(socket, :reply, Claudex.Stream.Accumulator.text(accumulator))
 
   Renders a reply as it arrives, without a text buffer alongside the
   accumulator, and joins the message's text blocks on every call rather than

@@ -1,6 +1,8 @@
 defmodule Claudex.Stream.AccumulatorTest do
   use ExUnit.Case, async: true
 
+  doctest Claudex.Stream.Accumulator
+
   alias Claudex.ContentBlock
   alias Claudex.Message
   alias Claudex.Stream.{Accumulator, Event}

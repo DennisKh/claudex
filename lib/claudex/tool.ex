@@ -309,6 +309,12 @@ defmodule Claudex.Tool do
   Indexes tool modules by the tool names they implement, so a `tool_use` block
   can be routed to the module that can run it.
 
+      registry = Claudex.Tool.registry([MyApp.Weather, MyApp.Math])
+      #=> %{"add" => MyApp.Math, "get_weather" => MyApp.Weather}
+
+      module = registry[tool_use.name]
+      Claudex.Tool.call(module, tool_use.name, tool_use.input)
+
   Takes the same shapes as `list/1`. Plain tool maps have no implementation
   behind them, so they don't appear — a `tool_use` naming one is an unknown
   tool as far as dispatch is concerned.

@@ -93,6 +93,11 @@ defmodule Claudex.Telemetry do
   @doc """
   Logs Claudex's events, for when you want to see what the SDK is doing.
 
+      # in application.ex
+      Claudex.Telemetry.attach_default_logger(level: :info)
+
+      # 18:19:41.256 [info] claudex POST /v1/messages claude-opus-5 → 200 in 24.2ms (15 in / 128 out)
+
   Takes `:level`, defaulting to `:debug`. Attaching twice is a no-op.
   """
   @spec attach_default_logger() :: :ok

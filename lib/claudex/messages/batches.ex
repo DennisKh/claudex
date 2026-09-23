@@ -164,6 +164,12 @@ defmodule Claudex.Messages.Batches do
   @doc """
   Streams a finished batch's results as `Claudex.Messages.BatchResult` structs.
 
+      {:ok, results} = Claudex.Messages.Batches.results(client, batch.id)
+
+      for %Claudex.Messages.BatchResult{custom_id: id, result: {:ok, message}} <- results do
+        {id, Claudex.Message.text(message)}
+      end
+
   Returns `{:error, %Claudex.Error{}}` if the batch hasn't ended yet — check
   `Claudex.Messages.Batch.ended?/1` first, or just match on the error and try
   again later.
