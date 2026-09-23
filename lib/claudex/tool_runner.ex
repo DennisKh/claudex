@@ -188,10 +188,10 @@ defmodule Claudex.ToolRunner do
 
   @typedoc """
   An option for `stream_to/3`: any `t:option/0`, plus the ones that say where
-  its messages go, which are `Claudex.Messages.stream_to/3`'s. It sets its own
-  `:cancel_ref` from the handle it returns.
+  its messages go. It sets its own `:cancel_ref` from the handle it returns.
   """
-  @type stream_to_option :: option() | Messages.stream_to_option()
+  @type stream_to_option ::
+          option() | {:to, pid()} | {:ref, reference()} | {:monitor, boolean()}
 
   @doc """
   Runs the conversation until Claude stops asking for tools, returning the last
@@ -369,6 +369,9 @@ defmodule Claudex.ToolRunner do
   written stops part-way and the tool calls it had got as far as asking for
   are not run. A tool already running is not interrupted, and the turn it
   belongs to is never sent.
+
+  Turns arrive one per message. `Claudex.Messages.stream_to/3`'s `:every`
+  batches events, which a completed turn is not.
   """
   @spec stream_to(Client.t(), map() | keyword()) :: {:ok, Handle.t()}
   @spec stream_to(Client.t(), map() | keyword(), [stream_to_option()]) :: {:ok, Handle.t()}
