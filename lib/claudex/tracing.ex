@@ -292,9 +292,9 @@ defmodule Claudex.Tracing do
 
   A span stays open and unexported until `end_conversation/3` runs, and the
   process goes on nesting new spans under it, so every path out of an exchange
-  has to end it. Within one function that is `try/after`; an app holding the
-  span across callbacks ends it on each way the exchange can finish, including
-  the error and abandoned ones.
+  has to end it. Within one function `conversation/3` does that; an app holding
+  the span across callbacks ends it on each way the exchange can finish,
+  including the error and abandoned ones.
   """
   @spec start_conversation(map()) :: term()
   @spec start_conversation(map(), keyword()) :: term()
@@ -320,6 +320,46 @@ defmodule Claudex.Tracing do
     set_attributes(span, Attributes.conversation_result(message, stop))
 
     end_span(span)
+  end
+
+  @doc """
+  Runs `fun` inside a conversation span and ends it on the way out.
+
+  `:session` names the process for the block, so the calls inside it carry the
+  id without being passed it again. Return `{stop, message}` and the span
+  records both, the way `end_conversation/3` does, with `message` coming back
+  as the value:
+
+      message =
+        Claudex.Tracing.conversation(params, [session: chat.id], fn ->
+          {:ok, message} = Claudex.Messages.create(client, params)
+
+          {:completed, message}
+        end)
+
+  `stop` is your own word for why the loop finished. Whatever session the
+  process had before the block is restored after it. Any other return value
+  comes back with nothing recorded, and a raise closes the span, marks it
+  failed and propagates unchanged.
+
+  A loop that spans callbacks, a LiveView waiting on an approval, holds the
+  handle from `start_conversation/2` instead.
+  """
+  @spec conversation(map(), (-> result)) :: result when result: term()
+  @spec conversation(map(), keyword(), (-> result)) :: result when result: term()
+  def conversation(params, opts \\ [], fun) when is_function(fun, 0) do
+    span(
+      fn ->
+        Attributes.conversation(
+          params,
+          Keyword.get(opts, :max_turns),
+          Keyword.get(opts, :session)
+        )
+      end,
+      fn span ->
+        with_session(Keyword.get(opts, :session), fn -> finish_conversation(span, fun.()) end)
+      end
+    )
   end
 
   @doc """
@@ -470,6 +510,33 @@ defmodule Claudex.Tracing do
       stop(span_ctx)
     end
   end
+
+  defp with_session(nil, fun), do: fun.()
+
+  defp with_session(session, fun) do
+    previous = session_id()
+    set_session(session)
+
+    try do
+      fun.()
+    after
+      set_session(previous)
+    end
+  end
+
+  defp finish_conversation(span, {stop, %Message{} = message}) when is_atom(stop) do
+    end_conversation(span, message, stop)
+
+    message
+  end
+
+  defp finish_conversation(span, {stop, nil}) when is_atom(stop) do
+    end_conversation(span, nil, stop)
+
+    nil
+  end
+
+  defp finish_conversation(_span, returned), do: returned
 
   defp store_session(session_id) do
     if enabled?(), do: put_session_baggage(session_id)
