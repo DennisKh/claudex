@@ -9,7 +9,7 @@ defmodule Claudex.TracingTest do
 
   require Record
 
-  alias Claudex.{Client, Files, Messages, Tool, ToolRunner, Tracing}
+  alias Claudex.{Client, Files, Message, Messages, Tool, ToolRunner, Tracing}
   alias Claudex.Stream.Event
   alias Claudex.TestSupport.{Fixtures, MessageStream}
   alias Claudex.Tracing.Attributes
@@ -488,6 +488,57 @@ defmodule Claudex.TracingTest do
     assert_receive {:span, recorded}, 2_000
     assert attributes(recorded)["claudex.stop"] == "cancelled"
     assert attributes(recorded)["session.id"] == "chat-cancelled"
+  end
+
+  test "conversation/3 records the stop and message its function returns" do
+    reply(message())
+
+    returned =
+      Tracing.conversation(@params, [session: "chat-block"], fn ->
+        {:ok, reply} = Messages.create(client(), @params)
+
+        {:completed, reply}
+      end)
+
+    assert %Message{} = returned
+
+    spans = collect_spans([])
+    [conversation] = named(spans, "invoke_agent claude-haiku-4-5")
+    [request] = named(spans, "chat claude-haiku-4-5")
+
+    assert span(request, :parent_span_id) == span(conversation, :span_id)
+    assert attributes(conversation)["claudex.stop"] == "completed"
+    assert attributes(conversation)["session.id"] == "chat-block"
+    assert attributes(request)["session.id"] == "chat-block"
+  end
+
+  test "conversation/3 gives the process back the session it had" do
+    reply(message())
+    Tracing.set_session("chat-outer")
+
+    Tracing.conversation(@params, [session: "chat-inner"], fn -> :done end)
+
+    assert Tracing.session_id() == "chat-outer"
+  end
+
+  test "conversation/3 returns anything else untouched, recording no result" do
+    span = Tracing.conversation(@params, [session: "chat-plain"], fn -> :nothing_to_record end)
+
+    assert span == :nothing_to_record
+
+    [conversation] = named(collect_spans([]), "invoke_agent claude-haiku-4-5")
+    refute Map.has_key?(attributes(conversation), "claudex.stop")
+    assert attributes(conversation)["session.id"] == "chat-plain"
+  end
+
+  test "conversation/3 ends the span when its function raises" do
+    assert_raise RuntimeError, "boom", fn ->
+      Tracing.conversation(@params, [session: "chat-raised"], fn -> raise "boom" end)
+    end
+
+    [conversation] = named(collect_spans([]), "invoke_agent claude-haiku-4-5")
+    assert attributes(conversation)["session.id"] == "chat-raised"
+    assert span(conversation, :status) == {:status, :error, "boom"}
   end
 
   test "a conversation with no turn limit records no turn limit" do
