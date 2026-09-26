@@ -430,6 +430,88 @@ defmodule Claudex.ToolRunnerTest do
       assert last.stop == :completed
     end
 
+    test "a halt ends the run, naming the turn's stop" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("unreachable")], "end_turn")
+      ])
+
+      halt = fn _call -> {:halt, :awaiting_approval} end
+
+      assert {:ok, turn} = ToolRunner.run(client(), @params, before_call: halt)
+
+      assert turn.stop == :awaiting_approval
+      assert [%ContentBlock.ToolUse{name: "add"}] = turn.tool_uses
+      assert turn.tool_results == []
+      assert List.last(turn.messages).role == "assistant"
+    end
+
+    test "a halt keeps the results of the calls that ran before it" do
+      respond_with([
+        message(
+          [tool_use("add", %{"a" => 1, "b" => 2}), tool_use("add", %{"a" => 3, "b" => 4})],
+          "tool_use"
+        ),
+        message([text("unreachable")], "end_turn")
+      ])
+
+      {:ok, agent} = Agent.start_link(fn -> :first end)
+
+      halt_second = fn _call ->
+        Agent.get_and_update(agent, fn
+          :first -> {:ok, :halt}
+          :halt -> {{:halt, :awaiting_approval}, :halt}
+        end)
+      end
+
+      assert {:ok, turn} = ToolRunner.run(client(), @params, before_call: halt_second)
+
+      assert turn.stop == :awaiting_approval
+      assert [%{content: "3"}] = turn.tool_results
+      assert length(turn.tool_uses) == 2
+    end
+
+    test "a halted run resumes from the history it left behind" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42.")], "end_turn")
+      ])
+
+      halt = fn _call -> {:halt, :awaiting_approval} end
+
+      assert {:ok, halted} = ToolRunner.run(client(), @params, before_call: halt)
+      assert halted.stop == :awaiting_approval
+
+      params = Map.put(@params, :messages, halted.messages)
+
+      assert {:ok, resumed} = ToolRunner.run(client(), params)
+
+      assert resumed.stop == :completed
+      assert Message.text(resumed.message) == "42."
+
+      assert %{role: "user", content: [%{type: "tool_result", content: "42"}]} =
+               Enum.at(resumed.messages, 2)
+    end
+
+    test "a halted run resumes from a history that went through storage" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42.")], "end_turn")
+      ])
+
+      halt = fn _call -> {:halt, :awaiting_approval} end
+
+      assert {:ok, halted} = ToolRunner.run(client(), @params, before_call: halt)
+
+      stored = halted.messages |> JSON.encode!() |> JSON.decode!()
+      params = Map.put(@params, :messages, stored)
+
+      assert {:ok, resumed} = ToolRunner.run(client(), params)
+
+      assert resumed.stop == :completed
+      assert [%{content: "42", is_error: false}] = hd(resumed.messages |> Enum.drop(2)).content
+    end
+
     test "returning :ok runs the tool as usual" do
       respond_with([
         message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
@@ -476,11 +558,13 @@ defmodule Claudex.ToolRunnerTest do
     test "an unexpected return value is a programmer error" do
       respond_with([message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use")])
 
-      assert_raise ArgumentError, ~r/:before_call must return :ok or \{:deny, reason\}/, fn ->
-        client()
-        |> ToolRunner.stream(@params, before_call: fn _call -> :maybe end)
-        |> Enum.to_list()
-      end
+      assert_raise ArgumentError,
+                   ~r/:before_call must return :ok, \{:deny, reason\} or \{:halt, stop\}/,
+                   fn ->
+                     client()
+                     |> ToolRunner.stream(@params, before_call: fn _call -> :maybe end)
+                     |> Enum.to_list()
+                   end
     end
   end
 

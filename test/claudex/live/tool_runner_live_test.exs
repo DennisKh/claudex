@@ -192,6 +192,31 @@ defmodule Claudex.Live.ToolRunnerTest do
       # ending the conversation.
       assert %Turn{stop: :completed} = List.last(turns)
     end
+
+    test "a halted call stops the run, and the stored history resumes it", %{client: client} do
+      params = approval_params("Delete report.csv please.")
+
+      assert {:ok, halted} =
+               ToolRunner.run(client, params,
+                 before_call: fn %ContentBlock.ToolUse{} -> {:halt, :awaiting_approval} end
+               )
+
+      assert halted.stop == :awaiting_approval
+      assert [%ContentBlock.ToolUse{name: "delete_file"}] = halted.tool_uses
+      assert halted.tool_results == []
+      refute Process.get(:deleted)
+
+      stored = halted.messages |> JSON.encode!() |> JSON.decode!()
+
+      assert {:ok, resumed} = ToolRunner.run(client, %{params | messages: stored})
+
+      # The approval arrived, so this time the tool runs and Claude answers for
+      # it. The API rejects a history whose calls have no results, so reaching
+      # a completed turn at all is the proof the runner answered them first.
+      assert resumed.stop == :completed
+      assert Process.get(:deleted) =~ "report.csv"
+      assert Message.text(resumed.message) != ""
+    end
   end
 
   describe "stream_to/3" do

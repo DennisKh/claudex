@@ -40,17 +40,17 @@ defmodule Claudex.Message do
   @type stop :: :completed | :tool_use | :paused | :truncated | :refusal | :unknown
 
   @type t :: %__MODULE__{
-          raw: map(),
-          id: String.t(),
-          type: String.t(),
-          model: String.t(),
+          raw: map() | nil,
+          id: String.t() | nil,
+          type: String.t() | nil,
+          model: String.t() | nil,
           role: String.t(),
           content: [ContentBlock.t()],
           stop_reason: String.t() | nil,
           stop_sequence: String.t() | nil,
           stop_details: map() | nil,
           container: map() | nil,
-          usage: Usage.t()
+          usage: Usage.t() | nil
         }
 
   @doc false

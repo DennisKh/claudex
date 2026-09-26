@@ -82,7 +82,8 @@ defmodule Claudex.ToolRunner do
       up, defaulting to #{@default_max_turns}. Tool rounds and resumed pauses
       both count. The last turn then carries `stop: :max_turns`.
     * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
-      before the tool does, returning `:ok` or `{:deny, reason}`
+      before the tool does, returning `:ok`, `{:deny, reason}` or
+      `{:halt, stop}`
     * `:on_event` - a function run on each `Claudex.Stream.Event` as it
       arrives, for showing a reply while it is still being written
     * `:cancel_ref` - tags every request the loop makes, so a
@@ -110,6 +111,35 @@ defmodule Claudex.ToolRunner do
   A denial sends `reason` back as a `tool_result` with `is_error: true` and the
   conversation carries on, so Claude can explain itself or try another way. The
   tool is never called, so nothing it would have done happens.
+
+  `{:halt, stop}` ends the run instead, with `stop` as the turn's `stop`. The
+  tool is not called, nor is any call after it, and the results of the ones
+  before it are in `tool_results`. They stay off `messages`, which ends with
+  Claude's reply, because the API answers every call of a reply in one message
+  and a partial one cannot be sent. That is how an approval outlives the
+  process holding the run:
+
+      {:ok, turn} =
+        Claudex.ToolRunner.run(client, params,
+          before_call: fn tool_use ->
+            case MyApp.Approvals.decision(tool_use) do
+              :granted -> :ok
+              :pending -> {:halt, :awaiting_approval}
+            end
+          end
+        )
+
+      # later, once a human has approved: the runner runs the calls that never ran
+      {:ok, turn} = Claudex.ToolRunner.run(client, %{params | messages: turn.messages})
+
+  A history ending in calls nobody answered is what `run/3` resumes from, and
+  the API rejects it as a request, so only a turn this halted can be handed
+  back. A truncated or cancelled turn's calls are as unfinished as the sentence
+  they came in, and a stored message says nothing about which it was.
+
+  A resumed turn makes no request, so its `message` carries no id, model or
+  usage, `:on_event` sees nothing for it, and `:max_turns` counts from one
+  again.
 
   The function is called in the process enumerating the stream, so it can block
   — waiting on a `GenServer.call` for a decision from a UI, say.
@@ -163,7 +193,7 @@ defmodule Claudex.ToolRunner do
 
   require Logger
 
-  alias Claudex.{Client, Error, Message, Messages, Tool, Tracing}
+  alias Claudex.{Client, ContentBlock, Error, Message, Messages, Tool, Tracing}
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Stream.{Accumulator, Event, Forwarder, Handle}
   alias Claudex.Tool.CallError
@@ -447,15 +477,55 @@ defmodule Claudex.ToolRunner do
   end
 
   defp run_turn(config, messages, index) do
-    message = request!(config, messages)
-    messages = Message.append(messages, message)
+    case unanswered(messages) do
+      nil ->
+        message = request!(config, messages)
 
+        turn(config, message, index, Message.append(messages, message))
+
+      message ->
+        turn(config, message, index, messages)
+    end
+  end
+
+  defp turn(config, message, index, messages) do
     resolve_turn(config, %Turn{
       message: message,
       index: index,
       tool_uses: Message.tool_uses(message),
       messages: messages
     })
+  end
+
+  # A history ending in calls nobody answered is a halted run coming back. The
+  # API rejects it as a request, so the tools run first and the reply that
+  # asked for them is the turn, rather than one the loop asks for again.
+  defp unanswered(messages) do
+    case List.last(messages) do
+      %Message{role: "assistant"} = message -> with_calls(message)
+      %{role: "assistant", content: content} -> rebuild(content)
+      %{"role" => "assistant", "content" => content} -> rebuild(content)
+      _other -> nil
+    end
+  end
+
+  defp with_calls(%Message{} = message) do
+    if Message.tool_uses(message) == [], do: nil, else: message
+  end
+
+  defp rebuild(content) when is_list(content) do
+    content
+    |> Enum.map(&block/1)
+    |> then(&%Message{role: "assistant", content: &1, stop_reason: "tool_use"})
+    |> with_calls()
+  end
+
+  defp rebuild(_content), do: nil
+
+  defp block(%{"type" => _type} = raw), do: ContentBlock.decode(raw)
+
+  defp block(%{} = raw) do
+    raw |> Map.new(fn {key, value} -> {to_string(key), value} end) |> ContentBlock.decode()
   end
 
   # canceled stream may carry stop_reason `nil`
@@ -480,11 +550,32 @@ defmodule Claudex.ToolRunner do
   end
 
   defp continue(config, turn, messages, index) do
-    results = Enum.map(turn.tool_uses, &run_tool(&1, config))
+    case run_tools(turn.tool_uses, config) do
+      {:ok, results} ->
+        messages = Message.append(messages, Message.tool_results(results))
 
-    messages = Message.append(messages, Message.tool_results(results))
+        advance(config, %{turn | tool_results: results, messages: messages}, messages, index)
 
-    advance(config, %{turn | tool_results: results, messages: messages}, messages, index)
+      {:halted, stop, results} ->
+        {%{turn | stop: stop, tool_results: results}, :done}
+    end
+  end
+
+  # The results of a halted turn stay off `messages`: the API answers every
+  # tool_use of a reply in one message, so a partial one cannot be sent and the
+  # conversation resumes by appending a complete one.
+  defp run_tools(tool_uses, config) do
+    tool_uses
+    |> Enum.reduce_while({:ok, []}, fn tool_use, {:ok, results} ->
+      case run_tool(tool_use, config) do
+        {:ok, result} -> {:cont, {:ok, [result | results]}}
+        {:halt, stop} -> {:halt, {:halted, stop, Enum.reverse(results)}}
+      end
+    end)
+    |> case do
+      {:ok, results} -> {:ok, Enum.reverse(results)}
+      halted -> halted
+    end
   end
 
   # The API picks a paused turn up from the trailing server tool block, so it
@@ -520,8 +611,9 @@ defmodule Claudex.ToolRunner do
 
   defp run_tool(%ToolUse{} = tool_use, config) do
     case decide(config.before_call, tool_use) do
-      :ok -> dispatch(tool_use, config)
-      {:deny, reason} -> denied(tool_use, reason)
+      :ok -> {:ok, dispatch(tool_use, config)}
+      {:deny, reason} -> {:ok, denied(tool_use, reason)}
+      {:halt, stop} -> {:halt, stop}
     end
   end
 
@@ -535,9 +627,13 @@ defmodule Claudex.ToolRunner do
       {:deny, reason} when is_binary(reason) ->
         {:deny, reason}
 
+      {:halt, stop} when is_atom(stop) ->
+        {:halt, stop}
+
       other ->
         raise ArgumentError,
-              ":before_call must return :ok or {:deny, reason}, got: #{inspect(other)}"
+              ":before_call must return :ok, {:deny, reason} or {:halt, stop}, " <>
+                "got: #{inspect(other)}"
     end
   end
 
