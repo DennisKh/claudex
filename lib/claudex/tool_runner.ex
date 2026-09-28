@@ -497,9 +497,6 @@ defmodule Claudex.ToolRunner do
     })
   end
 
-  # A history ending in calls nobody answered is a halted run coming back. The
-  # API rejects it as a request, so the tools run first and the reply that
-  # asked for them is the turn, rather than one the loop asks for again.
   defp unanswered(messages) do
     case List.last(messages) do
       %Message{role: "assistant"} = message -> with_calls(message)
@@ -561,9 +558,6 @@ defmodule Claudex.ToolRunner do
     end
   end
 
-  # The results of a halted turn stay off `messages`: the API answers every
-  # tool_use of a reply in one message, so a partial one cannot be sent and the
-  # conversation resumes by appending a complete one.
   defp run_tools(tool_uses, config) do
     tool_uses
     |> Enum.reduce_while({:ok, []}, fn tool_use, {:ok, results} ->
