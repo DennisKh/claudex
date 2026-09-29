@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.0](https://github.com/DennisKh/claudex/compare/v0.10.0...v0.11.0) (2026-09-29)
+
+
+### Features
+
+* **streaming:** batch stream_to/3 events over a window ([#78](https://github.com/DennisKh/claudex/issues/78)) ([417bdf7](https://github.com/DennisKh/claudex/commit/417bdf78e3cccbe716add8cea9f5d1d185196049))
+* **tool_runner:** halt a run and resume it from its own history ([#82](https://github.com/DennisKh/claudex/issues/82)) ([26c1c22](https://github.com/DennisKh/claudex/commit/26c1c228521d8f8a8658961b81aacec36ba5bb0c))
+* **tracing:** run a conversation in a block ([#81](https://github.com/DennisKh/claudex/issues/81)) ([cc4c030](https://github.com/DennisKh/claudex/commit/cc4c030424329af806ad06a6c50482144c90cc8c))
+
 ## [0.10.0](https://github.com/DennisKh/claudex/compare/v0.9.1...v0.10.0) (2026-09-20)
 
 
