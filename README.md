@@ -78,6 +78,15 @@ A breakpoint goes on any block: a `system` block, a message block from either ro
 
 `ttl` belongs to the `cache_control` object wherever it sits, and takes `"5m"`, the default, or `"1h"`, which costs more to write and keeps the prefix alive between turns that are minutes apart. `Claudex.Usage` reports what happened: `cache_creation_input_tokens` for what was written, `cache_read_input_tokens` for what was read back, and `cache_creation` for the split between the two lifetimes.
 
+A prefix below the model's minimum is not cached, and the request succeeds anyway with both counters at zero. The minimum depends on the model, so a system prompt long enough to cache against one is silently uncached against another. `Claudex.Usage.cached?/1` reads both counters at once:
+
+```elixir
+{:ok, message} = Claudex.Messages.create(client, params)
+
+Claudex.Usage.cached?(message.usage)
+#=> true
+```
+
 Which values each one takes, and which models accept them, is Anthropic's to
 say. The thinking config in particular has two shapes, and the one a model
 wants depends on the model:
