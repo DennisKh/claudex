@@ -16,7 +16,8 @@ defmodule Claudex.Usage do
   Whether prompt caching worked is here: `cache_creation_input_tokens` is what
   was written, `cache_read_input_tokens` what was read back instead of being
   charged in full, and `cache_creation` splits the write between the 5-minute
-  and 1-hour lifetimes.
+  and 1-hour lifetimes. `cached?/1` reads the first two together, which is how
+  a prefix too short to cache shows up.
   """
 
   @derive {Inspect, except: [:raw]}
@@ -82,6 +83,26 @@ defmodule Claudex.Usage do
     end)
   end
 
+  @doc """
+  Checks whether prompt caching did anything for this request.
+
+  A prefix shorter than the model's minimum is not cached and the API returns
+  no error for it, so zero on both counters is the only sign. The minimum
+  depends on the model, so a prompt worth caching on one is silently uncached
+  on another. See the
+  [prompt caching guide](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
+      iex> Claudex.Usage.cached?(%Claudex.Usage{cache_read_input_tokens: 1_024})
+      true
+
+      iex> Claudex.Usage.cached?(%Claudex.Usage{cache_creation_input_tokens: 0})
+      false
+  """
+  @spec cached?(t()) :: boolean()
+  def cached?(%__MODULE__{} = usage) do
+    counted(usage.cache_creation_input_tokens) > 0 or counted(usage.cache_read_input_tokens) > 0
+  end
+
   @doc false
   @spec decode(map()) :: t()
   def decode(json) do
@@ -99,4 +120,7 @@ defmodule Claudex.Usage do
       inference_geo: json["inference_geo"]
     }
   end
+
+  defp counted(nil), do: 0
+  defp counted(tokens), do: tokens
 end

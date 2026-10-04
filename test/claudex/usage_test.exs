@@ -23,4 +23,19 @@ defmodule Claudex.UsageTest do
     assert Usage.merge(nil, usage) == usage
     assert Usage.merge(nil, nil) == nil
   end
+
+  describe "cached?/1" do
+    test "a read or a write means the cache did something" do
+      assert Usage.cached?(%Usage{cache_read_input_tokens: 2048})
+      assert Usage.cached?(%Usage{cache_creation_input_tokens: 2048})
+    end
+
+    test "zero on both is a prefix the API declined to cache" do
+      refute Usage.cached?(%Usage{cache_creation_input_tokens: 0, cache_read_input_tokens: 0})
+    end
+
+    test "an endpoint that reports no cache counters at all is not cached" do
+      refute Usage.cached?(%Usage{input_tokens: 15, output_tokens: 5})
+    end
+  end
 end
