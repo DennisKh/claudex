@@ -348,7 +348,7 @@ defmodule Claudex.ToolRunnerTest do
     assert turn.stop == :refusal
     assert turn.message.stop_reason == "refusal"
     assert turn.tool_results == []
-    assert length(turn.messages) == 2
+    assert turn.messages == @params.messages
   end
 
   test "max_turns stops a conversation that keeps asking for tools" do
@@ -692,6 +692,24 @@ defmodule Claudex.ToolRunnerTest do
       # One request went out: the loop never sent results for a half-asked call.
       assert_received {:sent, _first}
       refute_received {:sent, _second}
+    end
+
+    test "leaves its calls unrun when its stored history is passed back" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "max_tokens"),
+        message([text("42.")], "end_turn")
+      ])
+
+      assert {:ok, %Turn{stop: :truncated} = truncated} = ToolRunner.run(client(), @params)
+      assert_received {:sent, _first}
+
+      stored = truncated.messages |> JSON.encode!() |> JSON.decode!()
+
+      assert {:ok, %Turn{stop: :completed}} =
+               ToolRunner.run(client(), Map.put(@params, :messages, stored))
+
+      refute_received {:sent,
+                       %{"messages" => [_, _, %{"content" => [%{"type" => "tool_result"}]}]}}
     end
   end
 

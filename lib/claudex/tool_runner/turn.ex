@@ -7,11 +7,13 @@ defmodule Claudex.ToolRunner.Turn do
   `tool_uses` and `tool_results` belong to this turn alone: what Claude asked
   for in this one reply, and what running it produced. A conversation completes
   by Claude asking for nothing, so both are empty on the turn `run/3` returns.
-  Every call the conversation made is in `messages`.
+  Every call that ran, or that a halt left waiting, is in `messages`.
 
   `messages` carries the whole conversation up to and including this turn, so
   you can stop consuming at any point and still have the complete history from
-  the last turn you saw.
+  the last turn you saw. A `:refusal` or `:truncated` reply that asked for
+  tools is the exception: it is in `message` only, so the history never ends
+  in calls that must not run.
 
   `stop` is nil while the conversation is still going, and says why it ended on
   the final turn:
