@@ -217,6 +217,33 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert Process.get(:deleted) =~ "report.csv"
       assert Message.text(resumed.message) != ""
     end
+
+    test "a truncated call's stored history asks again instead of running it",
+         %{client: client} do
+      params =
+        "Delete archive/2026/quarterly/reports/final-summary-report.csv please."
+        |> approval_params()
+        |> Map.merge(%{max_tokens: 10, tool_choice: %{type: "tool", name: "delete_file"}})
+
+      assert {:ok, truncated} = ToolRunner.run(client, params)
+
+      assert truncated.stop == :truncated
+      assert [%ContentBlock.ToolUse{id: cut_off_id}] = truncated.tool_uses
+      assert truncated.messages == params.messages
+      refute Process.get(:deleted)
+
+      stored = truncated.messages |> JSON.encode!() |> JSON.decode!()
+
+      assert {:ok, resumed} =
+               ToolRunner.run(client, %{params | max_tokens: 512, messages: stored},
+                 before_call: fn %ContentBlock.ToolUse{} -> {:halt, :awaiting_approval} end
+               )
+
+      assert "msg_" <> _ = resumed.message.id
+      assert [%ContentBlock.ToolUse{id: new_id}] = resumed.tool_uses
+      refute new_id == cut_off_id
+      refute Process.get(:deleted)
+    end
   end
 
   describe "stream_to/3" do

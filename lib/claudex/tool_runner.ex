@@ -133,9 +133,10 @@ defmodule Claudex.ToolRunner do
       {:ok, turn} = Claudex.ToolRunner.run(client, %{params | messages: turn.messages})
 
   A history ending in calls nobody answered is what `run/3` resumes from, and
-  the API rejects it as a request, so only a turn this halted can be handed
-  back. A truncated or cancelled turn's calls are as unfinished as the sentence
-  they came in, and a stored message says nothing about which it was.
+  the API rejects it as a request, so only a halted turn's history ends that
+  way. A `:refusal` or `:truncated` reply that asked for tools is left off
+  `messages`, because its calls must not run, so passing that history back
+  asks Claude again.
 
   A resumed turn makes no request, so its `message` carries no id, model or
   usage, `:on_event` sees nothing for it, and `:max_turns` counts from one
@@ -527,13 +528,13 @@ defmodule Claudex.ToolRunner do
 
   # canceled stream may carry stop_reason `nil`
   defp resolve_turn(_config, %Turn{message: %Message{stop_reason: nil}} = turn) do
-    {%{turn | stop: :truncated}, :done}
+    stop_unfinished(turn, :truncated)
   end
 
   defp resolve_turn(config, %Turn{messages: messages, index: index} = turn) do
     case Message.stop(turn.message) do
       stop when stop in [:refusal, :truncated] ->
-        {%{turn | stop: stop}, :done}
+        stop_unfinished(turn, stop)
 
       :paused when turn.tool_uses == [] ->
         resume(config, turn, messages, index)
@@ -544,6 +545,12 @@ defmodule Claudex.ToolRunner do
       _other ->
         {%{turn | stop: :completed}, :done}
     end
+  end
+
+  defp stop_unfinished(%Turn{tool_uses: []} = turn, stop), do: {%{turn | stop: stop}, :done}
+
+  defp stop_unfinished(%Turn{messages: messages} = turn, stop) do
+    {%{turn | stop: stop, messages: List.delete_at(messages, -1)}, :done}
   end
 
   defp continue(config, turn, messages, index) do
