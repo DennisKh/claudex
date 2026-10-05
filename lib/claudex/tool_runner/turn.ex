@@ -11,8 +11,8 @@ defmodule Claudex.ToolRunner.Turn do
 
   `messages` carries the whole conversation up to and including this turn, so
   you can stop consuming at any point and still have the complete history from
-  the last turn you saw. A `:refusal` or `:truncated` reply that asked for
-  tools is the exception: it is in `message` only, so the history never ends
+  the last turn you saw. A `:refusal`, `:truncated` or `:unknown` reply that
+  asked for tools is the exception: it is in `message` only, so the history never ends
   in calls that must not run.
 
   `stop` is nil while the conversation is still going, and says why it ended on
@@ -25,6 +25,9 @@ defmodule Claudex.ToolRunner.Turn do
       or the stream carrying it ended part-way, which is what cancelling one
       does. What it was saying, or asking for, is cut off, so its tool calls
       were not run either.
+    * `:unknown` - the reply asked for tools under a `stop_reason` this
+      version doesn't know, so they were not run. `message.stop_reason` has
+      the reason as the API sent it.
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can
       be picked up again by passing that history back.
