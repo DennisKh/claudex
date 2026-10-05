@@ -351,6 +351,23 @@ defmodule Claudex.ToolRunnerTest do
     assert turn.messages == @params.messages
   end
 
+  test "a stop reason this version doesn't know ends the conversation without running its calls" do
+    respond_with([
+      message([tool_use("add", %{"a" => 1, "b" => 2})], "a_future_reason"),
+      message([text("3")], "end_turn")
+    ])
+
+    assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+
+    assert turn.stop == :unknown
+    assert turn.message.stop_reason == "a_future_reason"
+    assert turn.tool_results == []
+    assert turn.messages == @params.messages
+
+    assert_received {:sent, _first}
+    refute_received {:sent, _second}
+  end
+
   test "max_turns stops a conversation that keeps asking for tools" do
     respond_with(List.duplicate(message([tool_use("add", %{"a" => 1, "b" => 1})], "tool_use"), 3))
 
