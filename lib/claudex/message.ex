@@ -86,12 +86,19 @@ defmodule Claudex.Message do
       {:ok, reply} = Claudex.Messages.create(client, %{model: model, max_tokens: 1024, messages: history})
       history = history ++ [reply, %{role: "user", content: "and then?"}]
 
+  A reply from a stream that ended part-way can hold a thinking block that was
+  never signed, or a text block that never got a word. The API rejects both, so
+  they're left out, and the rest of the reply goes back as it arrived.
+
   A message you built yourself is passed through, with any content blocks in it
   converted too — so `user/1` and friends can take Claudex structs as content.
   """
   @spec to_param(t() | map()) :: map()
   def to_param(%__MODULE__{} = message) do
-    %{role: message.role, content: Enum.map(message.content, &ContentBlock.to_param/1)}
+    %{
+      role: message.role,
+      content: for(block <- message.content, replayable?(block), do: ContentBlock.to_param(block))
+    }
   end
 
   def to_param(%{content: content} = message) when is_list(content) and not is_struct(message) do
@@ -288,6 +295,10 @@ defmodule Claudex.Message do
   end
 
   def stop(_unrecognised), do: :unknown
+
+  defp replayable?(%ContentBlock.Thinking{signature: signature}), do: signature not in [nil, ""]
+  defp replayable?(%ContentBlock.Text{text: text}), do: not blank_text?(text)
+  defp replayable?(_block), do: true
 
   defp blank_content?(blocks) when is_list(blocks), do: Enum.all?(blocks, &blank_block?/1)
   defp blank_content?(text) when is_binary(text), do: text == ""

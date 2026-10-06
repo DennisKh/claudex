@@ -2,6 +2,8 @@ defmodule Claudex.MessageTest do
   use ExUnit.Case, async: true
 
   alias Claudex.{ContentBlock, Message}
+  alias Claudex.Stream.{Accumulator, Event, SSE}
+  alias Claudex.TestSupport.Fixtures
 
   doctest Claudex.Message
 
@@ -186,6 +188,21 @@ defmodule Claudex.MessageTest do
                content: [%{type: "thinking", thinking: "hmm", signature: "sig"}]
              }
     end
+
+    test "drops a thinking block the stream ended before signing" do
+      reply =
+        cut_off("thinking_stream", &match?(%Event.ContentBlockDelta{delta: {:signature, _}}, &1))
+
+      assert [%ContentBlock.Thinking{signature: ""}] = reply.content
+      assert Message.to_param(reply) == %{role: "assistant", content: []}
+    end
+
+    test "drops a text block the stream ended before its first word" do
+      reply = cut_off("thinking_stream", &match?(%Event.ContentBlockDelta{index: 1}, &1))
+
+      assert [%ContentBlock.Thinking{}, %ContentBlock.Text{text: ""}] = reply.content
+      assert %{content: [%{type: "thinking"}]} = Message.to_param(reply)
+    end
   end
 
   describe "append/2" do
@@ -266,5 +283,20 @@ defmodule Claudex.MessageTest do
       assert Message.stop("something_new_2027") == :unknown
       assert Message.stop(%Message{stop_reason: nil}) == :unknown
     end
+  end
+
+  defp cut_off(fixture, stop?) do
+    {sse_events, _decoder} = SSE.decode(SSE.new(), Fixtures.sse!(fixture))
+
+    sse_events
+    |> Enum.flat_map(fn sse_event ->
+      case Event.from_sse(sse_event) do
+        {:ok, event} -> [event]
+        :ignore -> []
+      end
+    end)
+    |> Enum.take_while(&(not stop?.(&1)))
+    |> Enum.reduce(Accumulator.new(), &Accumulator.add(&2, &1))
+    |> Accumulator.message()
   end
 end

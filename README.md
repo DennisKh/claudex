@@ -543,11 +543,15 @@ order, and replay them:
 
 ```elixir
 # storing
-blocks = Enum.map(message.content, &Claudex.ContentBlock.to_param/1)
+%{content: blocks} = Claudex.Message.to_param(message)
 
 # replaying
 Claudex.Message.assistant(blocks)
 ```
+
+`Claudex.Message.to_param/1` also leaves out what a stream cut off part-way
+can't send back: a thinking block that was never signed, and a text block that
+never got a word.
 
 That survives block types this version of Claudex doesn't model yet, because
 `Claudex.ContentBlock.Unknown` keeps the raw map and replays it untouched, so a
