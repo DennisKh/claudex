@@ -9,8 +9,8 @@ defmodule Claudex.Live.ThinkingTest do
 
   use Claudex.TestSupport.LiveCase, async: false
 
-  alias Claudex.{ContentBlock, Messages, Stream}
-  alias Claudex.Stream.Event
+  alias Claudex.{ContentBlock, Message, Messages, Stream}
+  alias Claudex.Stream.{Accumulator, Event}
 
   @budget_tokens 1024
   @max_tokens 2048
@@ -54,5 +54,38 @@ defmodule Claudex.Live.ThinkingTest do
 
     assert thinking.thinking != ""
     assert thinking.signature != ""
+  end
+
+  test "a reply cut off mid-thinking goes back into the history and is accepted",
+       %{client: client} do
+    thinking = %{type: "enabled", budget_tokens: @budget_tokens}
+
+    reply =
+      client
+      |> Messages.stream!(%{
+        model: @model,
+        max_tokens: @max_tokens,
+        thinking: thinking,
+        messages: [Message.user(@prompt)]
+      })
+      |> Enum.take_while(&(not match?(%Event.ContentBlockDelta{delta: {:signature, _}}, &1)))
+      |> Enum.reduce(Accumulator.new(), &Accumulator.add(&2, &1))
+      |> Accumulator.message()
+
+    assert [%ContentBlock.Thinking{signature: ""} = cut_off] = reply.content
+    assert cut_off.thinking != ""
+
+    history =
+      [Message.user(@prompt)]
+      |> Message.append(reply)
+      |> Message.append(Message.user("Go on."))
+
+    assert {:ok, %Message{}} =
+             Messages.create(client, %{
+               model: @model,
+               max_tokens: @budget_tokens + 1,
+               thinking: thinking,
+               messages: history
+             })
   end
 end
