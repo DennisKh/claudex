@@ -197,8 +197,8 @@ defmodule Claudex.Messages do
       def handle_info({:claudex, ref, {:event, event}}, %{assigns: %{ref: ref}} = socket)
       def handle_info({:claudex, ref, :done}, %{assigns: %{ref: ref}} = socket)
 
-  With `:every`, events arrive in lists instead, and a cancel sends whatever
-  the open batch had collected before it sends `:cancelled`:
+  With `:every`, events arrive in lists instead, and a cancel or an error sends
+  whatever the open batch had collected before it says so:
 
       {:ok, handle} = Claudex.Messages.stream_to(client, params, to: self(), every: 100)
 
@@ -242,9 +242,10 @@ defmodule Claudex.Messages do
     * `:every` - milliseconds to batch events over. Messages arrive as
       `{:claudex, ref, {:events, [event]}}` instead of one per event, which is
       a render per batch rather than per token for a reader that would
-      otherwise fall behind. A batch goes out when the first event after the
-      window arrives, and whatever is buffered goes out when the stream ends,
-      cancelled included.
+      otherwise fall behind. A window opens with the first event it holds, and
+      its batch goes out when the first event after it arrives. Whatever is
+      buffered goes out when the stream ends, whether it finished, failed or
+      was cancelled. Anything but a positive integer raises `ArgumentError`.
 
   `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
   way, adding a message per completed turn.

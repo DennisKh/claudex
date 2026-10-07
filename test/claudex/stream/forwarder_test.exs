@@ -11,6 +11,20 @@ defmodule Claudex.Stream.ForwarderTest do
 
   @params %{model: "claude-haiku-4-5", max_tokens: 16, messages: [%{role: "user", content: "Hi"}]}
 
+  defmodule Handshake do
+    @moduledoc """
+    Tells the test its transport's first chunk was taken, so a cancel sent
+    after that lands with an event already in hand. The request runs in a
+    process whose `$callers` are the forwarder and then the test.
+    """
+
+    @doc false
+    def taken do
+      [_forwarder, test | _rest] = Process.get(:"$callers")
+      send(test, :first_chunk_taken)
+    end
+  end
+
   defmodule StubTransport do
     @moduledoc """
     A Req adapter serving one canned stream. A plug stub resolves through
@@ -59,6 +73,7 @@ defmodule Claudex.Stream.ForwarderTest do
       {_action, acc} =
         request.into.({:data, @first}, {request, Req.Response.new(status: 200)})
 
+      Handshake.taken()
       Process.sleep(200)
 
       case request.into.({:data, @second}, acc) do
@@ -128,6 +143,100 @@ defmodule Claudex.Stream.ForwarderTest do
     end
   end
 
+  defmodule ErrorMidStreamTransport do
+    @moduledoc """
+    Starts a message, then reports an error event in a later chunk, the way the
+    API does when it is overloaded part-way through. The error payload is the
+    streaming docs' own example.
+    """
+
+    @first """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    """
+
+    @error """
+    event: error
+    data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+    """
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @first}, {request, Req.Response.new(status: 200)})
+
+      Process.sleep(50)
+
+      case request.into.({:data, @error}, acc) do
+        {:cont, acc} -> acc
+        {:halt, acc} -> acc
+      end
+    end
+  end
+
+  defmodule HalfEventTransport do
+    @moduledoc """
+    Sends one whole event and the first half of the next in a single chunk,
+    then stalls. TCP splits chunks wherever it likes, so a cancel can land
+    while part of an event is still in the decoder.
+    """
+
+    @chunk """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: content_block_start
+    data: {"type":"content_block_st\
+    """
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @chunk}, {request, Req.Response.new(status: 200)})
+
+      Handshake.taken()
+      Process.sleep(:timer.seconds(5))
+
+      acc
+    end
+  end
+
+  defmodule SlowFirstByteTransport do
+    @moduledoc """
+    Waits before the first byte, as a real request does, then sends two events
+    10ms apart.
+    """
+
+    @first """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    """
+
+    @second """
+    event: message_stop
+    data: {"type":"message_stop"}
+
+    """
+
+    @doc false
+    def run(request) do
+      Process.sleep(150)
+
+      {_action, acc} =
+        request.into.({:data, @first}, {request, Req.Response.new(status: 200)})
+
+      Process.sleep(10)
+
+      case request.into.({:data, @second}, acc) do
+        {:cont, acc} -> acc
+        {:halt, acc} -> acc
+      end
+    end
+  end
+
   defp client do
     Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: StubTransport])
   end
@@ -164,11 +273,99 @@ defmodule Claudex.Stream.ForwarderTest do
     assert {:ok, %Handle{ref: ref} = handle} =
              Forwarder.events(client, @params, to: self(), every: 10_000)
 
+    assert_receive :first_chunk_taken, 2_000
     Process.sleep(20)
     Claudex.Stream.cancel(handle)
 
     assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 2_000
     assert_receive {:claudex, ^ref, :cancelled}, 2_000
+  end
+
+  test "an error mid-stream arrives after the events before it" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: ErrorMidStreamTransport]
+      )
+
+    assert {:ok, %Handle{ref: ref}} = Forwarder.events(client, @params, to: self())
+
+    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
+    assert_receive {:claudex, ^ref, {:error, %Error{}}}, 2_000
+    refute_receive {:claudex, ^ref, :done}, 100
+  end
+
+  test "a cancel with half an event in the decoder reports :cancelled, not an error" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: HalfEventTransport]
+      )
+
+    assert {:ok, %Handle{ref: ref} = handle} = Forwarder.events(client, @params, to: self())
+
+    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
+    Claudex.Stream.cancel(handle)
+
+    assert_receive {:claudex, ^ref, :cancelled}, 2_000
+    refute_receive {:claudex, ^ref, {:error, _error}}, 100
+  end
+
+  test "an error mid-window still delivers what the batch had buffered" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: ErrorMidStreamTransport]
+      )
+
+    assert {:ok, %Handle{ref: ref}} = Forwarder.events(client, @params, to: self(), every: 10_000)
+
+    assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 2_000
+    assert_receive {:claudex, ^ref, {:error, %Error{}}}, 2_000
+  end
+
+  test "a cancel with half an event in the decoder still delivers the batch" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: HalfEventTransport]
+      )
+
+    assert {:ok, %Handle{ref: ref} = handle} =
+             Forwarder.events(client, @params, to: self(), every: 10_000)
+
+    assert_receive :first_chunk_taken, 2_000
+    Process.sleep(20)
+    Claudex.Stream.cancel(handle)
+
+    assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 2_000
+    assert_receive {:claudex, ^ref, :cancelled}, 2_000
+  end
+
+  test "the first window opens with the first event, not with the request" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: SlowFirstByteTransport]
+      )
+
+    assert {:ok, %Handle{ref: ref}} = Forwarder.events(client, @params, to: self(), every: 100)
+
+    assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}, %Event.MessageStop{}]}},
+                   2_000
+  end
+
+  test "Messages.stream_to/3 refuses an :every that is not a positive integer" do
+    for every <- [0, -5, 2.5] do
+      assert_raise ArgumentError, ~r/:every/, fn ->
+        Messages.stream_to(client(), @params, every: every)
+      end
+    end
   end
 
   test "events/3 closes a window mid-stream, keeping every event in order" do
