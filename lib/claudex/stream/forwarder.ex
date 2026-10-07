@@ -54,50 +54,16 @@ defmodule Claudex.Stream.Forwarder do
   @spec events(Client.t(), map(), keyword()) :: {:ok, Handle.t()}
   def events(%Client{} = client, body, opts) do
     session = Keyword.get(opts, :session)
-    every = Keyword.get(opts, :every)
+    every = opts |> Keyword.get(:every) |> validate_every()
 
     start(opts, fn sink ->
       stream = Connection.stream(client, body, cancel_ref: sink.ref, session: session)
 
       case every do
-        every when is_integer(every) and every > 0 -> forward_batched(stream, sink, every)
-        _no_window_or_invalid -> forward_each(stream, sink, :event)
+        nil -> forward_each(stream, sink, :event)
+        every -> forward_batched(stream, sink, every)
       end
     end)
-  end
-
-  defp forward_batched(enumerable, sink, every) do
-    window = System.convert_time_unit(every, :millisecond, :native)
-
-    enumerable
-    |> Enum.reduce_while(
-      {:running, [], System.monotonic_time()},
-      fn event, {:running, buffered, opened} ->
-        case halt_reason(sink) do
-          nil -> {:cont, batch(sink, event, buffered, opened, window)}
-          reason -> {:halt, {reason, buffered, opened}}
-        end
-      end
-    )
-    |> flush(sink)
-  end
-
-  defp batch(sink, event, buffered, opened, window) do
-    if buffered != [] and System.monotonic_time() - opened >= window do
-      deliver(sink, {:events, Enum.reverse(buffered)})
-
-      {:running, [event], System.monotonic_time()}
-    else
-      {:running, [event | buffered], opened}
-    end
-  end
-
-  defp flush({outcome, [], _opened}, _sink), do: outcome
-
-  defp flush({outcome, buffered, _opened}, sink) do
-    deliver(sink, {:events, Enum.reverse(buffered)})
-
-    outcome
   end
 
   @doc false
@@ -123,6 +89,71 @@ defmodule Claudex.Stream.Forwarder do
     :ok
   rescue
     ArgumentError -> warn_unreachable(to)
+  end
+
+  defp validate_every(nil), do: nil
+  defp validate_every(every) when is_integer(every) and every > 0, do: every
+
+  defp validate_every(every) do
+    raise ArgumentError,
+          ":every must be a positive integer of milliseconds, got: #{inspect(every)}"
+  end
+
+  # Events are pulled one at a time, so the batch is still in hand when the
+  # stream raises part-way and can go out before the error does.
+  defp forward_batched(enumerable, sink, every) do
+    pull = &Enumerable.reduce(enumerable, &1, fn event, _acc -> {:suspend, event} end)
+    window = System.convert_time_unit(every, :millisecond, :native)
+
+    next_batch(pull, sink, %{buffered: [], opened: nil, window: window})
+  end
+
+  defp next_batch(pull, sink, batch) do
+    case pull_keeping(pull, sink, batch) do
+      {:suspended, event, pull} -> take(pull, sink, event, batch)
+      {_done_or_halted, _acc} -> flush(batch, sink, :running)
+    end
+  end
+
+  defp take(pull, sink, event, batch) do
+    case halt_reason(sink) do
+      nil ->
+        next_batch(pull, sink, add(sink, event, batch))
+
+      reason ->
+        pull.({:halt, nil})
+        flush(batch, sink, reason)
+    end
+  end
+
+  defp pull_keeping(pull, sink, batch) do
+    pull.({:cont, nil})
+  catch
+    kind, reason ->
+      flush(batch, sink, :raised)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp add(_sink, event, %{buffered: []} = batch) do
+    %{batch | buffered: [event], opened: System.monotonic_time()}
+  end
+
+  defp add(sink, event, batch) do
+    if System.monotonic_time() - batch.opened >= batch.window do
+      deliver(sink, {:events, Enum.reverse(batch.buffered)})
+
+      %{batch | buffered: [event], opened: System.monotonic_time()}
+    else
+      %{batch | buffered: [event | batch.buffered]}
+    end
+  end
+
+  defp flush(%{buffered: []}, _sink, outcome), do: outcome
+
+  defp flush(batch, sink, outcome) do
+    deliver(sink, {:events, Enum.reverse(batch.buffered)})
+
+    outcome
   end
 
   defp warn_unreachable(to) do

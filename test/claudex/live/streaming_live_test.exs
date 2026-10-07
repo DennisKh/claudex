@@ -66,6 +66,62 @@ defmodule Claudex.Live.StreamingTest do
     refute_receive {:claudex, ^ref, :done}, 1_000
   end
 
+  describe "stream_to/3 with :every" do
+    test "batches a real reply, its first window opening with the first event",
+         %{client: client} do
+      {:ok, handle} =
+        Messages.stream_to(
+          client,
+          %{
+            model: @model,
+            max_tokens: 64,
+            messages: [%{role: "user", content: "Reply with exactly one word: pong"}]
+          },
+          every: 250
+        )
+
+      [first | _rest] = batches = collect_batches(handle.ref, [])
+      events = List.flatten(batches)
+
+      assert [%Event.MessageStart{}, _next | _] = first
+      assert %Event.MessageStop{} = List.last(events)
+      assert text_of(events) != ""
+    end
+
+    test "a cancel mid-window delivers the buffered events, then :cancelled",
+         %{client: client} do
+      {:ok, handle} =
+        Messages.stream_to(
+          client,
+          %{
+            model: @model,
+            max_tokens: 1024,
+            messages: [
+              %{role: "user", content: "Count slowly from 1 to 200, one number per line."}
+            ]
+          },
+          every: 60_000
+        )
+
+      ref = handle.ref
+
+      Process.sleep(3_000)
+      assert Stream.cancel(handle) == :ok
+
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{} | _rest]}}, 60_000
+      assert_receive {:claudex, ^ref, :cancelled}, 60_000
+    end
+  end
+
+  defp collect_batches(ref, batches) do
+    receive do
+      {:claudex, ^ref, {:events, events}} -> collect_batches(ref, [events | batches])
+      {:claudex, ^ref, :done} -> Enum.reverse(batches)
+    after
+      60_000 -> flunk("the stream never finished")
+    end
+  end
+
   defp text_of(events) do
     Enum.map_join(events, "", fn
       %Event.ContentBlockDelta{delta: {:text, chunk}} -> chunk

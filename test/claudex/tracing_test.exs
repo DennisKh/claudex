@@ -531,6 +531,20 @@ defmodule Claudex.TracingTest do
     assert attributes(conversation)["session.id"] == "chat-plain"
   end
 
+  test "conversation/3 returns a create/2 result as it came, not read as a stop" do
+    reply(message())
+
+    returned =
+      Tracing.conversation(@params, [session: "chat-result"], fn ->
+        Messages.create(client(), @params)
+      end)
+
+    assert {:ok, %Message{}} = returned
+
+    [conversation] = named(collect_spans([]), "invoke_agent claude-haiku-4-5")
+    refute Map.has_key?(attributes(conversation), "claudex.stop")
+  end
+
   test "conversation/3 ends the span when its function raises" do
     assert_raise RuntimeError, "boom", fn ->
       Tracing.conversation(@params, [session: "chat-raised"], fn -> raise "boom" end)

@@ -92,6 +92,8 @@ defmodule Claudex.Message do
 
   A message you built yourself is passed through, with any content blocks in it
   converted too — so `user/1` and friends can take Claudex structs as content.
+  Those blocks are filtered the same way. A block you wrote as a map is sent as
+  you wrote it.
   """
   @spec to_param(t() | map()) :: map()
   def to_param(%__MODULE__{} = message) do
@@ -102,7 +104,10 @@ defmodule Claudex.Message do
   end
 
   def to_param(%{content: content} = message) when is_list(content) and not is_struct(message) do
-    %{message | content: Enum.map(content, &ContentBlock.to_param/1)}
+    %{
+      message
+      | content: for(block <- content, replayable?(block), do: ContentBlock.to_param(block))
+    }
   end
 
   def to_param(%{} = message), do: message
@@ -152,8 +157,7 @@ defmodule Claudex.Message do
 
   Replaying a stored turn passes its blocks instead:
 
-      blocks = Enum.map(stored.content, &Claudex.ContentBlock.to_param/1)
-      Claudex.Message.assistant(blocks)
+      Claudex.Message.assistant(stored.content)
 
   You don't need this for a reply you just received — a `%Claudex.Message{}`
   goes back into `messages` as it is.

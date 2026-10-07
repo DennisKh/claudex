@@ -339,11 +339,12 @@ defmodule Claudex.Tracing do
 
   `stop` is your own word for why the loop finished. Whatever session the
   process had before the block is restored after it. Any other return value
-  comes back with nothing recorded, and a raise closes the span, marks it
-  failed and propagates unchanged.
+  comes back with nothing recorded, `{:ok, message}` and `{:error, error}`
+  included, and a raise closes the span, marks it failed and propagates
+  unchanged.
 
-  A loop that spans callbacks, a LiveView waiting on an approval, holds the
-  handle from `start_conversation/2` instead.
+  `start_conversation/2` and `end_conversation/3` do the same for a loop that
+  spans callbacks, such as a LiveView waiting on an approval.
   """
   @spec conversation(map(), (-> result)) :: result when result: term()
   @spec conversation(map(), keyword(), (-> result)) :: result when result: term()
@@ -524,14 +525,17 @@ defmodule Claudex.Tracing do
     end
   end
 
+  defp finish_conversation(_span, {result, _value} = returned) when result in [:ok, :error],
+    do: returned
+
   defp finish_conversation(span, {stop, %Message{} = message}) when is_atom(stop) do
-    end_conversation(span, message, stop)
+    set_attributes(span, Attributes.conversation_result(message, stop))
 
     message
   end
 
   defp finish_conversation(span, {stop, nil}) when is_atom(stop) do
-    end_conversation(span, nil, stop)
+    set_attributes(span, Attributes.conversation_result(nil, stop))
 
     nil
   end
