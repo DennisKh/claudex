@@ -523,8 +523,6 @@ defmodule Claudex.ToolRunner do
       stop when stop in [:refusal, :truncated, :unknown] ->
         stop_without_running(turn, history, stop)
 
-      # The API picks a paused turn up from the trailing server tool block, so
-      # it resumes on the history as it stands.
       :paused when turn.tool_uses == [] ->
         advance(config, with_reply(turn, history))
 
@@ -538,9 +536,6 @@ defmodule Claudex.ToolRunner do
 
   defp with_reply(turn, history), do: %{turn | messages: Message.append(history, turn.message)}
 
-  # A history ending in calls is only ever resumed with `:tool_results`, but passed
-  # back without it, it would ask the API to continue from calls that must not
-  # run. Leaving the reply off makes it ask Claude again.
   defp stop_without_running(%Turn{tool_uses: []} = turn, history, stop) do
     {%{with_reply(turn, history) | stop: stop}, :done}
   end
