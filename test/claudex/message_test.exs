@@ -197,6 +197,19 @@ defmodule Claudex.MessageTest do
       assert Message.to_param(reply) == %{role: "assistant", content: []}
     end
 
+    test "drops cut-off blocks from a message built out of a reply's blocks too" do
+      reply = cut_off("thinking_stream", &match?(%Event.ContentBlockDelta{index: 1}, &1))
+
+      assert %{content: [%{type: "thinking"}]} =
+               reply.content |> Message.assistant() |> Message.to_param()
+    end
+
+    test "leaves a block you wrote as a map alone, whatever it holds" do
+      built = Message.assistant([%{type: "text", text: ""}])
+
+      assert Message.to_param(built) == built
+    end
+
     test "drops a text block the stream ended before its first word" do
       reply = cut_off("thinking_stream", &match?(%Event.ContentBlockDelta{index: 1}, &1))
 

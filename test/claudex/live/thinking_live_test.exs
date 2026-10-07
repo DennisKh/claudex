@@ -80,12 +80,16 @@ defmodule Claudex.Live.ThinkingTest do
       |> Message.append(reply)
       |> Message.append(Message.user("Go on."))
 
-    assert {:ok, %Message{}} =
-             Messages.create(client, %{
-               model: @model,
-               max_tokens: @budget_tokens + 1,
-               thinking: thinking,
-               messages: history
-             })
+    rebuilt = [Message.user(@prompt), Message.assistant(reply.content), Message.user("Go on.")]
+
+    for messages <- [history, rebuilt] do
+      assert {:ok, %Message{}} =
+               Messages.create(client, %{
+                 model: @model,
+                 max_tokens: @budget_tokens + 1,
+                 thinking: thinking,
+                 messages: messages
+               })
+    end
   end
 end
