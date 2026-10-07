@@ -1042,6 +1042,28 @@ defmodule Claudex.TracingTest do
     assert span(conversation, :parent_span_id) == span(app_span, :span_id)
   end
 
+  test "stream_to/3 with :every joins the caller's trace and session from its reader" do
+    require OpenTelemetry.Tracer, as: Tracer
+
+    stream_reply(message())
+    Tracing.set_session("chat-batched")
+
+    Tracer.with_span "my_app.handle_message" do
+      {:ok, handle} = Messages.stream_to(client(), @params, every: 10)
+
+      ref = handle.ref
+      assert_receive {:claudex, ^ref, :done}, 2_000
+    end
+
+    spans = collect_spans([])
+
+    [app_span] = named(spans, "my_app.handle_message")
+    [request] = named(spans, "chat claude-haiku-4-5")
+
+    assert span(request, :parent_span_id) == span(app_span, :span_id)
+    assert attributes(request)["session.id"] == "chat-batched"
+  end
+
   test "a response that is not a reply is not recorded as one" do
     Application.put_env(:claudex, :trace_content, true)
 

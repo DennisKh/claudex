@@ -17,6 +17,7 @@ defmodule Claudex.Live.ServerToolsTest do
 
   alias Claudex.{ContentBlock, Message, Messages, ToolRunner}
   alias Claudex.ContentBlock.{ServerToolResult, ServerToolUse}
+  alias Claudex.Stream.Event.{ContentBlockStart, ContentBlockStop}
 
   @moduletag timeout: 180_000
 
@@ -121,4 +122,66 @@ defmodule Claudex.Live.ServerToolsTest do
 
     block
   end
+
+  test "stream_to/3 with :every delivers what came before a search while the search runs",
+       %{client: client} do
+    {:ok, handle} =
+      Messages.stream_to(
+        client,
+        %{
+          model: @model,
+          max_tokens: 1024,
+          tools: [%{@web_search | max_uses: 1}],
+          messages: [Message.user("Search the web once for the year Kyiv's metro opened.")]
+        },
+        every: 50
+      )
+
+    batches = collect_timed(handle.ref, [])
+    arrivals = Enum.map(batches, fn {at, _events} -> at end)
+    silences = Enum.zip_with(arrivals, tl(arrivals), &(&2 - &1))
+
+    search =
+      first_index(batches, &match?(%ContentBlockStart{content_block: %ServerToolUse{}}, &1))
+
+    asked =
+      Enum.find_index(
+        batches,
+        &holds?(&1, fn e -> match?(%ContentBlockStop{index: ^search}, e) end)
+      )
+
+    # Nothing streams while the search runs, so that is the longest silence.
+    # A batch released only by the next event would end the silence instead
+    # of starting it, arriving together with the result.
+    assert Enum.at(silences, asked) == Enum.max(silences),
+           "the call's end came after the longest silence: #{inspect(silences)}"
+
+    assert holds?(
+             Enum.at(batches, asked + 1),
+             &match?(%ContentBlockStart{content_block: %ServerToolResult{}}, &1)
+           )
+  end
+
+  defp collect_timed(ref, batches) do
+    receive do
+      {:claudex, ^ref, {:events, events}} ->
+        collect_timed(ref, [{System.monotonic_time(:millisecond), events} | batches])
+
+      {:claudex, ^ref, :done} ->
+        Enum.reverse(batches)
+
+      {:claudex, ^ref, {:error, error}} ->
+        flunk("the stream failed: #{Exception.message(error)}")
+    after
+      120_000 -> flunk("the stream never finished")
+    end
+  end
+
+  defp first_index(batches, fun) do
+    batches
+    |> Enum.flat_map(fn {_at, events} -> events end)
+    |> Enum.find_value(fn event -> if fun.(event), do: event.index end)
+  end
+
+  defp holds?({_at, events}, fun), do: Enum.any?(events, fun)
 end

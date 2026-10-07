@@ -99,62 +99,99 @@ defmodule Claudex.Stream.Forwarder do
           ":every must be a positive integer of milliseconds, got: #{inspect(every)}"
   end
 
-  # Events are pulled one at a time, so the batch is still in hand when the
-  # stream raises part-way and can go out before the error does.
+  # The stream runs in a reader process of its own, so a stream gone quiet
+  # blocks the reader and not the timer that closes a window.
   defp forward_batched(enumerable, sink, every) do
-    pull = &Enumerable.reduce(enumerable, &1, fn event, _acc -> {:suspend, event} end)
-    window = System.convert_time_unit(every, :millisecond, :native)
+    reader = start_reader(enumerable, sink.ref)
 
-    next_batch(pull, sink, %{buffered: [], opened: nil, window: window})
+    collect(%{sink: sink, reader: reader, every: every, buffered: [], deadline: nil})
   end
 
-  defp next_batch(pull, sink, batch) do
-    case pull_keeping(pull, sink, batch) do
-      {:suspended, event, pull} -> take(pull, sink, event, batch)
-      {_done_or_halted, _acc} -> flush(batch, sink, :running)
-    end
+  defp start_reader(enumerable, ref) do
+    forwarder = self()
+    callers = [forwarder | Process.get(:"$callers", [])]
+    context = Tracing.context()
+
+    spawn_link(fn ->
+      Process.put(:"$callers", callers)
+      Tracing.attach(context)
+
+      send(forwarder, {:claudex_read_end, ref, read(enumerable, forwarder, ref)})
+    end)
   end
 
-  defp take(pull, sink, event, batch) do
-    case halt_reason(sink) do
-      nil ->
-        next_batch(pull, sink, add(sink, event, batch))
-
-      reason ->
-        pull.({:halt, nil})
-        flush(batch, sink, reason)
-    end
-  end
-
-  defp pull_keeping(pull, sink, batch) do
-    pull.({:cont, nil})
+  defp read(enumerable, forwarder, ref) do
+    Enum.each(enumerable, &send(forwarder, {:claudex_read, ref, &1}))
+    :done
   catch
-    kind, reason ->
-      flush(batch, sink, :raised)
-      :erlang.raise(kind, reason, __STACKTRACE__)
+    kind, reason -> {:failed, kind, reason, __STACKTRACE__}
   end
 
-  defp add(_sink, event, %{buffered: []} = batch) do
-    %{batch | buffered: [event], opened: System.monotonic_time()}
+  defp collect(%{sink: %{ref: ref, monitor: monitor}} = batch) do
+    receive do
+      {:claudex_read, ^ref, event} ->
+        collect(add(batch, event))
+
+      {:claudex_read_end, ^ref, ending} ->
+        batch |> deliver_batch() |> read_ended(ending)
+
+      {:claudex_cancel, ^ref} = cancel ->
+        batch |> stop_reader(cancel) |> deliver_batch()
+        :cancelled
+
+      {:DOWN, ^monitor, :process, _to, _reason} ->
+        stop_reader(batch, {:claudex_cancel, ref})
+        :unreachable
+    after
+      time_left(batch) -> batch |> deliver_batch() |> collect()
+    end
   end
 
-  defp add(sink, event, batch) do
-    if System.monotonic_time() - batch.opened >= batch.window do
-      deliver(sink, {:events, Enum.reverse(batch.buffered)})
+  # A window is also checked as an event arrives, because a steady stream keeps
+  # the mailbox busy and `after` only fires once it is empty.
+  defp add(%{buffered: []} = batch, event), do: open_window(batch, event)
 
-      %{batch | buffered: [event], opened: System.monotonic_time()}
+  defp add(batch, event) do
+    if now() >= batch.deadline do
+      batch |> deliver_batch() |> open_window(event)
     else
       %{batch | buffered: [event | batch.buffered]}
     end
   end
 
-  defp flush(%{buffered: []}, _sink, outcome), do: outcome
+  defp open_window(batch, event), do: %{batch | buffered: [event], deadline: now() + batch.every}
 
-  defp flush(batch, sink, outcome) do
-    deliver(sink, {:events, Enum.reverse(batch.buffered)})
+  defp deliver_batch(%{buffered: []} = batch), do: batch
 
-    outcome
+  defp deliver_batch(batch) do
+    deliver(batch.sink, {:events, Enum.reverse(batch.buffered)})
+
+    %{batch | buffered: [], deadline: nil}
   end
+
+  defp read_ended(_batch, :done), do: :running
+  defp read_ended(_batch, {:failed, kind, reason, stack}), do: :erlang.raise(kind, reason, stack)
+
+  # The reader's transport halts on the same cancel message, which closes the
+  # connection; waiting for it to finish keeps that ahead of what the sink hears.
+  defp stop_reader(%{reader: reader, sink: %{ref: ref}} = batch, cancel) do
+    send(reader, cancel)
+    await_reader(ref)
+
+    batch
+  end
+
+  defp await_reader(ref) do
+    receive do
+      {:claudex_read, ^ref, _event} -> await_reader(ref)
+      {:claudex_read_end, ^ref, _ending} -> :ok
+    end
+  end
+
+  defp time_left(%{deadline: nil}), do: :infinity
+  defp time_left(%{deadline: deadline}), do: max(deadline - now(), 0)
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp warn_unreachable(to) do
     unless Process.get(:claudex_unreachable_logged) do

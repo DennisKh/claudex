@@ -243,9 +243,10 @@ defmodule Claudex.Messages do
       `{:claudex, ref, {:events, [event]}}` instead of one per event, which is
       a render per batch rather than per token for a reader that would
       otherwise fall behind. A window opens with the first event it holds, and
-      its batch goes out when the first event after it arrives. Whatever is
-      buffered goes out when the stream ends, whether it finished, failed or
-      was cancelled. Anything but a positive integer raises `ArgumentError`.
+      its batch goes out `every` milliseconds later, whether or not the stream
+      has sent anything since. Whatever is buffered goes out when the stream
+      ends, whether it finished, failed or was cancelled. Anything but a
+      positive integer raises `ArgumentError`.
 
   `Claudex.ToolRunner.stream_to/3` delivers a whole tool conversation this
   way, adding a message per completed turn.

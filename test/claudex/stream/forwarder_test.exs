@@ -15,13 +15,14 @@ defmodule Claudex.Stream.ForwarderTest do
     @moduledoc """
     Tells the test its transport's first chunk was taken, so a cancel sent
     after that lands with an event already in hand. The request runs in a
-    process whose `$callers` are the forwarder and then the test.
+    process whose `$callers` start with the process consuming the stream and
+    end with the test, which has none of its own.
     """
 
     @doc false
     def taken do
-      [_forwarder, test | _rest] = Process.get(:"$callers")
-      send(test, :first_chunk_taken)
+      [consumer | _rest] = callers = Process.get(:"$callers")
+      send(List.last(callers), {:first_chunk_taken, consumer})
     end
   end
 
@@ -237,6 +238,70 @@ defmodule Claudex.Stream.ForwarderTest do
     end
   end
 
+  defmodule GatedTransport do
+    @moduledoc """
+    Sends one event, then holds the rest until the test opens the gate, the way
+    the API goes quiet while a server tool runs. Tells the test which process
+    holds the request and which one consumes the stream, so it can open the
+    gate or watch both go.
+    """
+
+    @first """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    """
+
+    @second """
+    event: message_stop
+    data: {"type":"message_stop"}
+
+    """
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.({:data, @first}, {request, Req.Response.new(status: 200)})
+
+      [consumer | _rest] = callers = Process.get(:"$callers")
+      send(List.last(callers), {:gated, self(), consumer})
+
+      receive do
+        :open ->
+          case request.into.({:data, @second}, acc) do
+            {:cont, acc} -> acc
+            {:halt, acc} -> acc
+          end
+      after
+        :timer.seconds(5) -> acc
+      end
+    end
+  end
+
+  defmodule FixtureTransport do
+    @moduledoc """
+    Replays the recorded thinking stream in 256-byte chunks a millisecond
+    apart, so events land in many windows and split across chunk boundaries.
+    """
+
+    alias Claudex.TestSupport.Fixtures
+
+    @doc false
+    def run(request) do
+      "thinking_stream"
+      |> Fixtures.sse!()
+      |> Fixtures.chunks(256)
+      |> Enum.reduce_while({request, Req.Response.new(status: 200)}, fn chunk, acc ->
+        Process.sleep(1)
+
+        case request.into.({:data, chunk}, acc) do
+          {:cont, acc} -> {:cont, acc}
+          {:halt, acc} -> {:halt, acc}
+        end
+      end)
+    end
+  end
+
   defp client do
     Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: StubTransport])
   end
@@ -273,7 +338,7 @@ defmodule Claudex.Stream.ForwarderTest do
     assert {:ok, %Handle{ref: ref} = handle} =
              Forwarder.events(client, @params, to: self(), every: 10_000)
 
-    assert_receive :first_chunk_taken, 2_000
+    assert_receive {:first_chunk_taken, _consumer}, 2_000
     Process.sleep(20)
     Claudex.Stream.cancel(handle)
 
@@ -338,7 +403,7 @@ defmodule Claudex.Stream.ForwarderTest do
     assert {:ok, %Handle{ref: ref} = handle} =
              Forwarder.events(client, @params, to: self(), every: 10_000)
 
-    assert_receive :first_chunk_taken, 2_000
+    assert_receive {:first_chunk_taken, _consumer}, 2_000
     Process.sleep(20)
     Claudex.Stream.cancel(handle)
 
@@ -524,5 +589,107 @@ defmodule Claudex.Stream.ForwarderTest do
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStop{}}}, 2_000
     assert_receive {:claudex, ^ref, :done}, 1_000
     refute_receive {:claudex, ^ref, :cancelled}, 100
+  end
+
+  describe "events/3 with :every while the stream is quiet" do
+    setup do
+      client =
+        Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: GatedTransport])
+
+      %{client: client}
+    end
+
+    test "delivers the open batch when its window closes, not when the next event arrives",
+         %{client: client} do
+      {:ok, %Handle{ref: ref}} = Forwarder.events(client, @params, to: self(), every: 50)
+
+      assert_receive {:gated, producer, reader}, 2_000
+      watched = Process.monitor(reader)
+
+      # The gate stays shut until this batch arrives, so no later event can
+      # be what releases it.
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 1_000
+
+      send(producer, :open)
+
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStop{}]}}, 1_000
+      assert_receive {:claudex, ^ref, :done}, 1_000
+      assert_receive {:DOWN, ^watched, :process, ^reader, :normal}, 1_000
+    end
+
+    test "a cancel ends the request and its reader, then reports :cancelled",
+         %{client: client} do
+      {:ok, %Handle{ref: ref} = handle} =
+        Forwarder.events(client, @params, to: self(), every: 50)
+
+      assert_receive {:gated, producer, reader}, 2_000
+      request = Process.monitor(producer)
+      watched = Process.monitor(reader)
+
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 1_000
+      Claudex.Stream.cancel(handle)
+
+      assert_receive {:claudex, ^ref, :cancelled}, 1_000
+      assert_receive {:DOWN, ^request, :process, ^producer, _killed}, 1_000
+      assert_receive {:DOWN, ^watched, :process, ^reader, :normal}, 1_000
+      refute_receive {:claudex, ^ref, _more}, 100
+    end
+
+    test "the caller exiting takes the reader with it", %{client: client} do
+      test = self()
+
+      {:ok, caller} =
+        Task.start(fn ->
+          {:ok, _handle} = Forwarder.events(client, @params, to: test, every: 50)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:gated, _producer, reader}, 2_000
+      watched = Process.monitor(reader)
+
+      Process.exit(caller, :kill)
+
+      assert_receive {:DOWN, ^watched, :process, ^reader, :killed}, 1_000
+    end
+
+    test "monitor: true stops the reader and the request when the receiver goes",
+         %{client: client} do
+      receiver = spawn(fn -> Process.sleep(:infinity) end)
+
+      {:ok, %Handle{pid: forwarder}} =
+        Forwarder.events(client, @params, to: receiver, monitor: true, every: 50)
+
+      assert_receive {:gated, producer, reader}, 2_000
+      watched = Enum.map([forwarder, reader, producer], &{&1, Process.monitor(&1)})
+
+      Process.exit(receiver, :kill)
+
+      for {pid, monitor} <- watched do
+        assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 1_000
+      end
+    end
+  end
+
+  test "events/3 with :every delivers a recorded stream whole and in order" do
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: FixtureTransport])
+
+    {:ok, %Handle{ref: each}} = Forwarder.events(client, @params, to: self())
+    {:ok, %Handle{ref: batched}} = Forwarder.events(client, @params, to: self(), every: 5)
+
+    one_by_one = collect(each, :event)
+    batches = collect(batched, :events)
+
+    assert length(batches) > 1
+    assert List.flatten(batches) == one_by_one
+  end
+
+  defp collect(ref, tag, collected \\ []) do
+    receive do
+      {:claudex, ^ref, {^tag, item}} -> collect(ref, tag, [item | collected])
+      {:claudex, ^ref, :done} -> Enum.reverse(collected)
+    after
+      5_000 -> flunk("the stream never finished")
+    end
   end
 end
