@@ -92,4 +92,41 @@ defmodule Claudex.Live.ThinkingTest do
                })
     end
   end
+
+  test "a cut-off reply stored as maps is refused as read back and accepted once filtered",
+       %{client: client} do
+    thinking = %{type: "enabled", budget_tokens: @budget_tokens}
+
+    reply =
+      client
+      |> Messages.stream!(%{
+        model: @model,
+        max_tokens: @max_tokens,
+        thinking: thinking,
+        messages: [Message.user(@prompt)]
+      })
+      |> Enum.take_while(&(not match?(%Event.ContentBlockDelta{delta: {:signature, _}}, &1)))
+      |> Enum.reduce(Accumulator.new(), &Accumulator.add(&2, &1))
+      |> Accumulator.message()
+
+    # How a row stored block by block, without Message.to_param/1, reads back.
+    stored =
+      reply.content |> Enum.map(&ContentBlock.to_param/1) |> JSON.encode!() |> JSON.decode!()
+
+    assert [%{"type" => "thinking", "signature" => ""}] = stored
+
+    request = fn blocks ->
+      Messages.create(client, %{
+        model: @model,
+        max_tokens: @budget_tokens + 1,
+        thinking: thinking,
+        messages: [Message.user(@prompt), Message.assistant(blocks), Message.user("Go on.")]
+      })
+    end
+
+    assert {:error, %Claudex.Error{status: 400}} = request.(stored)
+
+    assert {:ok, %Message{}} =
+             request.(Enum.filter(stored, &ContentBlock.replayable?/1))
+  end
 end

@@ -243,4 +243,49 @@ defmodule Claudex.ContentBlockTest do
                %{start | "input" => %{"repoName" => "elixir-lang/elixir"}}
     end
   end
+
+  describe "replayable?/1" do
+    test "rejects an unsigned thinking block and an empty text block in every shape" do
+      unsendable = [
+        %Thinking{thinking: "Hm", signature: nil},
+        %Thinking{thinking: "Hm", signature: ""},
+        %Text{text: ""},
+        %{type: "thinking", thinking: "Hm", signature: nil},
+        %{type: "thinking", thinking: "Hm"},
+        %{type: "text", text: ""},
+        %{"type" => "thinking", "thinking" => "Hm", "signature" => ""},
+        %{"type" => "thinking", "thinking" => "Hm"},
+        %{"type" => "text", "text" => nil}
+      ]
+
+      for block <- unsendable, do: refute(ContentBlock.replayable?(block), inspect(block))
+    end
+
+    test "accepts a signed thinking block, text with words, and every other block" do
+      sendable = [
+        %Thinking{thinking: "Hm", signature: "sig"},
+        %Text{text: "42"},
+        %{type: "thinking", thinking: "Hm", signature: "sig"},
+        %{"type" => "text", "text" => "42"},
+        %RedactedThinking{data: "opaque"},
+        %ToolUse{id: "toolu_1", name: "add", input: %{}},
+        %{"type" => "tool_use", "id" => "toolu_1", "name" => "add", "input" => %{}},
+        %Unknown{type: "compaction", raw: %{"type" => "compaction"}}
+      ]
+
+      for block <- sendable, do: assert(ContentBlock.replayable?(block), inspect(block))
+    end
+
+    test "a cut-off block stored one block at a time is still caught after a JSON round trip" do
+      stored =
+        [%Thinking{thinking: "Hm", signature: ""}, %Text{text: ""}, %Text{text: "42"}]
+        |> Enum.map(&ContentBlock.to_param/1)
+        |> JSON.encode!()
+        |> JSON.decode!()
+
+      assert Enum.filter(stored, &ContentBlock.replayable?/1) == [
+               %{"type" => "text", "text" => "42"}
+             ]
+    end
+  end
 end
