@@ -16,7 +16,7 @@ defmodule Claudex.Live.TracingTest do
 
   require Record
 
-  alias Claudex.{Message, Messages, Models, ToolRunner}
+  alias Claudex.{Message, Messages, Models, ToolRunner, Tracing}
 
   @fields Record.extract(:span, from_lib: "opentelemetry/include/otel_span.hrl")
   Record.defrecordp(:span, @fields)
@@ -208,6 +208,27 @@ defmodule Claudex.Live.TracingTest do
       refute Map.has_key?(recorded, "gen_ai.system")
       refute Map.has_key?(recorded, "gen_ai.completion")
       refute Map.has_key?(recorded, "gen_ai.output.messages")
+    end
+  end
+
+  describe "conversation/3" do
+    test "hands back a real create/2 result unchanged, under its span", %{client: client} do
+      params = %{model: @model, max_tokens: 16, messages: [Message.user("Say hi.")]}
+
+      returned =
+        Tracing.conversation(params, [session: "claudex-live-block"], fn ->
+          Messages.create(client, params)
+        end)
+
+      assert {:ok, %Message{}} = returned
+
+      spans = collect([])
+      [conversation] = named(spans, "invoke_agent " <> @model)
+      [request] = named(spans, "chat " <> @model)
+
+      assert span(request, :parent_span_id) == span(conversation, :span_id)
+      assert attributes(conversation)["session.id"] == "claudex-live-block"
+      refute Map.has_key?(attributes(conversation), "claudex.stop")
     end
   end
 
