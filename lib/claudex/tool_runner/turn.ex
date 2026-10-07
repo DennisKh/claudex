@@ -6,8 +6,10 @@ defmodule Claudex.ToolRunner.Turn do
 
   `tool_uses` and `tool_results` belong to this turn alone: what Claude asked
   for in this one reply, and what running it produced. A conversation completes
-  by Claude asking for nothing, so both are empty on the turn `run/3` returns.
-  Every call that ran, or that a halt left waiting, is in `messages`.
+  by Claude asking for nothing, so both are empty on a `:completed` turn. A
+  halted turn's `tool_results` hold the calls answered before the halt, which
+  is what the runner's `:tool_results` option takes. Every call that ran, or
+  that a halt left waiting, is in `messages`.
 
   `messages` carries the whole conversation up to and including this turn, so
   you can stop consuming at any point and still have the complete history from
@@ -25,16 +27,16 @@ defmodule Claudex.ToolRunner.Turn do
       or the stream carrying it ended part-way, which is what cancelling one
       does. What it was saying, or asking for, is cut off, so its tool calls
       were not run either.
-    * `:unknown` - the reply asked for tools under a `stop_reason` this
-      version doesn't know, so they were not run. `message.stop_reason` has
-      the reason as the API sent it.
+    * `:unknown` - the reply ended with a `stop_reason` this version doesn't
+      know. Any tool calls it asked for were not run. `message.stop_reason`
+      has the reason as the API sent it.
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can
       be picked up again by passing that history back.
     * any other atom - the one a `:before_call` halt named. `tool_results` holds
       what ran before it and `messages` ends with Claude's reply, so passing
-      `messages` back to `Claudex.ToolRunner.run/3` runs the calls that never
-      ran and carries on. Only a halted turn's history resumes that way.
+      `messages` back to `Claudex.ToolRunner.run/3` with `tool_results: tool_results`
+      runs the calls that never ran and carries on.
   """
 
   alias Claudex.ContentBlock.ToolUse
@@ -42,7 +44,8 @@ defmodule Claudex.ToolRunner.Turn do
 
   defstruct [:message, :index, :stop, tool_uses: [], tool_results: [], messages: []]
 
-  @type stop :: atom()
+  @typedoc "Why a conversation ended. Any other atom is one a `:before_call` halt named."
+  @type stop :: :completed | :refusal | :truncated | :unknown | :max_turns | atom()
 
   @type t :: %__MODULE__{
           message: Message.t(),

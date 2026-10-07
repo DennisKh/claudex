@@ -53,6 +53,21 @@ defmodule Claudex.Live.ToolRunnerTest do
     end
   end
 
+  defmodule Archive do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Deletes one file from the archive. Call it once per file."
+    @tool %{args: [path: "Path of the file to delete."]}
+    @spec delete_file(String.t()) :: String.t()
+    def delete_file(path) do
+      # Every deletion is kept, so a file deleted twice shows up twice.
+      Process.put(:deletions, Process.get(:deletions, []) ++ [path])
+
+      "deleted #{path}"
+    end
+  end
+
   defp params(messages, extra \\ %{}) do
     Map.merge(
       %{
@@ -206,9 +221,11 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert halted.tool_results == []
       refute Process.get(:deleted)
 
-      stored = halted.messages |> JSON.encode!() |> JSON.decode!()
+      [stored, results] =
+        [halted.messages, halted.tool_results] |> JSON.encode!() |> JSON.decode!()
 
-      assert {:ok, resumed} = ToolRunner.run(client, %{params | messages: stored})
+      assert {:ok, resumed} =
+               ToolRunner.run(client, %{params | messages: stored}, tool_results: results)
 
       # The approval arrived, so this time the tool runs and Claude answers for
       # it. The API rejects a history whose calls have no results, so reaching
@@ -216,6 +233,69 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert resumed.stop == :completed
       assert Process.get(:deleted) =~ "report.csv"
       assert Message.text(resumed.message) != ""
+    end
+
+    test "a resume after a partial halt runs only the call that never ran", %{client: client} do
+      params = %{
+        model: @model,
+        max_tokens: 512,
+        system:
+          "You manage a file archive. When asked to delete several files, call the tool " <>
+            "for all of them in the same reply.",
+        tools: Archive,
+        messages: [Message.user("Delete a.csv and b.csv.")]
+      }
+
+      {:ok, approvals} = Agent.start_link(fn -> 1 end)
+
+      approve_first = fn %ContentBlock.ToolUse{} ->
+        Agent.get_and_update(approvals, fn
+          0 -> {{:halt, :awaiting_approval}, 0}
+          left -> {:ok, left - 1}
+        end)
+      end
+
+      assert {:ok, halted} = ToolRunner.run(client, params, before_call: approve_first)
+
+      assert halted.stop == :awaiting_approval
+
+      assert [%ContentBlock.ToolUse{id: first_id}, %ContentBlock.ToolUse{id: second_id}] =
+               halted.tool_uses
+
+      assert [%{tool_use_id: ^first_id}] = halted.tool_results
+      assert [ran_first] = Process.get(:deletions)
+
+      test_pid = self()
+
+      assert {:ok, resumed} =
+               ToolRunner.run(client, %{params | messages: halted.messages},
+                 tool_results: halted.tool_results,
+                 before_call: fn %ContentBlock.ToolUse{id: id} ->
+                   send(test_pid, {:asked, id})
+                   :ok
+                 end
+               )
+
+      assert resumed.stop == :completed
+      assert [^ran_first, ran_second] = Process.get(:deletions)
+      refute ran_second == ran_first
+      assert_received {:asked, ^second_id}
+      refute_received {:asked, ^first_id}
+    end
+
+    test "without :tool_results, a halted history is refused by the API and runs nothing",
+         %{client: client} do
+      params = approval_params("Delete report.csv please.")
+
+      assert {:ok, halted} =
+               ToolRunner.run(client, params,
+                 before_call: fn %ContentBlock.ToolUse{} -> {:halt, :awaiting_approval} end
+               )
+
+      assert {:error, %Claudex.Error{status: 400}} =
+               ToolRunner.run(client, %{params | messages: halted.messages})
+
+      refute Process.get(:deleted)
     end
 
     test "a truncated call's stored history asks again instead of running it",
