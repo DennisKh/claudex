@@ -174,4 +174,54 @@ defmodule Claudex.Live.StreamingTest do
     assert message.usage.input_tokens > 0
     assert message.usage.input_tokens == opening.input_tokens
   end
+
+  test "a programmatic tool call carried by message_start reassembles into the message",
+       %{client: client} do
+    tools = [
+      %{
+        name: "revenue",
+        description: "Returns the revenue in dollars for a customer id such as C1, C2 or C3.",
+        input_schema: %{
+          type: "object",
+          properties: %{id: %{type: "string"}},
+          required: ["id"]
+        },
+        allowed_callers: ["code_execution_20260120"]
+      },
+      %{type: "code_execution_20260120", name: "code_execution"}
+    ]
+
+    question =
+      Message.user(
+        "Write Python code that calls revenue for C1, then C2, then C3 sequentially " <>
+          "(from code, not directly) and prints the total. Then tell me the total."
+      )
+
+    params = %{model: "claude-haiku-5-5", max_tokens: 1500, tools: tools}
+
+    {:ok, first} = Messages.create(client, Map.put(params, :messages, [question]))
+    [call] = Message.tool_uses(first)
+
+    history = [
+      question,
+      %{role: "assistant", content: first.raw["content"]},
+      Message.tool_results([Claudex.Tool.result(call.id, "100")])
+    ]
+
+    events =
+      client
+      |> Recorder.record_stream("programmatic_tool_call_stream")
+      |> Messages.stream!(
+        Map.merge(params, %{messages: history, container: first.container["id"]})
+      )
+      |> Enum.to_list()
+
+    assert [%Event.MessageStart{message: %{content: [_call | _rest]}} | _events] = events
+    refute Enum.any?(events, &match?(%Event.ContentBlockStart{}, &1))
+
+    {:ok, message} = Stream.final_message(events)
+
+    assert message.stop_reason == "tool_use"
+    assert [%{name: "revenue", input: %{"id" => _customer}}] = Message.tool_uses(message)
+  end
 end

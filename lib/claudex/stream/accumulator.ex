@@ -55,7 +55,10 @@ defmodule Claudex.Stream.Accumulator do
   """
   @spec add(t(), Claudex.Stream.Event.t()) :: t()
   def add(%__MODULE__{} = accumulator, %MessageStart{message: message}) do
-    %{accumulator | message: message, blocks: %{}, tool_input: %{}}
+    blocks =
+      message.content |> Enum.with_index(fn block, index -> {index, block} end) |> Map.new()
+
+    %{accumulator | message: message, blocks: blocks, tool_input: %{}}
   end
 
   def add(%__MODULE__{message: nil} = accumulator, _event), do: accumulator

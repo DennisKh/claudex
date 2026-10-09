@@ -1,8 +1,10 @@
 defmodule Claudex.Stream.Event.MessageStart do
   @moduledoc """
   The first event of a stream. Carries the `Claudex.Message` shell, with id,
-  model, role and usage so far, and empty content that the later events fill
-  in. `Claudex.Stream.Accumulator` is what fills it.
+  model, role and usage so far. Its content is usually empty and filled in by
+  the later events, but the continuation of a programmatic tool call can
+  arrive whole here, followed only by `message_stop`.
+  `Claudex.Stream.Accumulator` assembles both.
   """
 
   alias Claudex.Message

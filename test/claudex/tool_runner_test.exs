@@ -3,7 +3,7 @@ defmodule Claudex.ToolRunnerTest do
 
   alias Claudex.{Client, ContentBlock, Error, Message, ToolRunner}
   alias Claudex.Stream.{Event, Handle}
-  alias Claudex.TestSupport.MessageStream
+  alias Claudex.TestSupport.{Fixtures, MessageStream}
   alias Claudex.ToolRunner.Turn
 
   defmodule Calculator do
@@ -34,6 +34,15 @@ defmodule Claudex.ToolRunnerTest do
     @tool true
     @spec unencodable() :: any()
     def unencodable, do: {:error, :not_found}
+  end
+
+  defmodule Revenue do
+    use Claudex.Tool
+
+    @doc "Returns the revenue in dollars for a customer id such as C1, C2 or C3."
+    @tool true
+    @spec revenue(String.t()) :: integer()
+    def revenue(id), do: Map.get(%{"C1" => 100, "C2" => 250, "C3" => 75}, id, 0)
   end
 
   defmodule StallingTransport do
@@ -893,6 +902,28 @@ defmodule Claudex.ToolRunnerTest do
     assert_received {:sent, %{"messages" => [_user, %{"content" => [replayed]}]}}
 
     assert replayed["input"] == %{"query" => "kyiv population"}
+  end
+
+  test "runs a tool call that arrives whole in message_start" do
+    {:ok, replies} =
+      Agent.start_link(fn ->
+        [
+          &Plug.Conn.send_resp(&1, 200, Fixtures.sse!("programmatic_tool_call_stream")),
+          &MessageStream.respond(&1, message([text("The total is 425.")], "end_turn"))
+        ]
+      end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      Agent.get_and_update(replies, fn [reply | rest] -> {reply, rest} end).(conn)
+    end)
+
+    params = %{@params | tools: Revenue}
+
+    assert [first, second] = client() |> ToolRunner.stream(params) |> Enum.to_list()
+
+    assert [%ContentBlock.ToolUse{name: "revenue"}] = first.tool_uses
+    assert [%{content: "250", is_error: false}] = first.tool_results
+    assert second.stop == :completed
   end
 
   describe "a reply that ran out of room" do

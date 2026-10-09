@@ -136,6 +136,20 @@ defmodule Claudex.ReplayTest do
     end
   end
 
+  test "a recorded programmatic tool call, sent whole in message_start, replays into the message" do
+    for chunk_size <- [1, 7, 4096] do
+      stub_sse("programmatic_tool_call_stream", chunk_size)
+
+      events = client() |> Messages.stream!(@params) |> Enum.to_list()
+
+      assert {:ok, message} = Stream.final_message(events)
+      assert message.stop_reason == "tool_use"
+
+      assert [%ContentBlock.ToolUse{name: "revenue", input: %{"id" => "C2"}}] =
+               Message.tool_uses(message)
+    end
+  end
+
   test "a recorded stream carries the ping the API really sends" do
     raw = Fixtures.sse!("message_stream")
 
