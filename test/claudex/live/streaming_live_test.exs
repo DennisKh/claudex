@@ -42,9 +42,9 @@ defmodule Claudex.Live.StreamingTest do
 
     ref = handle.ref
 
-    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 60_000
-    assert_receive {:claudex, ^ref, {:event, %Event.MessageStop{}}}, 60_000
-    assert_receive {:claudex, ^ref, :done}, 60_000
+    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 10_000
+    assert_receive {:claudex, ^ref, {:event, %Event.MessageStop{}}}, 5_000
+    assert_receive {:claudex, ^ref, :done}, 5_000
   end
 
   test "cancel/1 stops a long reply part-way through", %{client: client} do
@@ -57,12 +57,12 @@ defmodule Claudex.Live.StreamingTest do
 
     ref = handle.ref
 
-    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 60_000
-    assert_receive {:claudex, ^ref, {:event, %Event.ContentBlockDelta{}}}, 60_000
+    assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 10_000
+    assert_receive {:claudex, ^ref, {:event, %Event.ContentBlockDelta{}}}, 5_000
 
     assert Stream.cancel(handle) == :ok
 
-    assert_receive {:claudex, ^ref, :cancelled}, 60_000
+    assert_receive {:claudex, ^ref, :cancelled}, 5_000
     refute_receive {:claudex, ^ref, :done}, 1_000
   end
 
@@ -95,21 +95,34 @@ defmodule Claudex.Live.StreamingTest do
           client,
           %{
             model: @model,
-            max_tokens: 1024,
+            max_tokens: 8_000,
             messages: [
-              %{role: "user", content: "Count slowly from 1 to 200, one number per line."}
+              %{
+                role: "user",
+                content:
+                  "Count from 1 to 2000, one number per line. " <>
+                    "Write every number; don't skip or abbreviate."
+              }
             ]
           },
-          every: 60_000
+          every: 500
         )
 
       ref = handle.ref
 
-      Process.sleep(3_000)
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{} | _rest]}}, 10_000
+
+      Process.sleep(200)
       assert Stream.cancel(handle) == :ok
 
-      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{} | _rest]}}, 60_000
-      assert_receive {:claudex, ^ref, :cancelled}, 60_000
+      assert_receive {:claudex, ^ref, {:events, [_event | _rest]}}, 5_000
+
+      assert_receive {:claudex, ^ref, ending}
+                     when ending in [:cancelled, :done] or
+                            (is_tuple(ending) and elem(ending, 0) == :error),
+                     5_000
+
+      assert ending == :cancelled
     end
   end
 

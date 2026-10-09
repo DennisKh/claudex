@@ -1,13 +1,11 @@
 defmodule Claudex.Live.ServerToolsTest do
   @moduledoc """
-  End-to-end coverage of a server-side tool loop: the blocks `web_search`
-  sends back, and what `Claudex.ToolRunner` does when the API pauses a turn
-  part-way through one.
+  End-to-end coverage of a server-side tool: the blocks `web_search` sends
+  back, a search run through `Claudex.ToolRunner`, and how `:every` batches
+  around one.
 
-  A pause is not something a request can ask for. It happens when the
-  server-side loop runs long enough to hit its own iteration limit, so the
-  prompt here is written to keep it searching, and the assertion holds either
-  way: if a pause arrives, the loop must have carried on past it.
+  A request can't ask the API to pause a turn, so resuming a `pause_turn` is
+  covered offline in `Claudex.ToolRunnerTest`.
 
   `web_search` is billed per search, and Claude Haiku 4.5 rejects the tool
   outright, hence a model of this test's own rather than the shared `@model`.
@@ -18,8 +16,6 @@ defmodule Claudex.Live.ServerToolsTest do
   alias Claudex.{ContentBlock, Message, Messages, ToolRunner}
   alias Claudex.ContentBlock.{ServerToolResult, ServerToolUse}
   alias Claudex.Stream.Event.{ContentBlockStart, ContentBlockStop}
-
-  @moduletag timeout: 180_000
 
   @model "claude-sonnet-5"
 
@@ -34,21 +30,20 @@ defmodule Claudex.Live.ServerToolsTest do
     allowed_callers: ["direct"]
   }
 
-  @prompt """
-  Search the web for each of these separately, then answer in one paragraph:
-  the current population of Kyiv, the year its metro opened, and the name of
-  its longest bridge. Search again to confirm anything you are unsure of.
-  """
-
-  test "a paused turn never ends the conversation", %{client: client} do
+  test "a search run through ToolRunner.stream/3 keeps its query and completes",
+       %{client: client} do
     turns =
       client
       |> ToolRunner.stream(
         %{
           model: @model,
-          max_tokens: 4096,
-          tools: [@web_search],
-          messages: [Message.user(@prompt)]
+          max_tokens: 1024,
+          tools: [%{@web_search | max_uses: 1}],
+          messages: [
+            Message.user(
+              "Search the web once for the population of Kyiv, then answer in one sentence."
+            )
+          ]
         },
         max_turns: 6
       )
@@ -60,13 +55,6 @@ defmodule Claudex.Live.ServerToolsTest do
            "expected the loop to finish, got #{inspect(last.stop)} after #{length(turns)} turn(s)"
 
     assert Message.text(last.message) =~ ~r/Kyiv/i
-
-    paused = Enum.filter(turns, &(&1.message.stop_reason == "pause_turn"))
-
-    for turn <- paused do
-      assert turn.index < last.index,
-             "turn #{turn.index} paused and the loop stopped there"
-    end
 
     # The loop runs on the streaming path, where a server tool's arguments
     # arrive as fragments. A search replayed with an empty input is a search
@@ -144,6 +132,8 @@ defmodule Claudex.Live.ServerToolsTest do
     search =
       first_index(batches, &match?(%ContentBlockStart{content_block: %ServerToolUse{}}, &1))
 
+    assert search, "the prompt produced no web search to time"
+
     asked =
       Enum.find_index(
         batches,
@@ -173,7 +163,7 @@ defmodule Claudex.Live.ServerToolsTest do
       {:claudex, ^ref, {:error, error}} ->
         flunk("the stream failed: #{Exception.message(error)}")
     after
-      120_000 -> flunk("the stream never finished")
+      30_000 -> flunk("the stream never finished")
     end
   end
 
