@@ -93,20 +93,21 @@ defmodule Claudex.Message do
   A message you built yourself is passed through, with any content blocks in it
   converted too — so `user/1` and friends can take Claudex structs as content.
   Those blocks are filtered the same way. A block you wrote as a map is sent as
-  you wrote it.
+  you wrote it, and `Claudex.ContentBlock.replayable?/1` filters maps read back
+  from storage.
   """
   @spec to_param(t() | map()) :: map()
   def to_param(%__MODULE__{} = message) do
     %{
       role: message.role,
-      content: for(block <- message.content, replayable?(block), do: ContentBlock.to_param(block))
+      content: for(block <- message.content, sendable?(block), do: ContentBlock.to_param(block))
     }
   end
 
   def to_param(%{content: content} = message) when is_list(content) and not is_struct(message) do
     %{
       message
-      | content: for(block <- content, replayable?(block), do: ContentBlock.to_param(block))
+      | content: for(block <- content, sendable?(block), do: ContentBlock.to_param(block))
     }
   end
 
@@ -283,10 +284,11 @@ defmodule Claudex.Message do
     * `:unknown` - a reason this version doesn't model, or none at all, which
       is how a reply reads while it is still streaming or if it was cancelled.
 
-  A `:refusal` or `:truncated` reply may carry tool calls, and they must not be
-  run: what Claude was part-way through asking for is as unfinished as the
-  sentence before it, and results for a call it never confirmed cannot be
-  replayed. `Claudex.ToolRunner` stops on both for that reason.
+  A `:refusal`, `:truncated` or `:unknown` reply may carry tool calls, and they
+  must not be run: what Claude was part-way through asking for is as
+  unfinished as the sentence before it, and results for a call it never
+  confirmed cannot be replayed. `Claudex.ToolRunner` stops on all three for
+  that reason.
 
   Takes the reason on its own as readily as a message, since an app that
   persists its turns asks this of a database column rather than a struct.
@@ -300,9 +302,9 @@ defmodule Claudex.Message do
 
   def stop(_unrecognised), do: :unknown
 
-  defp replayable?(%ContentBlock.Thinking{signature: signature}), do: signature not in [nil, ""]
-  defp replayable?(%ContentBlock.Text{text: text}), do: not blank_text?(text)
-  defp replayable?(_block), do: true
+  # A map is sent as written, so only decoded blocks are filtered
+  defp sendable?(block) when is_struct(block), do: ContentBlock.replayable?(block)
+  defp sendable?(_map), do: true
 
   defp blank_content?(blocks) when is_list(blocks), do: Enum.all?(blocks, &blank_block?/1)
   defp blank_content?(text) when is_binary(text), do: text == ""

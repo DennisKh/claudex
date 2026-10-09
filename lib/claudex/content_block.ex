@@ -113,4 +113,34 @@ defmodule Claudex.ContentBlock do
   @spec to_param(t() | map()) :: map()
   def to_param(%module{} = block) when module in @modules, do: module.to_param(block)
   def to_param(%{} = block), do: block
+
+  @doc """
+  Checks whether a block can be sent back to the API. Takes a decoded block,
+  or a map with atom or string keys such as one read back from storage.
+
+  A stream that ended part-way can leave a thinking block that was never
+  signed, or a text block that never got a word. The API rejects both, and
+  every other block goes back as it arrived.
+
+      iex> Claudex.ContentBlock.replayable?(%Claudex.ContentBlock.Text{text: "42"})
+      true
+
+      iex> Claudex.ContentBlock.replayable?(%{"type" => "thinking", "thinking" => "Hm", "signature" => nil})
+      false
+
+  `Claudex.Message.to_param/1` leaves these out of a decoded reply, but sends a
+  map as it was written. A history stored as maps is filtered with this:
+
+      Claudex.Message.assistant(Enum.filter(stored, &Claudex.ContentBlock.replayable?/1))
+  """
+  @spec replayable?(t() | map()) :: boolean()
+  def replayable?(%Thinking{signature: signature}), do: present?(signature)
+  def replayable?(%Text{text: text}), do: present?(text)
+  def replayable?(%{type: "thinking"} = block), do: present?(Map.get(block, :signature))
+  def replayable?(%{"type" => "thinking"} = block), do: present?(Map.get(block, "signature"))
+  def replayable?(%{type: "text"} = block), do: present?(Map.get(block, :text))
+  def replayable?(%{"type" => "text"} = block), do: present?(Map.get(block, "text"))
+  def replayable?(%{} = _block), do: true
+
+  defp present?(value), do: value not in [nil, ""]
 end

@@ -308,12 +308,12 @@ Claudex.ToolRunner.run(client, params,
 case Claudex.Message.stop(message) do
   :tool_use -> run(Claudex.Message.tool_uses(message))
   :paused -> resend(history)
-  stop when stop in [:refusal, :truncated] -> stop_here(stop)
+  stop when stop in [:refusal, :truncated, :unknown] -> stop_here(stop)
   :completed -> render(message)
 end
 ```
 
-It takes the reason on its own as readily as a message, so an app that stores turns can ask it of a column after a reload. A `:refusal` or `:truncated` reply may still carry tool calls, and running them sends results for a call Claude never confirmed.
+It takes the reason on its own as readily as a message, so an app that stores turns can ask it of a column after a reload. A `:refusal`, `:truncated` or `:unknown` reply may still carry tool calls, and running them sends results for a call Claude never confirmed. `:unknown` covers a reply that was cancelled part-way, so a stored turn with no stop reason reads as one.
 
 A denial sends the reason back as an error result and the conversation carries on, so Claude can explain itself or try another way; the tool is never called. Each call in a parallel batch is offered separately, so a batch can be partly approved. The function runs in the process enumerating the stream, so it can block — waiting on a `GenServer.call` while a LiveView shows an approve button, say.
 
@@ -551,7 +551,13 @@ Claudex.Message.assistant(blocks)
 
 `Claudex.Message.to_param/1` also leaves out what a stream cut off part-way
 can't send back: a thinking block that was never signed, and a text block that
-never got a word.
+never got a word. Blocks read back as maps are sent as stored, so a row
+written before that filtering, or by another route, goes through
+`Claudex.ContentBlock.replayable?/1` on the way out:
+
+```elixir
+Claudex.Message.assistant(Enum.filter(blocks, &Claudex.ContentBlock.replayable?/1))
+```
 
 That survives block types this version of Claudex doesn't model yet, because
 `Claudex.ContentBlock.Unknown` keeps the raw map and replays it untouched, so a

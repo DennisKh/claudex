@@ -1,13 +1,11 @@
 defmodule Claudex.Live.ServerToolsTest do
   @moduledoc """
-  End-to-end coverage of a server-side tool loop: the blocks `web_search`
-  sends back, and what `Claudex.ToolRunner` does when the API pauses a turn
-  part-way through one.
+  End-to-end coverage of a server-side tool: the blocks `web_search` sends
+  back, a search run through `Claudex.ToolRunner`, and how `:every` batches
+  around one.
 
-  A pause is not something a request can ask for. It happens when the
-  server-side loop runs long enough to hit its own iteration limit, so the
-  prompt here is written to keep it searching, and the assertion holds either
-  way: if a pause arrives, the loop must have carried on past it.
+  A request can't ask the API to pause a turn, so resuming a `pause_turn` is
+  covered offline in `Claudex.ToolRunnerTest`.
 
   `web_search` is billed per search, and Claude Haiku 4.5 rejects the tool
   outright, hence a model of this test's own rather than the shared `@model`.
@@ -17,8 +15,7 @@ defmodule Claudex.Live.ServerToolsTest do
 
   alias Claudex.{ContentBlock, Message, Messages, ToolRunner}
   alias Claudex.ContentBlock.{ServerToolResult, ServerToolUse}
-
-  @moduletag timeout: 180_000
+  alias Claudex.Stream.Event.{ContentBlockStart, ContentBlockStop}
 
   @model "claude-sonnet-5"
 
@@ -33,21 +30,20 @@ defmodule Claudex.Live.ServerToolsTest do
     allowed_callers: ["direct"]
   }
 
-  @prompt """
-  Search the web for each of these separately, then answer in one paragraph:
-  the current population of Kyiv, the year its metro opened, and the name of
-  its longest bridge. Search again to confirm anything you are unsure of.
-  """
-
-  test "a paused turn never ends the conversation", %{client: client} do
+  test "a search run through ToolRunner.stream/3 keeps its query and completes",
+       %{client: client} do
     turns =
       client
       |> ToolRunner.stream(
         %{
           model: @model,
-          max_tokens: 4096,
-          tools: [@web_search],
-          messages: [Message.user(@prompt)]
+          max_tokens: 1024,
+          tools: [%{@web_search | max_uses: 1}],
+          messages: [
+            Message.user(
+              "Search the web once for the population of Kyiv, then answer in one sentence."
+            )
+          ]
         },
         max_turns: 6
       )
@@ -59,13 +55,6 @@ defmodule Claudex.Live.ServerToolsTest do
            "expected the loop to finish, got #{inspect(last.stop)} after #{length(turns)} turn(s)"
 
     assert Message.text(last.message) =~ ~r/Kyiv/i
-
-    paused = Enum.filter(turns, &(&1.message.stop_reason == "pause_turn"))
-
-    for turn <- paused do
-      assert turn.index < last.index,
-             "turn #{turn.index} paused and the loop stopped there"
-    end
 
     # The loop runs on the streaming path, where a server tool's arguments
     # arrive as fragments. A search replayed with an empty input is a search
@@ -121,4 +110,68 @@ defmodule Claudex.Live.ServerToolsTest do
 
     block
   end
+
+  test "stream_to/3 with :every delivers what came before a search while the search runs",
+       %{client: client} do
+    {:ok, handle} =
+      Messages.stream_to(
+        client,
+        %{
+          model: @model,
+          max_tokens: 1024,
+          tools: [%{@web_search | max_uses: 1}],
+          messages: [Message.user("Search the web once for the year Kyiv's metro opened.")]
+        },
+        every: 50
+      )
+
+    batches = collect_timed(handle.ref, [])
+    arrivals = Enum.map(batches, fn {at, _events} -> at end)
+    silences = Enum.zip_with(arrivals, tl(arrivals), &(&2 - &1))
+
+    search =
+      first_index(batches, &match?(%ContentBlockStart{content_block: %ServerToolUse{}}, &1))
+
+    assert search, "the prompt produced no web search to time"
+
+    asked =
+      Enum.find_index(
+        batches,
+        &holds?(&1, fn e -> match?(%ContentBlockStop{index: ^search}, e) end)
+      )
+
+    # Nothing streams while the search runs, so that is the longest silence.
+    # A batch released only by the next event would end the silence instead
+    # of starting it, arriving together with the result.
+    assert Enum.at(silences, asked) == Enum.max(silences),
+           "the call's end came after the longest silence: #{inspect(silences)}"
+
+    assert holds?(
+             Enum.at(batches, asked + 1),
+             &match?(%ContentBlockStart{content_block: %ServerToolResult{}}, &1)
+           )
+  end
+
+  defp collect_timed(ref, batches) do
+    receive do
+      {:claudex, ^ref, {:events, events}} ->
+        collect_timed(ref, [{System.monotonic_time(:millisecond), events} | batches])
+
+      {:claudex, ^ref, :done} ->
+        Enum.reverse(batches)
+
+      {:claudex, ^ref, {:error, error}} ->
+        flunk("the stream failed: #{Exception.message(error)}")
+    after
+      30_000 -> flunk("the stream never finished")
+    end
+  end
+
+  defp first_index(batches, fun) do
+    batches
+    |> Enum.flat_map(fn {_at, events} -> events end)
+    |> Enum.find_value(fn event -> if fun.(event), do: event.index end)
+  end
+
+  defp holds?({_at, events}, fun), do: Enum.any?(events, fun)
 end

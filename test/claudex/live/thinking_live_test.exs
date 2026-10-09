@@ -14,6 +14,7 @@ defmodule Claudex.Live.ThinkingTest do
 
   @budget_tokens 1024
   @max_tokens 2048
+  @thinking %{type: "enabled", budget_tokens: @budget_tokens}
   @prompt "How many keystrokes to type the letters of 'banana' on a phone keypad? Think it through."
 
   test "returns thinking blocks alongside the reply", %{client: client} do
@@ -23,7 +24,7 @@ defmodule Claudex.Live.ThinkingTest do
       |> Messages.create(%{
         model: @model,
         max_tokens: @max_tokens,
-        thinking: %{type: "enabled", budget_tokens: @budget_tokens},
+        thinking: @thinking,
         messages: [%{role: "user", content: @prompt}]
       })
 
@@ -41,7 +42,7 @@ defmodule Claudex.Live.ThinkingTest do
       |> Messages.stream!(%{
         model: @model,
         max_tokens: @max_tokens,
-        thinking: %{type: "enabled", budget_tokens: @budget_tokens},
+        thinking: @thinking,
         messages: [%{role: "user", content: @prompt}]
       })
       |> Enum.to_list()
@@ -58,19 +59,7 @@ defmodule Claudex.Live.ThinkingTest do
 
   test "a reply cut off mid-thinking goes back into the history and is accepted",
        %{client: client} do
-    thinking = %{type: "enabled", budget_tokens: @budget_tokens}
-
-    reply =
-      client
-      |> Messages.stream!(%{
-        model: @model,
-        max_tokens: @max_tokens,
-        thinking: thinking,
-        messages: [Message.user(@prompt)]
-      })
-      |> Enum.take_while(&(not match?(%Event.ContentBlockDelta{delta: {:signature, _}}, &1)))
-      |> Enum.reduce(Accumulator.new(), &Accumulator.add(&2, &1))
-      |> Accumulator.message()
+    reply = cut_off_mid_thinking(client)
 
     assert [%ContentBlock.Thinking{signature: ""} = cut_off] = reply.content
     assert cut_off.thinking != ""
@@ -83,13 +72,63 @@ defmodule Claudex.Live.ThinkingTest do
     rebuilt = [Message.user(@prompt), Message.assistant(reply.content), Message.user("Go on.")]
 
     for messages <- [history, rebuilt] do
-      assert {:ok, %Message{}} =
-               Messages.create(client, %{
-                 model: @model,
-                 max_tokens: @budget_tokens + 1,
-                 thinking: thinking,
-                 messages: messages
-               })
+      assert [%Event.MessageStart{}] = first_event(client, messages)
     end
+  end
+
+  test "a cut-off reply stored as maps is refused as read back and accepted once filtered",
+       %{client: client} do
+    reply = cut_off_mid_thinking(client)
+
+    # How a row stored block by block, without Message.to_param/1, reads back.
+    stored =
+      reply.content |> Enum.map(&ContentBlock.to_param/1) |> JSON.encode!() |> JSON.decode!()
+
+    assert [%{"type" => "thinking", "signature" => ""}] = stored
+
+    messages = fn blocks ->
+      [Message.user(@prompt), Message.assistant(blocks), Message.user("Go on.")]
+    end
+
+    assert {:error, %Claudex.Error{status: 400}} =
+             Messages.create(client, %{
+               model: @model,
+               max_tokens: @budget_tokens + 1,
+               thinking: @thinking,
+               messages: messages.(stored)
+             })
+
+    assert [%Event.MessageStart{}] =
+             first_event(client, messages.(Enum.filter(stored, &ContentBlock.replayable?/1)))
+  end
+
+  defp cut_off_mid_thinking(client) do
+    client
+    |> Messages.stream!(%{
+      model: @model,
+      max_tokens: @max_tokens,
+      thinking: @thinking,
+      messages: [Message.user(@prompt)]
+    })
+    |> Enum.reduce_while(Accumulator.new(), fn event, accumulator ->
+      accumulator = Accumulator.add(accumulator, event)
+
+      case event do
+        %Event.ContentBlockDelta{delta: {:thinking, _chunk}} -> {:halt, accumulator}
+        _event -> {:cont, accumulator}
+      end
+    end)
+    |> Accumulator.message()
+  end
+
+  defp first_event(client, messages) do
+    client
+    |> Messages.stream!(%{
+      model: @model,
+      max_tokens: @budget_tokens + 1,
+      thinking: @thinking,
+      messages: messages
+    })
+    |> Enum.take(1)
   end
 end
