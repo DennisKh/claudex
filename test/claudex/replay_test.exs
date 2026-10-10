@@ -160,7 +160,8 @@ defmodule Claudex.ReplayTest do
 
       assert {:ok, message} = Stream.final_message(events)
       assert [%ContentBlock.Unknown{type: "compaction"} = compaction] = message.content
-      assert ContentBlock.to_param(compaction)["content"] == summary["content"]
+      assert %{"type" => "compaction", "content" => content} = ContentBlock.to_param(compaction)
+      assert content == summary["content"]
     end
   end
 
