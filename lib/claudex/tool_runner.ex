@@ -39,6 +39,11 @@ defmodule Claudex.ToolRunner do
   unchanged and the conversation carries on, so a pause costs a turn but does
   not end anything.
 
+  Each request after the first runs in the container the last reply named, so
+  code execution keeps its files between turns and a tool called from code
+  gets its answer in the run that called it. A `:container` in `params` that
+  has no id gets that one.
+
   `stream/3` hands you one turn at a time instead, so you can watch the
   conversation, log it, or stop it:
 
@@ -341,9 +346,9 @@ defmodule Claudex.ToolRunner do
 
     history = Message.append([], params[:messages] || [])
 
-    Stream.unfold(first_turn(history, Keyword.get(opts, :tool_results)), fn
-      :done -> nil
-      state -> next_turn(config, state)
+    Stream.unfold({config, first_turn(history, Keyword.get(opts, :tool_results))}, fn
+      {_config, :done} -> nil
+      {config, state} -> next_turn(config, state)
     end)
     |> Stream.map(&emit_turn/1)
     |> traced(config)
@@ -491,17 +496,36 @@ defmodule Claudex.ToolRunner do
   defp first_turn(history, nil), do: {history, 1}
   defp first_turn(history, results), do: {:resume, history, results}
 
-  defp next_turn(config, {:resume, history, results}) do
+  defp next_turn(config, state) do
+    {turn, next} = take_turn(config, state)
+
+    {turn, {in_container(config, turn.message), next}}
+  end
+
+  defp take_turn(config, {:resume, history, results}) do
     Tracing.span(fn -> Attributes.turn(1) end, fn _span ->
       resume_turn(config, history, results)
     end)
   end
 
-  defp next_turn(config, {history, index}) do
+  defp take_turn(config, {history, index}) do
     Tracing.span(fn -> Attributes.turn(index) end, fn _span ->
       run_turn(config, history, index)
     end)
   end
+
+  defp in_container(config, %Message{container: %{"id" => id}}) do
+    %{config | params: Map.update(config.params, :container, id, &with_container_id(&1, id))}
+  end
+
+  defp in_container(config, _message), do: config
+
+  defp with_container_id(nil, id), do: id
+
+  defp with_container_id(%{id: pinned} = container, _id) when is_binary(pinned), do: container
+  defp with_container_id(%{"id" => pinned} = container, _id) when is_binary(pinned), do: container
+  defp with_container_id(%{} = container, id), do: Map.put(container, :id, id)
+  defp with_container_id(pinned, _id), do: pinned
 
   defp run_turn(config, history, index) do
     message = request!(config, history)
@@ -697,7 +721,7 @@ defmodule Claudex.ToolRunner do
   end
 
   defp denied(tool_use, reason) do
-    report(tool_use, :denied, fn -> Tool.result(tool_use.id, reason, is_error: true) end)
+    report(tool_use, :denied, fn -> Tool.result(tool_use, reason, is_error: true) end)
   end
 
   defp dispatch(tool_use, config) do
@@ -707,15 +731,15 @@ defmodule Claudex.ToolRunner do
 
       :error ->
         report(tool_use, :unknown_tool, fn ->
-          Tool.result(tool_use.id, "no tool named #{tool_use.name}", is_error: true)
+          Tool.result(tool_use, "no tool named #{tool_use.name}", is_error: true)
         end)
     end
   end
 
   defp call(module, tool_use, session) do
     case Tool.call(module, tool_use.name, tool_use.input, session: session) do
-      {:ok, value} -> Tool.result(tool_use.id, encode(value))
-      {:error, reason} -> Tool.result(tool_use.id, describe(tool_use, reason), is_error: true)
+      {:ok, value} -> Tool.result(tool_use, encode(value))
+      {:error, reason} -> Tool.result(tool_use, describe(tool_use, reason), is_error: true)
     end
   end
 

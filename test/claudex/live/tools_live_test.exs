@@ -144,4 +144,26 @@ defmodule Claudex.Live.ToolsTest do
 
     assert tokens > 0
   end
+
+  test "a toolset call goes back with its toolset_name and is answered", %{client: client} do
+    params = %{
+      model: "claude-haiku-5-5",
+      max_tokens: 256,
+      tools: [%{type: "computer_toolset_20260801"}],
+      messages: [Message.user("Take a screenshot of the screen, nothing else.")]
+    }
+
+    {:ok, first} = client |> Recorder.record_json("toolset_tool_use") |> Messages.create(params)
+
+    [call] = Message.tool_uses(first)
+    assert call.toolset_name == "computer"
+
+    history =
+      Message.append(params.messages, [
+        first,
+        Message.tool_results([Tool.result(call, "The screen is blank.")])
+      ])
+
+    assert {:ok, _second} = Messages.create(client, %{params | messages: history})
+  end
 end

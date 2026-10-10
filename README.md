@@ -575,8 +575,8 @@ next message has to answer both:
 [call_a, call_b] = Claudex.Message.tool_uses(turn.message)
 
 Claudex.Message.tool_results([
-  Claudex.Tool.result(call_a.id, "42"),
-  Claudex.Tool.result(call_b.id, "7")
+  Claudex.Tool.result(call_a, "42"),
+  Claudex.Tool.result(call_b, "7")
 ])
 ```
 

@@ -926,6 +926,56 @@ defmodule Claudex.ToolRunnerTest do
     assert second.stop == :completed
   end
 
+  test "the next request runs in the container the reply named" do
+    respond_with([
+      Map.put(message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"), "container", %{
+        "id" => "container_1",
+        "expires_at" => "2026-10-10T12:00:00Z"
+      }),
+      message([text("3")], "end_turn")
+    ])
+
+    assert {:ok, %Turn{stop: :completed}} = ToolRunner.run(client(), @params)
+
+    assert_received {:sent, first}
+    refute Map.has_key?(first, "container")
+    assert_received {:sent, %{"container" => "container_1"}}
+  end
+
+  test "a container given with skills and no id gains the reply's id and keeps its skills" do
+    skills = [%{type: "anthropic", skill_id: "xlsx", version: "latest"}]
+
+    respond_with([
+      Map.put(message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"), "container", %{
+        "id" => "container_1"
+      }),
+      message([text("3")], "end_turn")
+    ])
+
+    params = Map.put(@params, :container, %{skills: skills})
+
+    assert {:ok, _turn} = ToolRunner.run(client(), params)
+
+    assert_received {:sent, %{"container" => %{"skills" => [_skill]} = first}}
+    refute Map.has_key?(first, "id")
+    assert_received {:sent, %{"container" => %{"id" => "container_1", "skills" => [_skill]}}}
+  end
+
+  test "a toolset call goes back with its toolset_name, and so does its result" do
+    respond_with([Fixtures.json!("toolset_tool_use"), message([text("Done.")], "end_turn")])
+
+    assert {:ok, _turn} = ToolRunner.run(client(), @params)
+
+    assert_received {:sent, _first}
+
+    assert_received {:sent,
+                     %{"messages" => [_user, %{"content" => [call]}, %{"content" => [result]}]}}
+
+    assert %{"toolset_name" => "computer", "caller" => %{"type" => "direct"}} = call
+    assert %{"tool_use_id" => id, "toolset_name" => "computer"} = result
+    assert id == call["id"]
+  end
+
   describe "a reply that ran out of room" do
     test "stops the loop rather than reading as finished" do
       respond_with([message([text("The answer is")], "max_tokens")])
