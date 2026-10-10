@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0](https://github.com/DennisKh/claudex/compare/v0.10.0...v0.11.0) (2026-10-10)
+
+
+### Features
+
+* send :every batches on a timer and add ContentBlock.replayable?/1 ([#88](https://github.com/DennisKh/claudex/issues/88)) ([164eb30](https://github.com/DennisKh/claudex/commit/164eb30dc940ff5d97b14b0ea222cd1e41df4733))
+* **streaming:** batch stream_to/3 events over a window ([#78](https://github.com/DennisKh/claudex/issues/78)) ([417bdf7](https://github.com/DennisKh/claudex/commit/417bdf78e3cccbe716add8cea9f5d1d185196049))
+* **tool_runner:** halt a run and resume it from its own history ([#82](https://github.com/DennisKh/claudex/issues/82)) ([26c1c22](https://github.com/DennisKh/claudex/commit/26c1c228521d8f8a8658961b81aacec36ba5bb0c))
+* **tracing:** run a conversation in a block ([#81](https://github.com/DennisKh/claudex/issues/81)) ([cc4c030](https://github.com/DennisKh/claudex/commit/cc4c030424329af806ad06a6c50482144c90cc8c))
+* **usage:** answer whether prompt caching did anything ([#83](https://github.com/DennisKh/claudex/issues/83)) ([6dcd640](https://github.com/DennisKh/claudex/commit/6dcd640b30f73dfa9fabd924b5802fa2087ba5a3))
+
+
+### Bug Fixes
+
+* 0.11.0 review findings ([#87](https://github.com/DennisKh/claudex/issues/87)) ([708e442](https://github.com/DennisKh/claudex/commit/708e442d817b5b5ed26b9d0dbe71fdf7f955453f))
+* **message:** leave a cut-off stream's unsendable blocks out of the history ([#86](https://github.com/DennisKh/claudex/issues/86)) ([88974a8](https://github.com/DennisKh/claudex/commit/88974a85c86bfd68075eda3b23db9cd2e484f0aa))
+* **streaming:** keep the content a message_start event carries ([bf08e91](https://github.com/DennisKh/claudex/commit/bf08e916426382b0f477e0d87a134e79c0b7a280))
+* **streaming:** keep the summary a compaction delta carries ([#90](https://github.com/DennisKh/claudex/issues/90)) ([0b21499](https://github.com/DennisKh/claudex/commit/0b21499284105759a8f66062c5c73c16e2595397))
+* **tool_runner:** keep an unfinished reply's calls out of the history ([#84](https://github.com/DennisKh/claudex/issues/84)) ([e70a6e7](https://github.com/DennisKh/claudex/commit/e70a6e770a09d4cce1589bca9ab277cbfecfde72))
+* **tool_runner:** stop instead of running calls under an unknown stop reason ([#85](https://github.com/DennisKh/claudex/issues/85)) ([c6ffb8d](https://github.com/DennisKh/claudex/commit/c6ffb8d9fd531c6f25adcdf7e7f992fe019693e5))
+* **tool:** send a tool call's caller and toolset back, and keep the runner in its container ([#89](https://github.com/DennisKh/claudex/issues/89)) ([a951ea7](https://github.com/DennisKh/claudex/commit/a951ea7c3e456353f79ed3c8ccf32defa1dd8170))
+
 ## [0.10.0](https://github.com/DennisKh/claudex/compare/v0.9.1...v0.10.0) (2026-09-20)
 
 
