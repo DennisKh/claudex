@@ -221,4 +221,49 @@ defmodule Claudex.Live.StreamingTest do
     assert message.stop_reason == "tool_use"
     assert [%{name: "revenue", input: %{"id" => "C2"}}] = Message.tool_uses(message)
   end
+
+  test "a streamed compaction keeps its summary, and the next request is compacted" do
+    client = Claudex.new(api_key: @api_key, beta: ["compact-2026-01-12"])
+
+    log =
+      for i <- 1..2600, into: "" do
+        "Log line #{i}: the sensor in bay #{rem(i * 7, 97)} reported #{rem(i * 13, 1000)} units.\n"
+      end
+
+    messages = [
+      Message.user("Here is a log:\n" <> log <> "\nReply with just OK."),
+      Message.assistant("OK."),
+      Message.user("Which bay appears in line 5? One word.")
+    ]
+
+    params = %{
+      model: "claude-haiku-5-5",
+      max_tokens: 2000,
+      messages: messages,
+      context_management: %{
+        edits: [
+          %{
+            type: "compact_20260112",
+            trigger: %{type: "input_tokens", value: 50_000},
+            pause_after_compaction: true
+          }
+        ]
+      }
+    }
+
+    {:ok, paused} =
+      client
+      |> Recorder.record_stream("compaction_stream")
+      |> Messages.stream!(params)
+      |> Stream.final_message()
+
+    assert paused.stop_reason == "compaction"
+    assert [%Claudex.ContentBlock.Unknown{type: "compaction", raw: compaction}] = paused.content
+    assert is_binary(compaction["content"]) and compaction["content"] != ""
+
+    {:ok, continued} =
+      Messages.create(client, %{params | messages: Message.append(messages, paused)})
+
+    assert continued.usage.input_tokens < 10_000
+  end
 end

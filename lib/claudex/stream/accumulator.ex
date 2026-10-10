@@ -15,7 +15,7 @@ defmodule Claudex.Stream.Accumulator do
   only parseable together.
   """
 
-  alias Claudex.ContentBlock.{MCPToolUse, ServerToolUse, Text, Thinking, ToolUse}
+  alias Claudex.ContentBlock.{MCPToolUse, ServerToolUse, Text, Thinking, ToolUse, Unknown}
   alias Claudex.{Message, Usage}
 
   alias Claudex.Stream.Event.{
@@ -179,7 +179,12 @@ defmodule Claudex.Stream.Accumulator do
     end)
   end
 
-  defp apply_delta(accumulator, _index, {:unknown, _delta}), do: accumulator
+  defp apply_delta(accumulator, index, {:unknown, delta}) do
+    update_block(accumulator, index, fn
+      %Unknown{} = block -> %{block | raw: Map.merge(block.raw, Map.delete(delta, "type"))}
+      block -> block
+    end)
+  end
 
   defp update_block(accumulator, index, fun) do
     case Map.fetch(accumulator.blocks, index) do

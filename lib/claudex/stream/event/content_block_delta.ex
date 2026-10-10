@@ -8,6 +8,10 @@ defmodule Claudex.Stream.Event.ContentBlockDelta do
   `{:input_json, chunk}` is a fragment of a tool call's arguments — the
   fragments are only valid JSON once concatenated, which
   `Claudex.Stream.Accumulator` does for you.
+
+  `{:unknown, map}` is a delta type this version doesn't model, such as
+  `compaction_delta`. The accumulator merges its fields into the block when
+  that block is a `Claudex.ContentBlock.Unknown`.
   """
 
   defstruct [:index, :delta]

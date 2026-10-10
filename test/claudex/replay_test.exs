@@ -150,6 +150,21 @@ defmodule Claudex.ReplayTest do
     end
   end
 
+  test "a recorded compaction keeps the summary its delta carries, however it is chunked" do
+    for chunk_size <- [1, 7, 4096] do
+      stub_sse("compaction_stream", chunk_size)
+
+      events = client() |> Messages.stream!(@params) |> Enum.to_list()
+
+      [summary] = for %Event.ContentBlockDelta{delta: {:unknown, delta}} <- events, do: delta
+
+      assert {:ok, message} = Stream.final_message(events)
+      assert [%ContentBlock.Unknown{type: "compaction"} = compaction] = message.content
+      assert %{"type" => "compaction", "content" => content} = ContentBlock.to_param(compaction)
+      assert content == summary["content"]
+    end
+  end
+
   test "a recorded stream carries the ping the API really sends" do
     raw = Fixtures.sse!("message_stream")
 
