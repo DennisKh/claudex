@@ -134,6 +134,7 @@ defmodule Claudex.Tool do
   `Claudex.OutputFormat` for the same mapping listed type by type.
   """
 
+  alias Claudex.ContentBlock.ToolUse
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
   alias Claudex.Tracing
   alias Claudex.Tracing.Attributes
@@ -244,6 +245,7 @@ defmodule Claudex.Tool do
 
   @doc """
   Builds a `tool_result` content block to send back after running a tool.
+  Takes the `Claudex.ContentBlock.ToolUse` it answers, or that call's id.
 
   `content` must be a string or a list of content blocks, per the Messages
   API — if your tool returns something else, encode it first
@@ -257,11 +259,34 @@ defmodule Claudex.Tool do
 
       iex> Claudex.Tool.result("toolu_1", "no such city", is_error: true)
       %{type: "tool_result", tool_use_id: "toolu_1", content: "no such city", is_error: true}
+
+  An answer to a toolset's tool has to name the toolset too, which the call
+  carries:
+
+      iex> call = %Claudex.ContentBlock.ToolUse{id: "toolu_1", toolset_name: "computer"}
+      iex> Claudex.Tool.result(call, "The screen is blank.")
+      %{
+        type: "tool_result",
+        tool_use_id: "toolu_1",
+        content: "The screen is blank.",
+        is_error: false,
+        toolset_name: "computer"
+      }
   """
 
-  @spec result(String.t(), String.t() | [map()]) :: map()
-  @spec result(String.t(), String.t() | [map()], keyword()) :: map()
-  def result(tool_use_id, content, opts \\ []) do
+  @spec result(ToolUse.t() | String.t(), String.t() | [map()]) :: map()
+  @spec result(ToolUse.t() | String.t(), String.t() | [map()], keyword()) :: map()
+  def result(tool_use, content, opts \\ [])
+
+  def result(%ToolUse{toolset_name: nil} = tool_use, content, opts) do
+    result(tool_use.id, content, opts)
+  end
+
+  def result(%ToolUse{} = tool_use, content, opts) do
+    tool_use.id |> result(content, opts) |> Map.put(:toolset_name, tool_use.toolset_name)
+  end
+
+  def result(tool_use_id, content, opts) do
     %{
       type: "tool_result",
       tool_use_id: tool_use_id,

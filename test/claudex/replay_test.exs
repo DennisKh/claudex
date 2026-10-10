@@ -174,6 +174,34 @@ defmodule Claudex.ReplayTest do
     assert is_map(tool_use.input) and tool_use.input != %{}
   end
 
+  test "a recorded tool call goes back with the caller the API named" do
+    stub_json("tool_use")
+
+    assert {:ok, message} = Messages.create(client(), @params)
+
+    [tool_use] = Message.tool_uses(message)
+
+    assert tool_use.caller == %{"type" => "direct"}
+    assert %{caller: %{"type" => "direct"}} = ContentBlock.to_param(tool_use)
+    refute Map.has_key?(ContentBlock.to_param(tool_use), :toolset_name)
+  end
+
+  test "a recorded toolset call and its result both carry the toolset_name" do
+    stub_json("toolset_tool_use")
+
+    assert {:ok, message} = Messages.create(client(), @params)
+
+    [tool_use] = Message.tool_uses(message)
+
+    assert tool_use.toolset_name == "computer"
+
+    assert %{toolset_name: "computer", caller: %{"type" => "direct"}} =
+             ContentBlock.to_param(tool_use)
+
+    assert %{tool_use_id: id, toolset_name: "computer"} = Claudex.Tool.result(tool_use, "blank")
+    assert id == tool_use.id
+  end
+
   test "a recorded thinking response decodes into a Thinking block" do
     stub_json("thinking")
 

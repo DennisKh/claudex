@@ -202,11 +202,8 @@ defmodule Claudex.Live.StreamingTest do
     {:ok, first} = Messages.create(client, Map.put(params, :messages, [question]))
     [call] = Message.tool_uses(first)
 
-    history = [
-      question,
-      %{role: "assistant", content: first.raw["content"]},
-      Message.tool_results([Claudex.Tool.result(call.id, "100")])
-    ]
+    history =
+      Message.append([question], [first, Message.tool_results([Claudex.Tool.result(call, "100")])])
 
     events =
       client
@@ -222,6 +219,6 @@ defmodule Claudex.Live.StreamingTest do
     {:ok, message} = Stream.final_message(events)
 
     assert message.stop_reason == "tool_use"
-    assert [%{name: "revenue", input: %{"id" => _customer}}] = Message.tool_uses(message)
+    assert [%{name: "revenue", input: %{"id" => "C2"}}] = Message.tool_uses(message)
   end
 end

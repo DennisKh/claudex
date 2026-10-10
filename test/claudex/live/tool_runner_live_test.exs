@@ -68,6 +68,16 @@ defmodule Claudex.Live.ToolRunnerTest do
     end
   end
 
+  defmodule Checkpoint do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Confirms the file is saved and says what to do next."
+    @tool true
+    @spec checkpoint() :: String.t()
+    def checkpoint, do: "Saved. Now print the file."
+  end
+
   defp params(messages, extra \\ %{}) do
     Map.merge(
       %{
@@ -323,6 +333,40 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert [%ContentBlock.ToolUse{id: new_id}] = resumed.tool_uses
       refute new_id == cut_off_id
       refute Process.get(:deleted)
+    end
+  end
+
+  test "every turn runs in the first reply's container, given no container or one without an id",
+       %{client: client} do
+    prompt =
+      "Do these steps in order. 1. With code execution, write the text zebra-42 to " <>
+        "/tmp/secret.txt. 2. Only once the file is written, call the checkpoint tool. " <>
+        "3. After it answers, print the file with code execution and reply with exactly " <>
+        "what it printed, or MISSING if the file doesn't exist."
+
+    for container <- [%{}, %{container: %{}}] do
+      params =
+        Map.merge(
+          %{
+            model: @model,
+            max_tokens: 1024,
+            tools: [Checkpoint, %{type: "code_execution_20260120", name: "code_execution"}],
+            messages: [Message.user(prompt)]
+          },
+          container
+        )
+
+      turns = client |> ToolRunner.stream(params) |> Enum.to_list()
+
+      assert [%Turn{tool_uses: [%{name: "checkpoint"}]} | _rest] = turns
+      assert %Turn{stop: :completed} = last = List.last(turns)
+      # A turn can come back with no container, so only those that have one are
+      # compared, and it takes two to show one was carried.
+      containers = for %{message: %{container: %{"id" => id}}} <- turns, do: id
+
+      assert [first, _second | _rest] = containers
+      assert Enum.all?(containers, &(&1 == first))
+      assert Message.text(last.message) =~ "zebra-42"
     end
   end
 
