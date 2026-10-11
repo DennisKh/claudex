@@ -74,7 +74,8 @@ defmodule Claudex.ToolRunner do
   Claude like a policy decision, and shouldn't end the conversation either.
 
   Whatever a tool returns is the result: text is sent as-is, anything else is
-  JSON-encoded, and anything JSON can't carry is described instead. Returning
+  encoded with `Jason`, and anything Jason can't encode is described instead.
+  A struct sends the fields its `Jason.Encoder` exposes. Returning
   is success; raising is failure. A tool's return value is your own data, so
   it can't double as an error channel.
 
@@ -762,7 +763,7 @@ defmodule Claudex.ToolRunner do
   end
 
   defp encode(value) do
-    JSON.encode!(value)
+    Jason.encode!(value)
   rescue
     _not_encodable -> inspect(value)
   catch

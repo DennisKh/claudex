@@ -312,6 +312,27 @@ defmodule Claudex.ToolRunnerTest do
     assert result["content"] =~ "137"
   end
 
+  defmodule Accounts do
+    use Claudex.Tool
+
+    @doc "Fetches an account by name."
+    @tool true
+    @spec fetch(String.t()) :: map()
+    def fetch(name), do: %Claudex.TestSupport.Account{name: name, password_hash: "hash"}
+  end
+
+  test "a tool returning a struct sends only the fields its Jason encoder exposes" do
+    respond_with([
+      message([tool_use("fetch", %{"name" => "ann"})], "tool_use"),
+      message([text("done")], "end_turn")
+    ])
+
+    assert [first, _second] =
+             client() |> ToolRunner.stream(%{@params | tools: Accounts}) |> Enum.to_list()
+
+    assert [%{content: ~s({"name":"ann"}), is_error: false}] = first.tool_results
+  end
+
   test "a tool raising Tool.Error becomes an error result Claude can read" do
     respond_with([
       message([tool_use("halve", %{"n" => -4})], "tool_use"),
