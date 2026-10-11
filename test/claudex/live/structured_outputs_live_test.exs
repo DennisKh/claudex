@@ -12,7 +12,8 @@ defmodule Claudex.Live.StructuredOutputsTest do
   use Claudex.TestSupport.LiveCase, async: false
 
   alias Claudex.{Message, Messages}
-  alias Claudex.TestSupport.Ticket
+  alias Claudex.TestSupport.{Incident, Ticket}
+  alias Claudex.TestSupport.Schemas.EctoEdit
 
   @prompt """
   Open a ticket from this note, and answer only with the ticket:
@@ -55,5 +56,45 @@ defmodule Claudex.Live.StructuredOutputsTest do
 
     # additionalProperties: false on every object, so nothing else comes back.
     assert Map.keys(ticket) -- ~w(id title priority tags due reporter metadata) == []
+  end
+
+  test "a struct that builds its schema with use Claudex.Schema gets a reply in its shape",
+       %{client: client} do
+    {:ok, message} =
+      Messages.create(client, %{
+        model: @model,
+        max_tokens: 512,
+        output_config: %{format: Incident},
+        messages: [Message.user(@prompt)]
+      })
+
+    assert message.stop_reason == "end_turn",
+           "the reply stopped for #{inspect(message.stop_reason)}, so it isn't the promised shape"
+
+    assert {:ok, incident} = message |> Message.text() |> JSON.decode()
+
+    assert is_binary(incident["summary"])
+    assert incident["severity"] in ["minor", "major"]
+    assert is_integer(incident["affected_users"]) and incident["affected_users"] >= 0
+    assert is_binary(incident["reporter"]["name"])
+    assert Map.keys(incident) -- ~w(summary severity affected_users reporter) == []
+  end
+
+  test "an Ecto schema's required fields come back filled", %{client: client} do
+    {:ok, message} =
+      Messages.create(client, %{
+        model: @model,
+        max_tokens: 256,
+        output_config: %{format: EctoEdit},
+        messages: [Message.user("Describe the edit that fixes the spelling of 'recieve'.")]
+      })
+
+    assert message.stop_reason == "end_turn",
+           "the reply stopped for #{inspect(message.stop_reason)}, so it isn't the promised shape"
+
+    assert {:ok, edit} = message |> Message.text() |> JSON.decode()
+
+    assert is_binary(edit["old_string"])
+    assert is_binary(edit["new_string"])
   end
 end

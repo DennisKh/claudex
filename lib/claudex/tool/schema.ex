@@ -232,9 +232,10 @@ defmodule Claudex.Tool.Schema do
     %{visited: [], env: env, current_module: env.module, escape_hatch: @tool_escape_hatch}
   end
 
-  defp module_ref({:__aliases__, _, _} = alias_ast, env), do: Macro.expand(alias_ast, env)
-
   defp module_ref(mod, _env) when is_atom(mod), do: mod
+
+  # An alias, or __MODULE__ in a struct's own @type t read before it compiles.
+  defp module_ref(ast, env), do: Macro.expand(ast, env)
 
   for {module, schema} <- @remote_types do
     defp remote_type_schema(unquote(module), _ctx), do: unquote(Macro.escape(schema))

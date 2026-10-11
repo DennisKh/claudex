@@ -4,8 +4,10 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   `Mod.t()` references `Claudex.Tool.Schema` finds in a `@spec` that
   aren't one of the built-in types.
 
-  Two sources of field info, tried in this order:
+  Three sources of field info, tried in this order:
 
+    * a struct declaring `use Claudex.Schema` — its `__json_schema__/0`,
+      built while it compiled, so it needs no readable `.beam`
     * an Ecto schema — read via the module's own `__schema__/1`
       reflection. Claudex has no compile-time dependency on Ecto; this
       only runs when the referenced module itself implements `__schema__/1`,
@@ -21,13 +23,19 @@ defmodule Claudex.Tool.Schema.StructExpansion do
     * a plain struct with `@type t :: %__MODULE__{...}` — read from the
       module's own compiled typespec.
 
-  A struct with neither still expands, with every field left unconstrained
-  (`%{}`) — the field names alone are more useful to Claude than nothing,
-  and "no type info at all" isn't the same failure as "a type Claudex
-  can't map."
+  A referenced module that isn't compiled yet is waited for, so a struct
+  from the same project can be expanded while that project compiles.
+
+  A plain struct whose `.beam` can't be read raises
+  `Claudex.Tool.SchemaError`, naming `use Claudex.Schema` as the fix: it is
+  compiled in the same build, or a release stripped its typespecs. A plain
+  struct whose `.beam` reads fine but declares no `@type t` still expands,
+  with every field left unconstrained (`%{}`), since the field names alone
+  are more useful to Claude than nothing.
 
   Ecto doesn't expose which fields are `NOT NULL`, so an Ecto-backed
-  object's `required` list is always empty. A plain struct's `required`
+  object's `required` list is the one its `use Claudex.Schema, required:`
+  names, or empty without it. A plain struct's `required`
   list is inferred from its typespec: a field typed `t | nil` (or bare
   `nil`) is optional, anything else is required.
 
@@ -44,18 +52,50 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   Expands `module` into an object schema.
 
   Returns `:cycle` when `module` was already seen earlier on this
-  expansion path (`ctx.visited`) — a self- or mutually-referential
-  struct, not an error — and `:unsupported` when `module` isn't loaded,
-  or is loaded but is neither a struct nor an Ecto schema. Callers decide
+  expansion path (`ctx.visited`), or when two structs compiling at once
+  wait on each other — a self- or mutually-referential struct, not an
+  error — and `:unsupported` when `module` doesn't exist, or is neither a
+  struct nor an Ecto schema. Callers decide
   what to do with each: `Claudex.Tool.Schema` falls back to an
   unconstrained schema for `:cycle` and raises `Claudex.Tool.SchemaError`
   for `:unsupported`.
   """
   @spec expand(module(), Schema.context()) :: :cycle | {:ok, map()} | :unsupported
   def expand(module, ctx) do
+    if module in ctx.visited, do: :cycle, else: expand_compiled(module, ctx)
+  end
+
+  @doc """
+  Builds the object schema for a struct from the fields of its `@type t`,
+  as `{field, type_ast}` pairs. `Claudex.Schema` calls this while the struct
+  compiles, when the type is still a module attribute.
+  """
+  @spec typed_object(keyword(Macro.t()), Schema.context()) :: map()
+  def typed_object(fields, ctx) do
+    properties =
+      Map.new(fields, fn {field, type_ast} ->
+        {Atom.to_string(field), Schema.type_to_schema(type_ast, ctx)}
+      end)
+
+    required =
+      fields
+      |> Enum.reject(fn {_field, type_ast} -> nullable?(type_ast) end)
+      |> Enum.map(fn {field, _type_ast} -> Atom.to_string(field) end)
+
+    object(properties, required)
+  end
+
+  defp expand_compiled(module, ctx) do
+    case Code.ensure_compiled(module) do
+      {:module, ^module} -> expand_loaded(module, ctx)
+      {:error, :unavailable} -> :cycle
+      {:error, _reason} -> :unsupported
+    end
+  end
+
+  defp expand_loaded(module, ctx) do
     cond do
-      module in ctx.visited -> :cycle
-      not Code.ensure_loaded?(module) -> :unsupported
+      declared?(module) -> {:ok, module.__json_schema__()}
       ecto_schema?(module) -> {:ok, ecto_object(module, visit(ctx, module))}
       struct?(module) -> {:ok, struct_object(module, visit(ctx, module))}
       true -> :unsupported
@@ -63,6 +103,8 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   end
 
   defp visit(ctx, module), do: %{ctx | visited: [module | ctx.visited], current_module: module}
+
+  defp declared?(module), do: function_exported?(module, :__json_schema__, 0)
 
   defp ecto_schema?(module), do: function_exported?(module, :__schema__, 1)
   defp struct?(module), do: function_exported?(module, :__struct__, 0)
@@ -73,7 +115,13 @@ defmodule Claudex.Tool.Schema.StructExpansion do
         {Atom.to_string(field), ecto_type_schema(module.__schema__(:type, field), ctx)}
       end)
 
-    object(properties, [])
+    object(properties, ecto_required(module))
+  end
+
+  defp ecto_required(module) do
+    if function_exported?(module, :__json_required__, 0),
+      do: Enum.map(module.__json_required__(), &Atom.to_string/1),
+      else: []
   end
 
   # Every object Claudex builds here comes from a known, closed set of
@@ -160,34 +208,33 @@ defmodule Claudex.Tool.Schema.StructExpansion do
 
   defp struct_object(module, ctx) do
     case fetch_struct_fields(module) do
-      {:ok, fields} -> typed_struct_object(fields, ctx)
-      :error -> untyped_struct_object(module)
+      {:ok, fields} -> typed_object(fields, ctx)
+      :untyped -> untyped_struct_object(module)
+      :unreadable -> raise SchemaError, message: unreadable_message(module)
     end
   end
 
   defp fetch_struct_fields(module) do
-    with {:ok, types} <- Code.Typespec.fetch_types(module),
-         {:type, {:t, type_ast, []}} <- Enum.find(types, &match?({:type, {:t, _ast, []}}, &1)),
+    case Code.Typespec.fetch_types(module) do
+      {:ok, types} -> struct_fields(module, types)
+      :error -> :unreadable
+    end
+  end
+
+  defp struct_fields(module, types) do
+    with {:type, {:t, type_ast, []}} <- Enum.find(types, &match?({:type, {:t, _ast, []}}, &1)),
          {:"::", _, [_name, {:%, _, [^module, {:%{}, _, fields}]}]} <-
            Code.Typespec.type_to_quoted({:t, type_ast, []}) do
       {:ok, fields}
     else
-      _other -> :error
+      _no_struct_type -> :untyped
     end
   end
 
-  defp typed_struct_object(fields, ctx) do
-    properties =
-      Map.new(fields, fn {field, type_ast} ->
-        {Atom.to_string(field), Schema.type_to_schema(type_ast, ctx)}
-      end)
-
-    required =
-      fields
-      |> Enum.reject(fn {_field, type_ast} -> nullable?(type_ast) end)
-      |> Enum.map(fn {field, _type_ast} -> Atom.to_string(field) end)
-
-    object(properties, required)
+  defp unreadable_message(module) do
+    "can't read `#{inspect(module)}`'s `@type t`: it is compiled in the same build as the " <>
+      "code reading it, or `mix release` stripped its typespecs. Add `use Claudex.Schema` " <>
+      "to `#{inspect(module)}` so its schema is built while it compiles"
   end
 
   defp nullable?(type_ast), do: nil in Schema.flatten_union(type_ast)

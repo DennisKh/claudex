@@ -95,3 +95,15 @@ defmodule Claudex.TestSupport.Schemas.Reflected do
     end
   end
 end
+
+defmodule Claudex.TestSupport.Schemas.EctoEdit do
+  @moduledoc false
+  use Ecto.Schema
+  use Claudex.Schema, required: [:old_string, :new_string]
+
+  embedded_schema do
+    field(:old_string, :string)
+    field(:new_string, :string)
+    field(:replace_all, :boolean)
+  end
+end
