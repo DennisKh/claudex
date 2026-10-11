@@ -550,8 +550,8 @@ Claudex.Message.assistant(blocks)
 ```
 
 `Claudex.Message.to_param/1` also leaves out what a stream cut off part-way
-can't send back: a thinking block that was never signed, and a text block that
-never got a word. Blocks read back as maps are sent as stored, so a row
+can't send back: a thinking block that was never signed, a text block that
+never got a word, and a tool call the reply holds no result for. Blocks read back as maps are sent as stored, so a row
 written before that filtering, or by another route, goes through
 `Claudex.ContentBlock.replayable?/1` on the way out:
 

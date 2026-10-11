@@ -7,6 +7,8 @@ defmodule Claudex.Live.ToolsTest do
   use Claudex.TestSupport.LiveCase, async: false
 
   alias Claudex.{Message, Messages, Tool}
+  alias Claudex.Stream.Accumulator
+  alias Claudex.Stream.Event.ContentBlockDelta
 
   defmodule WeatherTool do
     @moduledoc false
@@ -165,5 +167,43 @@ defmodule Claudex.Live.ToolsTest do
       ])
 
     assert {:ok, _second} = Messages.create(client, %{params | messages: history})
+  end
+
+  test "a reply cut off inside a tool call goes back without the call and is accepted",
+       %{client: client} do
+    messages = [Message.user("What is the temperature in Paris?")]
+
+    params = %{
+      model: @model,
+      max_tokens: 256,
+      tools: Tool.list(WeatherTool),
+      tool_choice: %{type: "tool", name: "get_temperature"},
+      messages: messages
+    }
+
+    events =
+      client
+      |> Recorder.record_stream("tool_use_stream")
+      |> Messages.stream!(params)
+      |> Enum.to_list()
+
+    cut_off = cut_at_first_argument(events)
+
+    assert [%Claudex.ContentBlock.ToolUse{}] = Message.tool_uses(cut_off)
+
+    history = Message.append(messages, [cut_off, Message.user("Go on.")])
+
+    params = params |> Map.delete(:tool_choice) |> Map.put(:messages, history)
+
+    assert {:ok, _reply} = Messages.create(client, params)
+  end
+
+  # The state a cancel leaves when it lands on the call's first argument fragment.
+  defp cut_at_first_argument(events) do
+    {before, [fragment | _rest]} =
+      Enum.split_while(events, &(not match?(%ContentBlockDelta{delta: {:input_json, _}}, &1)))
+
+    Enum.reduce(before ++ [fragment], Accumulator.new(), &Accumulator.add(&2, &1))
+    |> Accumulator.message()
   end
 end

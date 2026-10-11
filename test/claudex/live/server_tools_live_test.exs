@@ -15,7 +15,8 @@ defmodule Claudex.Live.ServerToolsTest do
 
   alias Claudex.{ContentBlock, Message, Messages, ToolRunner}
   alias Claudex.ContentBlock.{ServerToolResult, ServerToolUse}
-  alias Claudex.Stream.Event.{ContentBlockStart, ContentBlockStop}
+  alias Claudex.Stream.Accumulator
+  alias Claudex.Stream.Event.{ContentBlockDelta, ContentBlockStart, ContentBlockStop}
 
   @model "claude-sonnet-5"
 
@@ -150,6 +151,37 @@ defmodule Claudex.Live.ServerToolsTest do
              Enum.at(batches, asked + 1),
              &match?(%ContentBlockStart{content_block: %ServerToolResult{}}, &1)
            )
+  end
+
+  test "a reply cut off inside a server tool call goes back without the call and is accepted",
+       %{client: client} do
+    messages = [Message.user("Search the web for the population of Kyiv in 2025.")]
+
+    params = %{
+      model: @model,
+      max_tokens: 300,
+      tools: [%{type: "web_search_20260209", name: "web_search"}],
+      messages: messages
+    }
+
+    cut_off =
+      client
+      |> Messages.stream!(params)
+      |> Enum.reduce_while(Accumulator.new(), fn event, accumulator ->
+        accumulator = Accumulator.add(accumulator, event)
+
+        case event do
+          %ContentBlockDelta{delta: {:input_json, _chunk}} -> {:halt, accumulator}
+          _event -> {:cont, accumulator}
+        end
+      end)
+      |> Accumulator.message()
+
+    assert Enum.any?(cut_off.content, &match?(%ServerToolUse{}, &1))
+
+    history = Message.append(messages, [cut_off, Message.user("Go on.")])
+
+    assert {:ok, _reply} = Messages.create(client, %{params | messages: history})
   end
 
   defp collect_timed(ref, batches) do
