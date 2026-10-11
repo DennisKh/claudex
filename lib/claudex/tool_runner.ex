@@ -137,10 +137,13 @@ defmodule Claudex.ToolRunner do
           end
         )
 
-      # store turn.messages and turn.tool_results; later, once a human has approved:
+      # store turn.messages, turn.tool_results and turn.message.container["id"];
+      # later, once a human has approved:
+      params = Map.merge(params, %{messages: messages, container: container})
+
       {:ok, turn} =
-        Claudex.ToolRunner.run(client, %{params | messages: turn.messages},
-          tool_results: turn.tool_results,
+        Claudex.ToolRunner.run(client, params,
+          tool_results: tool_results,
           before_call: &MyApp.Approvals.check/1
         )
 
@@ -151,6 +154,11 @@ defmodule Claudex.ToolRunner do
   `tool_results` then hold every call answered so far. It raises
   `ArgumentError` for a history that does not end in tool calls, or for a
   result whose call is not in that reply.
+
+  The container the halted reply ran in is not part of the history, so a run
+  that used code execution goes on in it only when `:container` names it again.
+  Without it, the resumed run starts in a new container, without the files it
+  wrote or the code that was waiting on the halted call.
 
   Without `:tool_results`, a history is only ever sent to the API, and a
   history ending in calls nobody answered is refused there. A `:refusal`,

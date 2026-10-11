@@ -143,6 +143,7 @@ defmodule Claudex.MessageTest do
     test "converts a decoded message into request params" do
       message = %Message{
         role: "assistant",
+        stop_reason: "tool_use",
         content: [
           %ContentBlock.Text{text: "here you go"},
           %ContentBlock.ToolUse{id: "toolu_1", name: "add", input: %{"a" => 1}}
@@ -216,6 +217,47 @@ defmodule Claudex.MessageTest do
       assert [%ContentBlock.Thinking{}, %ContentBlock.Text{text: ""}] = reply.content
       assert %{content: [%{type: "thinking"}]} = Message.to_param(reply)
     end
+
+    test "drops a tool call the stream ended inside, which nothing will answer" do
+      reply =
+        cut_off("tool_use_stream", &match?(%Event.ContentBlockDelta{delta: {:input_json, _}}, &1))
+
+      assert [%ContentBlock.ToolUse{}] = Message.tool_uses(reply)
+      refute Enum.any?(Message.to_param(reply).content, &match?(%{type: "tool_use"}, &1))
+    end
+
+    test "drops an MCP call the stream ended inside" do
+      reply =
+        cut_off(
+          "mcp_connector_stream",
+          &match?(%Event.ContentBlockDelta{delta: {:input_json, _}}, &1)
+        )
+
+      assert Enum.any?(reply.content, &match?(%ContentBlock.MCPToolUse{}, &1))
+      refute Enum.any?(Message.to_param(reply).content, &match?(%{"type" => "mcp_tool_use"}, &1))
+    end
+
+    # The blocks are recorded; the missing stop reason stands in for a cancel
+    # that landed after the search finished.
+    test "keeps a server call a cut-off reply already holds the result of" do
+      reply = %{Message.decode(Fixtures.json!("server_tools")) | stop_reason: nil}
+      types = Enum.map(Message.to_param(reply).content, &(&1["type"] || &1[:type]))
+
+      assert "server_tool_use" in types
+      assert "web_search_tool_result" in types
+    end
+
+    test "keeps an unanswered call in a paused reply, which the next request runs" do
+      reply =
+        cut_off(
+          "mcp_connector_stream",
+          &match?(%Event.ContentBlockDelta{delta: {:input_json, _}}, &1)
+        )
+
+      paused = %{reply | stop_reason: "pause_turn"}
+
+      assert Enum.any?(Message.to_param(paused).content, &match?(%{"type" => "mcp_tool_use"}, &1))
+    end
   end
 
   describe "append/2" do
@@ -242,6 +284,7 @@ defmodule Claudex.MessageTest do
     test "produces a history that survives a round trip through JSON" do
       reply = %Message{
         role: "assistant",
+        stop_reason: "tool_use",
         content: [%ContentBlock.ToolUse{id: "toolu_1", name: "add", input: %{"a" => 1}}]
       }
 

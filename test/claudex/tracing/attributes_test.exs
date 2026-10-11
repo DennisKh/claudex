@@ -8,6 +8,8 @@ defmodule Claudex.Tracing.AttributesTest do
   use ExUnit.Case, async: false
 
   alias Claudex.{Message, Usage}
+  alias Claudex.Stream.{Accumulator, Event, SSE}
+  alias Claudex.TestSupport.Fixtures
   alias Claudex.Tracing.Attributes
 
   @messages_path "/v1/messages"
@@ -17,6 +19,21 @@ defmodule Claudex.Tracing.AttributesTest do
     on_exit(fn -> Application.delete_env(:claudex, :trace_content) end)
 
     :ok
+  end
+
+  defp cut_at_first_argument(fixture) do
+    {sse_events, _decoder} = SSE.decode(SSE.new(), Fixtures.sse!(fixture))
+
+    sse_events
+    |> Enum.flat_map(fn sse_event ->
+      case Event.from_sse(sse_event) do
+        {:ok, event} -> [event]
+        :ignore -> []
+      end
+    end)
+    |> Enum.take_while(&(not match?(%Event.ContentBlockDelta{delta: {:input_json, _}}, &1)))
+    |> Enum.reduce(Accumulator.new(), &Accumulator.add(&2, &1))
+    |> Accumulator.message()
   end
 
   defp metadata(path, extra) do
@@ -207,6 +224,20 @@ defmodule Claudex.Tracing.AttributesTest do
       assert attributes["gen_ai.response.model"] == "claude-haiku-4-5-20251001"
       assert attributes["gen_ai.usage.input_tokens"] == 15
       assert attributes["gen_ai.response.finish_reasons"] == ["tool_use"]
+    end
+
+    test "records the call a reply cut off inside it, which the history leaves out" do
+      reply = cut_at_first_argument("tool_use_stream")
+
+      assert Message.to_param(reply).content == []
+
+      attributes = Attributes.reply(reply)
+
+      assert %{"tool_calls" => [%{"name" => "get_temperature"}]} =
+               JSON.decode!(attributes["gen_ai.completion"])
+
+      assert [%{"parts" => [%{"type" => "tool_call", "name" => "get_temperature"}]}] =
+               JSON.decode!(attributes["gen_ai.output.messages"])
     end
 
     test "a message with no usage yet records none" do

@@ -11,7 +11,7 @@ Thirteen of them were added in one commit, `88bf1b5` (2026-09-08,
 "test: replay recorded API payloads in the offline suite (#19)"); git history
 carries no earlier or later capture for any of those. The two MCP connector
 fixtures were recorded on 2026-09-17, `programmatic_tool_call_stream.sse`
-on 2026-10-09, and `toolset_tool_use.json` and `compaction_stream.sse` on 2026-10-10. A few fixtures embed
+on 2026-10-09, and `toolset_tool_use.json`, `compaction_stream.sse` and `tool_use_stream.sse` on 2026-10-10. A few fixtures embed
 their own `created_at`, which is the request's real timestamp rather than a
 guess; the rest carry no timestamp of their own, so the commit date is the
 only dated record of when they entered the repo. Every one of those names `claude-haiku-4-5-20251001` as `model` (or, for the
@@ -40,6 +40,7 @@ resolving to `claude-haiku-4-5` at the time of capture. `server_tools.json` is
 | `programmatic_tool_call_stream.sse` | `POST /v1/messages` (`stream: true`), the turn after a `tool_result` for a call made from `code_execution_20260120` | `live/streaming_live_test.exs` — "a programmatic tool call carried by message_start reassembles into the message" | 2026-10-09, recorded for the call `message_start` carries |
 | `toolset_tool_use.json` | `POST /v1/messages`, with the `computer_toolset_20260801` tool | `live/tools_live_test.exs` — "a toolset call goes back with its toolset_name and is answered" | 2026-10-10, recorded for the `toolset_name` a member call carries |
 | `compaction_stream.sse` | `POST /v1/messages` (`stream: true`), with `compact_20260112` and `pause_after_compaction` | `live/streaming_live_test.exs` — "a streamed compaction keeps its summary, and the next request is compacted" | 2026-10-10, recorded for the summary a `compaction_delta` carries |
+| `tool_use_stream.sse` | `POST /v1/messages` (`stream: true`), with `tools` and a forced `tool_choice` | `live/tools_live_test.exs` — "a reply cut off inside a tool call goes back without the call and is accepted" | 2026-10-10, recorded for a call cut off part-way |
 
 "Commit date only" means the fixture carries no timestamp of its own; the
 earliest and only record of when it was captured is `88bf1b5`'s commit date,

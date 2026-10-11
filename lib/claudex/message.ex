@@ -21,6 +21,9 @@ defmodule Claudex.Message do
     "refusal" => :refusal
   }
 
+  @unfinished_stops [:refusal, :truncated, :unknown]
+  @calls [ContentBlock.ToolUse, ContentBlock.ServerToolUse, ContentBlock.MCPToolUse]
+
   @derive {Inspect, except: [:raw]}
   defstruct [
     :raw,
@@ -90,6 +93,10 @@ defmodule Claudex.Message do
   never signed, or a text block that never got a word. The API rejects both, so
   they're left out, and the rest of the reply goes back as it arrived.
 
+  A reply that stopped as `:refusal`, `:truncated` or `:unknown` (see `stop/1`)
+  also goes back without the tool calls it holds no result for. Nothing will
+  answer them, and a call left unanswered fails the request after it.
+
   A message you built yourself is passed through, with any content blocks in it
   converted too — so `user/1` and friends can take Claudex structs as content.
   Those blocks are filtered the same way. A block you wrote as a map is sent as
@@ -98,9 +105,17 @@ defmodule Claudex.Message do
   """
   @spec to_param(t() | map()) :: map()
   def to_param(%__MODULE__{} = message) do
+    unanswered = unanswered_calls(stop(message), message.content)
+
     %{
       role: message.role,
-      content: for(block <- message.content, sendable?(block), do: ContentBlock.to_param(block))
+      content:
+        for(
+          block <- message.content,
+          sendable?(block),
+          not unanswered?(block, unanswered),
+          do: ContentBlock.to_param(block)
+        )
     }
   end
 
@@ -288,7 +303,7 @@ defmodule Claudex.Message do
   must not be run: what Claude was part-way through asking for is as
   unfinished as the sentence before it, and results for a call it never
   confirmed cannot be replayed. `Claudex.ToolRunner` stops on all three for
-  that reason.
+  that reason, and `to_param/1` leaves those calls out of the history.
 
   Takes the reason on its own as readily as a message, since an app that
   persists its turns asks this of a database column rather than a struct.
@@ -305,6 +320,23 @@ defmodule Claudex.Message do
   # A map is sent as written, so only decoded blocks are filtered
   defp sendable?(block) when is_struct(block), do: ContentBlock.replayable?(block)
   defp sendable?(_map), do: true
+
+  defp unanswered_calls(stop, content) when stop in @unfinished_stops do
+    answered = for %{tool_use_id: id} <- content, into: MapSet.new(), do: id
+
+    for %call{id: id} <- content,
+        call in @calls,
+        not MapSet.member?(answered, id),
+        into: MapSet.new(),
+        do: id
+  end
+
+  defp unanswered_calls(_stop, _content), do: MapSet.new()
+
+  defp unanswered?(%call{id: id}, unanswered) when call in @calls,
+    do: MapSet.member?(unanswered, id)
+
+  defp unanswered?(_block, _unanswered), do: false
 
   defp blank_content?(blocks) when is_list(blocks), do: Enum.all?(blocks, &blank_block?/1)
   defp blank_content?(text) when is_binary(text), do: text == ""

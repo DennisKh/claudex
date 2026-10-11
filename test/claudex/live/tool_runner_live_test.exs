@@ -370,6 +370,44 @@ defmodule Claudex.Live.ToolRunnerTest do
     end
   end
 
+  test "a run resumed after a halt goes on in the container it halted in", %{client: client} do
+    prompt =
+      "Do these steps in order. 1. With code execution, write the text zebra-42 to " <>
+        "/tmp/secret.txt. 2. Only once the file is written, call the checkpoint tool. " <>
+        "3. After it answers, print the file with code execution and reply with exactly " <>
+        "what it printed, or MISSING if the file doesn't exist."
+
+    params = %{
+      model: @model,
+      max_tokens: 1024,
+      tools: [Checkpoint, %{type: "code_execution_20260120", name: "code_execution"}],
+      messages: [Message.user(prompt)]
+    }
+
+    {:ok, halted} =
+      ToolRunner.run(client, params, before_call: fn _call -> {:halt, :awaiting_approval} end)
+
+    assert %Turn{stop: :awaiting_approval, tool_uses: [%{name: "checkpoint"}]} = halted
+    assert %{"id" => container} = halted.message.container
+
+    resumed =
+      client
+      |> ToolRunner.stream(
+        %{params | messages: halted.messages} |> Map.put(:container, container),
+        tool_results: halted.tool_results
+      )
+      |> Enum.to_list()
+
+    assert %Turn{stop: :completed} = last = List.last(resumed)
+
+    resumed_in = for %{message: %{container: %{"id" => id}}} <- resumed, do: id
+
+    assert [_one | _rest] = resumed_in
+    assert Enum.all?(resumed_in, &(&1 == container))
+
+    assert Message.text(last.message) =~ "zebra-42"
+  end
+
   describe "stream_to/3" do
     test "delivers a whole tool conversation to another process's mailbox", %{client: client} do
       {:ok, handle} =
