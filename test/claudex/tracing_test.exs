@@ -546,6 +546,8 @@ defmodule Claudex.TracingTest do
   end
 
   test "conversation/3 ends the span when its function raises" do
+    Application.put_env(:claudex, :trace_content, true)
+
     assert_raise RuntimeError, "boom", fn ->
       Tracing.conversation(@params, [session: "chat-raised"], fn -> raise "boom" end)
     end
@@ -1092,6 +1094,8 @@ defmodule Claudex.TracingTest do
   end
 
   test "a tool that fails marks its span, not only an attribute" do
+    Application.put_env(:claudex, :trace_content, true)
+
     replies = [
       %{
         message()
@@ -1255,6 +1259,8 @@ defmodule Claudex.TracingTest do
   end
 
   test "an exception in the work is recorded on the span and re-raised unchanged" do
+    Application.put_env(:claudex, :trace_content, true)
+
     assert_raise RuntimeError, "boom", fn ->
       Tracing.span(fn -> {"work", %{}} end, fn _span -> raise "boom" end)
     end
@@ -1268,5 +1274,98 @@ defmodule Claudex.TracingTest do
 
     assert recorded_attributes["exception.type"] == "RuntimeError"
     assert recorded_attributes["exception.message"] == "boom"
+  end
+
+  defmodule FailingTool do
+    use Claudex.Tool
+
+    @doc "Fails with the card number in its exception."
+    @tool true
+    @spec leak() :: integer()
+    def leak, do: raise(KeyError, key: :cvv, term: %{card: "4111-SECRET"})
+
+    @doc "Refuses, naming the card."
+    @tool true
+    @spec refuse() :: integer()
+    def refuse, do: raise(Claudex.Tool.Error, "card 4111-SECRET is blocked")
+
+    @doc "Throws the card."
+    @tool true
+    @spec toss() :: integer()
+    def toss, do: throw({:card, "4111-SECRET"})
+
+    @doc "Exits with the card."
+    @tool true
+    @spec quit() :: integer()
+    def quit, do: exit({:card, "4111-SECRET"})
+  end
+
+  defmodule Matcher do
+    @moduledoc false
+    def check(:ok), do: :ok
+  end
+
+  test "with content off, a tool that raises marks its span with the exception type only" do
+    assert {:error, _error} = Tool.call(FailingTool, "leak", %{})
+
+    [tool] = named(collect_spans([]), "execute_tool leak")
+    assert span(tool, :status) == {:status, :error, "KeyError"}
+  end
+
+  test "with content off, a refused, thrown or exited tool marks its span with the kind of failure" do
+    for name <- ["refuse", "toss", "quit"], do: Tool.call(FailingTool, name, %{})
+
+    spans = collect_spans([])
+
+    assert [refused] = named(spans, "execute_tool refuse")
+    assert span(refused, :status) == {:status, :error, "tool_refused"}
+    assert [thrown] = named(spans, "execute_tool toss")
+    assert span(thrown, :status) == {:status, :error, "throw"}
+    assert [exited] = named(spans, "execute_tool quit")
+    assert span(exited, :status) == {:status, :error, "exit"}
+  end
+
+  test "with content off, an exception in the work records its type and a stacktrace without arguments" do
+    assert_raise FunctionClauseError, fn ->
+      Tracing.span(fn -> {"work", %{}} end, fn _span ->
+        Matcher.check(Enum.random(["4111-SECRET"]))
+      end)
+    end
+
+    assert_receive {:span, recorded}, 2_000
+
+    assert span(recorded, :status) == {:status, :error, "FunctionClauseError"}
+    assert {:events, _count, _limit, _type, _dropped, [event]} = span(recorded, :events)
+    {:event, _time, :exception, {:attributes, _n, _t, _d, recorded_attributes}} = event
+
+    assert recorded_attributes["exception.type"] == "FunctionClauseError"
+    refute Map.has_key?(recorded_attributes, "exception.message")
+    assert recorded_attributes["exception.stacktrace"] =~ "Matcher.check/1"
+    refute recorded_attributes["exception.stacktrace"] =~ "SECRET"
+  end
+
+  test "with content on, an exception's stacktrace keeps the arguments" do
+    Application.put_env(:claudex, :trace_content, true)
+
+    assert_raise FunctionClauseError, fn ->
+      Tracing.span(fn -> {"work", %{}} end, fn _span ->
+        Matcher.check(Enum.random(["4111-SECRET"]))
+      end)
+    end
+
+    assert_receive {:span, recorded}, 2_000
+    assert {:events, _count, _limit, _type, _dropped, [event]} = span(recorded, :events)
+    {:event, _time, :exception, {:attributes, _n, _t, _d, recorded_attributes}} = event
+
+    assert recorded_attributes["exception.stacktrace"] =~ "4111-SECRET"
+  end
+
+  test "with content off, a throw in the work marks the span with its kind only" do
+    assert catch_throw(
+             Tracing.span(fn -> {"work", %{}} end, fn _span -> throw({:card, "4111-SECRET"}) end)
+           ) == {:card, "4111-SECRET"}
+
+    assert_receive {:span, recorded}, 2_000
+    assert span(recorded, :status) == {:status, :error, "throw"}
   end
 end

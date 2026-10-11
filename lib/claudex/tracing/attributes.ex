@@ -17,6 +17,7 @@ defmodule Claudex.Tracing.Attributes do
   """
 
   alias Claudex.{ContentBlock, Message, Tracing}
+  alias Claudex.Tool.CallError
   alias Claudex.Tracing.Messages
 
   @system "anthropic"
@@ -164,11 +165,16 @@ defmodule Claudex.Tracing.Attributes do
   Returns the error a failed tool call puts on its span, or nil when it worked.
 
   A tool that refuses or breaks returns rather than raising, so nothing marks
-  the span and a backend's error filter passes over it.
+  the span and a backend's error filter passes over it. The failure's message
+  is content, so with `trace_content` off the error names only the kind of
+  failure: the exception's module, `throw`, `exit`, or the
+  `Claudex.Tool.CallError` type.
   """
   @spec tool_error(term()) :: String.t() | nil
-  def tool_error({:error, %{message: message}}), do: message
-  def tool_error({:error, reason}), do: inspect(reason)
+  def tool_error({:error, reason}) do
+    if Tracing.trace_content?(), do: failure_message(reason), else: failure_kind(reason)
+  end
+
   def tool_error(_result), do: nil
 
   @doc "Builds the attributes recording how a tool call turned out and what it returned."
@@ -300,6 +306,18 @@ defmodule Claudex.Tracing.Attributes do
   catch
     _kind, _reason -> inspect(content)
   end
+
+  defp failure_message(%{message: message}), do: message
+  defp failure_message(reason), do: inspect(reason)
+
+  defp failure_kind(%CallError{type: :tool_raised, details: %{exception: module}}),
+    do: inspect(module)
+
+  defp failure_kind(%CallError{type: :tool_raised, details: %{kind: kind}}),
+    do: Atom.to_string(kind)
+
+  defp failure_kind(%CallError{type: type}), do: Atom.to_string(type)
+  defp failure_kind(_reason), do: "error"
 
   defp returned({:ok, value}), do: value
   defp returned({:error, %{message: message}}), do: message
