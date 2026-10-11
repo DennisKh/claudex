@@ -16,7 +16,7 @@ defmodule Claudex.Tracing.Attributes do
   says so, which is why the shapers are passed in unapplied.
   """
 
-  alias Claudex.{Message, Tracing}
+  alias Claudex.{ContentBlock, Message, Tracing}
   alias Claudex.Tracing.Messages
 
   @system "anthropic"
@@ -238,7 +238,7 @@ defmodule Claudex.Tracing.Attributes do
 
   defp put_reply_content(attributes, message) do
     if Tracing.trace_content?() do
-      content = Message.to_param(message).content
+      content = Enum.map(message.content, &ContentBlock.to_param/1)
 
       attributes
       |> put_content("gen_ai.output.messages", fn -> Messages.output(content) end)
