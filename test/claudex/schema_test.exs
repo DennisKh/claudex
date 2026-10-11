@@ -346,3 +346,119 @@ defmodule Claudex.SchemaTest do
     end
   end
 end
+
+defmodule Claudex.SchemaDependencyTest do
+  @moduledoc """
+  A schema built at compile time is stale once a struct it came from changes,
+  unless the module holding it depends on that struct at compile time. Mix
+  recompiles a module when one it requires changes, so these watch for the
+  `require` the compiler records. The tracer option is global to the VM, so
+  this module doesn't run alongside the async tests.
+  """
+
+  use ExUnit.Case, async: false
+
+  defmodule Tracer do
+    @moduledoc false
+    def trace({:require, _meta, required, _opts}, env) do
+      send(self(), {:required, env.module, required})
+      :ok
+    end
+
+    def trace(_event, _env), do: :ok
+  end
+
+  setup do
+    tracers = Code.get_compiler_option(:tracers)
+    Code.put_compiler_option(:tracers, [Tracer | tracers])
+    on_exit(fn -> Code.put_compiler_option(:tracers, tracers) end)
+  end
+
+  defp compile(source) do
+    prefix = "Claudex.SchemaDependencyTest.M#{System.unique_integer([:positive])}"
+    source |> String.replace("PREFIX", prefix) |> Code.compile_string()
+    prefix
+  end
+
+  defp required(prefix, name) do
+    module = Module.concat([prefix, name])
+
+    receive_required(module, [])
+  end
+
+  defp receive_required(module, acc) do
+    receive do
+      {:required, ^module, required} -> receive_required(module, [required | acc])
+    after
+      0 -> acc
+    end
+  end
+
+  test "a tool depends at compile time on the struct its schema came from, which depends on its own" do
+    prefix =
+      compile("""
+      defmodule PREFIX.Reporter do
+        use Claudex.Schema
+        defstruct [:name]
+        @type t :: %__MODULE__{name: String.t()}
+      end
+
+      defmodule PREFIX.Ticket do
+        use Claudex.Schema
+        defstruct [:title, :reporter]
+        @type t :: %__MODULE__{title: String.t(), reporter: PREFIX.Reporter.t()}
+      end
+
+      defmodule PREFIX.Tools do
+        use Claudex.Tool
+
+        @doc "Files a ticket."
+        @tool true
+        @spec file(PREFIX.Ticket.t()) :: String.t()
+        def file(_ticket), do: "filed"
+      end
+      """)
+
+    ticket = Module.concat([prefix, Ticket])
+    reporter = Module.concat([prefix, Reporter])
+
+    assert ticket in required(prefix, Tools)
+    assert reporter in required(prefix, Ticket)
+  end
+
+  test "a tool depends at compile time on an Ecto schema and the embeds inside it" do
+    prefix =
+      compile("""
+      defmodule PREFIX.Meta do
+        use Ecto.Schema
+
+        embedded_schema do
+          field(:source, :string)
+        end
+      end
+
+      defmodule PREFIX.Post do
+        use Ecto.Schema
+
+        embedded_schema do
+          field(:title, :string)
+          embeds_one(:meta, PREFIX.Meta)
+        end
+      end
+
+      defmodule PREFIX.Tools do
+        use Claudex.Tool
+
+        @doc "Publishes a post."
+        @tool true
+        @spec publish(PREFIX.Post.t()) :: String.t()
+        def publish(_post), do: "published"
+      end
+      """)
+
+    required = required(prefix, Tools)
+
+    assert Module.concat([prefix, Post]) in required
+    assert Module.concat([prefix, Meta]) in required
+  end
+end

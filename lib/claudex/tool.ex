@@ -164,7 +164,7 @@ defmodule Claudex.Tool do
 
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
-  alias Claudex.Tool.Schema.Strict
+  alias Claudex.Tool.Schema.{Strict, StructExpansion}
   alias Claudex.Tracing
   alias Claudex.Tracing.Attributes
 
@@ -214,6 +214,8 @@ defmodule Claudex.Tool do
     # function they meant to write. `Claudex.Tool.list/1` and
     # `Claudex.Tool.call/3` are the public way in; these stay out of the docs.
     quote do
+      unquote_splicing(StructExpansion.requires(env.module))
+
       @doc false
       @spec __tools__() :: [map()]
       def __tools__, do: unquote(tools)

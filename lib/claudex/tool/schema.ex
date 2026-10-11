@@ -32,6 +32,10 @@ defmodule Claudex.Tool.Schema do
     * `current_module` — which module a *bare* `t()` (no module prefix)
       refers to right now. A struct's own `@type t` can reference itself
       as plain `t()`, not `Mod.t()` — this is how that resolves
+    * `dependent` — the module being compiled, when the schema is built at
+      compile time. Every struct expanded for it is recorded on it, so
+      `Claudex.Tool.Schema.StructExpansion.requires/1` can make it depend on
+      them
     * `escape_hatch` — the sentence a `Claudex.Tool.SchemaError` ends with,
       naming the way out of an unmappable type. It differs per caller, so it
       travels with the context; `escape_hatch/1` has the two in use here
@@ -40,6 +44,7 @@ defmodule Claudex.Tool.Schema do
           :visited => [module()],
           :env => Macro.Env.t(),
           :current_module => module(),
+          optional(:dependent) => module(),
           optional(:escape_hatch) => String.t()
         }
 
@@ -229,7 +234,13 @@ defmodule Claudex.Tool.Schema do
   end
 
   defp new_context(env) do
-    %{visited: [], env: env, current_module: env.module, escape_hatch: @tool_escape_hatch}
+    %{
+      visited: [],
+      env: env,
+      current_module: env.module,
+      dependent: env.module,
+      escape_hatch: @tool_escape_hatch
+    }
   end
 
   defp module_ref(mod, _env) when is_atom(mod), do: mod
