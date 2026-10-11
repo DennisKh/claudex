@@ -48,7 +48,11 @@ defmodule Claudex.Tool do
   Pass a map instead of `true` for options:
 
     * `:args` - a description per argument, merged into the inferred schema
-    * `:strict` - sets `strict: true` on the tool definition
+    * `:strict` - sets `strict: true` on the tool definition. Strict mode
+      takes the same schema subset as `Claudex.OutputFormat`, so an inferred
+      schema is fitted to it the same way: the `minimum` a
+      `non_neg_integer()` implies moves into the argument's description.
+      An `:args_schema` is sent as written
     * `:args_schema` - use this JSON schema for the properties instead of
       inferring one from `@spec`. Takes full priority: when it's set, the
       `@spec` is never even inspected, so it's also the way out of a type
@@ -136,10 +140,14 @@ defmodule Claudex.Tool do
 
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
+  alias Claudex.Tool.Schema.Strict
   alias Claudex.Tracing
   alias Claudex.Tracing.Attributes
 
   @tool_opts [:args, :args_schema, :strict]
+  @strict_unexpressible "A strict tool needs a concrete type for every argument, and `any()`, " <>
+                          "`term()` and a struct that refers to itself have none. Give it one, " <>
+                          "or pass args_schema: in the @tool options to describe it explicitly"
 
   defmacro __using__(_opts) do
     quote do
@@ -375,12 +383,16 @@ defmodule Claudex.Tool do
     {properties, params} = schema_for(opts, name, args, module, env)
     properties = describe_args(properties, opts, name)
 
-    input_schema = %{
-      type: "object",
-      properties: properties,
-      required: required_params(params, properties),
-      additionalProperties: false
-    }
+    input_schema =
+      fit_strict(
+        %{
+          type: "object",
+          properties: properties,
+          required: required_params(params, properties),
+          additionalProperties: false
+        },
+        opts
+      )
 
     tool = %{
       name: Atom.to_string(name),
@@ -414,6 +426,11 @@ defmodule Claudex.Tool do
     built = Schema.build(name, args, Module.get_attribute(module, :spec), env)
     {built.properties, built.params}
   end
+
+  defp fit_strict(input_schema, %{strict: true} = opts) when not is_map_key(opts, :args_schema),
+    do: Strict.fit(input_schema, @strict_unexpressible)
+
+  defp fit_strict(input_schema, _opts), do: input_schema
 
   defp normalize_opts(true), do: %{}
 

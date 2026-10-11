@@ -110,6 +110,7 @@ defmodule Claudex.MixProject do
           Claudex.Tracing.Attributes,
           Claudex.Tracing.Messages,
           Claudex.Tool.Schema,
+          Claudex.Tool.Schema.Strict,
           Claudex.Tool.Schema.StructExpansion,
           Claudex.Tool.Dispatch,
           Claudex.Stream.SSE,

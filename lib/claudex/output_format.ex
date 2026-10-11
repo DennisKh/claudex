@@ -62,11 +62,11 @@ defmodule Claudex.OutputFormat do
   referenced.
   """
 
-  alias Claudex.Tool.Schema.StructExpansion
+  alias Claudex.Tool.Schema.{Strict, StructExpansion}
   alias Claudex.Tool.SchemaError
 
-  @string_formats ~w(date-time time date duration email hostname uri ipv4 ipv6 uuid)
-  @carried [:enum, :const, :description, :title]
+  @unexpressible "An output format needs a concrete type for every field, and `any()`, " <>
+                   "`term()` and a struct that refers to itself have none"
 
   @doc """
   Returns the `output_config.format` value for a struct module.
@@ -79,7 +79,7 @@ defmodule Claudex.OutputFormat do
   """
   @spec json_schema(module()) :: map()
   def json_schema(module) when is_atom(module) do
-    %{type: "json_schema", schema: module |> expand() |> strict([])}
+    %{type: "json_schema", schema: module |> expand() |> Strict.fit(@unexpressible)}
   end
 
   defp expand(module) do
@@ -129,91 +129,5 @@ defmodule Claudex.OutputFormat do
       {:ok, types} -> Enum.any?(types, &match?({:type, {:t, _ast, []}}, &1))
       :error -> false
     end
-  end
-
-  defp strict(schema, path) do
-    {kept, used} = supported(schema, path)
-    kept = Map.merge(kept, Map.take(schema, @carried))
-
-    if kept == %{}, do: raise(SchemaError, message: unexpressible(path))
-
-    describe(kept, Map.drop(schema, used ++ @carried))
-  end
-
-  defp supported(%{anyOf: variants}, path) do
-    {%{anyOf: Enum.map(variants, &strict(&1, path))}, [:anyOf]}
-  end
-
-  defp supported(%{type: "object"} = schema, path) do
-    properties =
-      for {name, property} <- Map.get(schema, :properties, %{}),
-          into: %{},
-          do: {name, strict(property, path ++ [name])}
-
-    object = %{type: "object", properties: properties, additionalProperties: false}
-
-    object =
-      case schema do
-        %{required: required} -> Map.put(object, :required, required)
-        _no_required -> object
-      end
-
-    # An Ecto `{:map, inner}` field carries its value schema here, and the API
-    # takes only `false`, so leaving it unused sends it to the description.
-    used =
-      case schema do
-        %{additionalProperties: value} when is_map(value) -> [:type, :properties, :required]
-        _closed -> [:type, :properties, :additionalProperties, :required]
-      end
-
-    {object, used}
-  end
-
-  defp supported(%{type: "array"} = schema, path) do
-    array =
-      case schema do
-        %{items: items} -> %{type: "array", items: strict(items, path)}
-        _no_items -> %{type: "array"}
-      end
-
-    # 0 and 1 are the only counts the API takes, and 1 is what a
-    # nonempty_list() implies.
-    case schema do
-      %{minItems: count} when count in [0, 1] ->
-        {Map.put(array, :minItems, count), [:type, :items, :minItems]}
-
-      _other_count ->
-        {array, [:type, :items]}
-    end
-  end
-
-  defp supported(%{type: "string"} = schema, _path) do
-    case schema do
-      %{format: format} when format in @string_formats ->
-        {%{type: "string", format: format}, [:type, :format]}
-
-      _unsupported_format ->
-        {%{type: "string"}, [:type]}
-    end
-  end
-
-  defp supported(%{type: type}, _path), do: {%{type: type}, [:type]}
-
-  defp supported(_schema, _path), do: {%{}, []}
-
-  defp describe(kept, unsupported) when unsupported == %{}, do: kept
-
-  defp describe(kept, unsupported) do
-    hints = Enum.map_join(unsupported, ", ", fn {key, value} -> "#{key}: #{inspect(value)}" end)
-
-    Map.update(kept, :description, "{#{hints}}", &(&1 <> "\n\n{#{hints}}"))
-  end
-
-  defp unexpressible([]), do: "this struct has no type the API can be told about"
-
-  defp unexpressible(path) do
-    "`#{Enum.join(path, ".")}` has no type the API can be told about. An output format " <>
-      "needs a concrete type for every field, and `any()`, `term()` and a struct that " <>
-      "refers to itself have none"
   end
 end

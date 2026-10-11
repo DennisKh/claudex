@@ -37,6 +37,32 @@ defmodule Claudex.Live.ToolsTest do
     end
   end
 
+  defmodule StrictTool do
+    @moduledoc false
+    use Tool
+
+    @doc "Repeats a word a number of times."
+    @tool %{strict: true}
+    @spec repeat(String.t(), non_neg_integer()) :: String.t()
+    def repeat(word, times), do: String.duplicate(word, times)
+  end
+
+  test "a strict tool with a bounded integer is accepted and called", %{client: client} do
+    assert {:ok, message} =
+             Messages.create(client, %{
+               model: @model,
+               max_tokens: 256,
+               tools: StrictTool,
+               tool_choice: %{type: "tool", name: "repeat"},
+               messages: [Message.user("Repeat the word echo three times.")]
+             })
+
+    assert [%{name: "repeat", input: %{"word" => _word, "times" => times}}] =
+             Message.tool_uses(message)
+
+    assert is_integer(times) and times >= 0
+  end
+
   test "round-trips a tool call: request, dispatch, and follow-up", %{client: client} do
     tools = Tool.list(WeatherTool)
     messages = [Message.user("What is the temperature in Paris?")]
