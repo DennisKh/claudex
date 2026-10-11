@@ -266,6 +266,49 @@ defmodule Claudex.ToolTest do
       end
     end
 
+    test "a strict tool moves what strict mode rejects into the argument's description" do
+      [{module, _bin}] =
+        define(
+          "%{strict: true}",
+          "@spec a(non_neg_integer(), map()) :: :ok\ndef a(_count, _opts), do: :ok"
+        )
+
+      [tool] = module.__tools__()
+
+      assert tool.input_schema.properties["count"] == %{
+               type: "integer",
+               description: "{minimum: 0}"
+             }
+
+      assert tool.input_schema.properties["opts"].additionalProperties == false
+    end
+
+    test "a strict tool with an argument of no concrete type names it at compile time" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/`value` has no type the API can be told about/,
+                   fn ->
+                     define("%{strict: true}", "@spec a(any()) :: :ok\ndef a(_value), do: :ok")
+                   end
+    end
+
+    test "a tool that isn't strict keeps the bounds its @spec implies" do
+      [{module, _bin}] =
+        define("true", "@spec a(non_neg_integer()) :: :ok\ndef a(_count), do: :ok")
+
+      [tool] = module.__tools__()
+
+      assert tool.input_schema.properties["count"] == %{type: "integer", minimum: 0}
+    end
+
+    test "a strict tool's args_schema is sent as written" do
+      [{module, _bin}] =
+        define(~s(%{strict: true, args_schema: %{"n" => %{type: "integer", minimum: 0}}}))
+
+      [tool] = module.__tools__()
+
+      assert tool.input_schema.properties["n"] == %{type: "integer", minimum: 0}
+    end
+
     test "valid options still compile" do
       assert [{_module, _bin}] = define("%{strict: true}")
       assert [{_module, _bin}] = define(~s(%{args_schema: %{"a" => %{type: "string"}}}))
