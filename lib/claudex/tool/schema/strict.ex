@@ -1,11 +1,7 @@
 defmodule Claudex.Tool.Schema.Strict do
   @moduledoc """
   Fits a JSON schema to the subset the API takes for structured outputs and
-  strict tools.
-
-  Every object is closed with `additionalProperties: false`, and whatever the
-  subset rejects, such as the `minimum: 0` that a `non_neg_integer()` implies,
-  moves into that property's description, where the model still reads it.
+  strict tools, as `Claudex.OutputFormat` describes.
   """
 
   alias Claudex.Tool.SchemaError
