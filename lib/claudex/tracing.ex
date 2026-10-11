@@ -158,7 +158,9 @@ defmodule Claudex.Tracing do
   With it on, the conversation span carries the question the run started with
   and the answer it ended on, a request span carries the messages and the
   reply, and a tool span carries the arguments it was called with and what it
-  returned. A trace's own input and output are the run's, which is what a
+  returned. A failed span's error carries the failure's message and the
+  arguments in its stacktrace, where with content off it names only the kind of
+  failure. A trace's own input and output are the run's, which is what a
   backend shows on a session or in a list of traces.
   Everything else is recorded either way: model, token counts, latency, stop
   reason and tool names, which is why a trace is useful without content.
@@ -370,7 +372,8 @@ defmodule Claudex.Tracing do
   is true, so building the attributes costs nothing while tracing is off.
   `fun` is given the span, or `:untraced` when there is none, and whatever it
   returns is returned here. An exception is recorded on the span and re-raised
-  unchanged.
+  unchanged. With `trace_content` off, the span records the exception's type
+  and a stacktrace without arguments, not its message.
   """
   @spec span((-> {String.t(), map()}), (term() -> result)) :: result when result: term()
   def span(describe, fun) when is_function(describe, 0) and is_function(fun, 1) do
@@ -505,7 +508,7 @@ defmodule Claudex.Tracing do
         reraise exception, __STACKTRACE__
     catch
       kind, reason ->
-        fail(span_ctx, "#{kind}: #{inspect(reason)}")
+        fail(span_ctx, thrown(kind, reason))
         :erlang.raise(kind, reason, __STACKTRACE__)
     after
       stop(span_ctx)
@@ -612,13 +615,10 @@ defmodule Claudex.Tracing do
   defp record_exception(:untraced, _exception, _stacktrace), do: :ok
 
   defp record_exception({span_ctx, _parent}, exception, stacktrace) do
-    :otel_span.add_event(span_ctx, :exception, %{
-      "exception.type" => inspect(exception.__struct__),
-      "exception.message" => Exception.message(exception),
-      "exception.stacktrace" => Exception.format_stacktrace(stacktrace)
-    })
+    {attributes, status} = exception_event(exception, stacktrace, trace_content?())
 
-    :otel_span.set_status(span_ctx, :opentelemetry.status(:error, Exception.message(exception)))
+    :otel_span.add_event(span_ctx, :exception, attributes)
+    :otel_span.set_status(span_ctx, :opentelemetry.status(:error, status))
 
     :ok
   rescue
@@ -626,6 +626,40 @@ defmodule Claudex.Tracing do
   catch
     _kind, _reason -> :ok
   end
+
+  defp exception_event(exception, stacktrace, true = _content?) do
+    message = Exception.message(exception)
+
+    attributes = %{
+      "exception.type" => inspect(exception.__struct__),
+      "exception.message" => message,
+      "exception.stacktrace" => Exception.format_stacktrace(stacktrace)
+    }
+
+    {attributes, message}
+  end
+
+  defp exception_event(exception, stacktrace, false = _content?) do
+    type = inspect(exception.__struct__)
+
+    attributes = %{
+      "exception.type" => type,
+      "exception.stacktrace" =>
+        stacktrace |> Enum.map(&without_args/1) |> Exception.format_stacktrace()
+    }
+
+    {attributes, type}
+  end
+
+  defp thrown(kind, reason) do
+    if trace_content?(), do: "#{kind}: #{inspect(reason)}", else: Atom.to_string(kind)
+  end
+
+  defp without_args({module, function, args, location}) when is_list(args),
+    do: {module, function, length(args), location}
+
+  defp without_args({fun, args, location}) when is_list(args), do: {fun, length(args), location}
+  defp without_args(entry), do: entry
 
   defp fail(:untraced, _message), do: :ok
 

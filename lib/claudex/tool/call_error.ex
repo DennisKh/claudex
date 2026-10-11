@@ -23,7 +23,9 @@ defmodule Claudex.Tool.CallError do
     * `:unknown_tool` — no tool of that name is registered on the module
     * `:missing_args` — a required argument wasn't in the input
     * `:tool_refused` — the tool raised `Claudex.Tool.Error`, declining on purpose
-    * `:tool_raised` — anything else: another exception, a `throw`, or an `exit`
+    * `:tool_raised` — anything else: another exception, a `throw`, or an `exit`.
+      `details` has `:kind` (`:error`, `:throw` or `:exit`), and `:exception`,
+      the exception's module, when the kind is `:error`.
   """
   @type type :: :unknown_tool | :missing_args | :tool_refused | :tool_raised
 
@@ -50,6 +52,8 @@ defmodule Claudex.Tool.CallError do
   def tool_refused(message), do: %__MODULE__{type: :tool_refused, message: message}
 
   @doc false
-  @spec tool_raised(String.t()) :: t()
-  def tool_raised(message), do: %__MODULE__{type: :tool_raised, message: message}
+  @spec tool_raised(String.t(), map()) :: t()
+  def tool_raised(message, details) do
+    %__MODULE__{type: :tool_raised, message: message, details: details}
+  end
 end

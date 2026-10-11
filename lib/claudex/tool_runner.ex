@@ -1,5 +1,6 @@
 defmodule Claudex.ToolRunner do
   @default_max_turns 20
+  @failure_text_max 4096
   @reserved_stops [nil, true, false, :completed, :truncated, :refusal, :unknown, :max_turns]
 
   @moduledoc """
@@ -70,7 +71,8 @@ defmodule Claudex.ToolRunner do
       end
 
   Any other exception becomes an error result too, with the exception type in
-  the content and a warning in your logs — a bug in a tool shouldn't read to
+  the content, cut to #{@failure_text_max} characters, and the whole message in
+  a warning in your logs — a bug in a tool shouldn't read to
   Claude like a policy decision, and shouldn't end the conversation either.
 
   Whatever a tool returns is the result: text is sent as-is, anything else is
@@ -773,7 +775,7 @@ defmodule Claudex.ToolRunner do
   defp describe(tool_use, %CallError{type: :tool_raised, message: message}) do
     Logger.warning("Claudex tool #{tool_use.name} failed: #{message}")
 
-    "the tool failed: #{message}"
+    String.slice("the tool failed: #{message}", 0, @failure_text_max)
   end
 
   defp describe(_tool_use, %CallError{message: message}), do: message

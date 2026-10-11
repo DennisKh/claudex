@@ -1,6 +1,8 @@
 defmodule Claudex.ToolRunnerTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Claudex.{Client, ContentBlock, Error, Message, ToolRunner}
   alias Claudex.Stream.{Event, Handle}
   alias Claudex.TestSupport.{Fixtures, MessageStream}
@@ -356,6 +358,52 @@ defmodule Claudex.ToolRunnerTest do
     assert content =~ "the tool failed:"
     assert content =~ "KeyError"
     assert content =~ "key :missing not found"
+  end
+
+  defmodule Verbose do
+    use Claudex.Tool
+
+    @doc "Fails with a very long message."
+    @tool true
+    @spec crash() :: integer()
+    def crash, do: raise(String.duplicate("x", 10_000))
+
+    @doc "Refuses with a very long message."
+    @tool true
+    @spec refuse() :: integer()
+    def refuse, do: raise(Claudex.Tool.Error, String.duplicate("x", 10_000))
+  end
+
+  test "an unexpected failure reaches Claude cut to 4096 characters, but not in the log" do
+    respond_with([
+      message([tool_use("crash", %{})], "tool_use"),
+      message([text("That tool is broken.")], "end_turn")
+    ])
+
+    log =
+      capture_log(fn ->
+        assert [first, _second] =
+                 client() |> ToolRunner.stream(%{@params | tools: Verbose}) |> Enum.to_list()
+
+        assert [%{content: content, is_error: true}] = first.tool_results
+        assert content =~ "the tool failed: RuntimeError"
+        assert String.length(content) == 4096
+      end)
+
+    assert log =~ String.duplicate("x", 5_000)
+  end
+
+  test "a refusal reaches Claude whole, however long" do
+    respond_with([
+      message([tool_use("refuse", %{})], "tool_use"),
+      message([text("Refused.")], "end_turn")
+    ])
+
+    assert [first, _second] =
+             client() |> ToolRunner.stream(%{@params | tools: Verbose}) |> Enum.to_list()
+
+    assert [%{content: content, is_error: true}] = first.tool_results
+    assert String.length(content) == 10_000
   end
 
   test "a tool_use naming an unknown tool becomes an error result, not a crash" do

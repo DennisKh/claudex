@@ -84,10 +84,13 @@ defmodule Claudex.Tool.Dispatch do
     exception ->
       # The type is part of the message: a KeyError from a bug in a tool has to
       # be distinguishable from a considered refusal when Claude reads it back.
-      {:error,
-       CallError.tool_raised("#{inspect(exception.__struct__)}: #{Exception.message(exception)}")}
+      message = "#{inspect(exception.__struct__)}: #{Exception.message(exception)}"
+      {:error, CallError.tool_raised(message, %{kind: :error, exception: exception.__struct__})}
   catch
-    :throw, value -> {:error, CallError.tool_raised("tool threw #{inspect(value)}")}
-    :exit, reason -> {:error, CallError.tool_raised("tool exited: #{inspect(reason)}")}
+    :throw, value ->
+      {:error, CallError.tool_raised("tool threw #{inspect(value)}", %{kind: :throw})}
+
+    :exit, reason ->
+      {:error, CallError.tool_raised("tool exited: #{inspect(reason)}", %{kind: :exit})}
   end
 end
