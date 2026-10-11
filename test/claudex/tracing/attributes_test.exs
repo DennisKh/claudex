@@ -167,6 +167,14 @@ defmodule Claudex.Tracing.AttributesTest do
       assert attributes["gen_ai.tool.call.result"] == "42 degrees"
     end
 
+    test "a struct result records only the fields its Jason encoder exposes" do
+      account = %Claudex.TestSupport.Account{name: "ann", password_hash: "hash"}
+
+      attributes = Attributes.tool_outcome(:ok, {:ok, account})
+
+      assert attributes["gen_ai.tool.call.result"] == ~s({"name":"ann"})
+    end
+
     test "content JSON cannot carry is described rather than raised over" do
       # A tool that reads a file hands back bytes. The attributes are built
       # outside every tracer guard, so raising here reaches the caller.

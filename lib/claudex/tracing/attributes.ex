@@ -294,7 +294,7 @@ defmodule Claudex.Tracing.Attributes do
   end
 
   defp encode(content) do
-    JSON.encode!(content)
+    Jason.encode!(content)
   rescue
     _not_encodable -> inspect(content)
   catch

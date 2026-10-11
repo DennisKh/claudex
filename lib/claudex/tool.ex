@@ -249,7 +249,7 @@ defmodule Claudex.Tool do
 
   `content` must be a string or a list of content blocks, per the Messages
   API — if your tool returns something else, encode it first
-  (`JSON.encode!/1` for structured data).
+  (`Jason.encode!/1` for structured data).
 
   `:is_error` in `opts` marks the result as a failure Claude should react to
   rather than an answer, and defaults to `false`.
