@@ -367,7 +367,27 @@ A failed call is still a 200, with an error object in `content` and its code lif
 
 If you'd rather drive the loop yourself, `Claudex.Tool.call/3` runs one tool and `Claudex.Tool.result/3` builds the block to send back.
 
-A struct or Ecto schema in a `@spec` (`@spec summarize(Ticket.t()) :: String.t()`) expands into a nested object schema automatically. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. See the `Claudex.Tool` and `Claudex.Tool.Schema.StructExpansion` module docs for the full picture, and `Claudex.OutputFormat` for the same mapping listed type by type.
+A struct in a `@spec` expands into a nested object schema built from its `@type t`. A struct of your own app declares `use Claudex.Schema`, and so does every struct of your app nested inside it:
+
+```elixir
+defmodule MyApp.Ticket do
+  use Claudex.Schema
+
+  defstruct [:title, :priority]
+  @type t :: %__MODULE__{title: String.t(), priority: :low | :high}
+end
+
+defmodule MyApp.Tools do
+  use Claudex.Tool
+
+  @doc "Files a ticket."
+  @tool true
+  @spec file_ticket(MyApp.Ticket.t()) :: String.t()
+  def file_ticket(ticket), do: ...
+end
+```
+
+`use Claudex.Schema` builds the schema while the struct compiles. Without it, a struct compiled in the same build as the tool raises `Claudex.Tool.SchemaError` at compile time, naming the struct. An Ecto schema doesn't need the line for its fields; `use Claudex.Schema, required: [...]` names the ones Claude must fill, since otherwise every field of one is optional. The function still receives the decoded JSON map, with string keys. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. `Claudex.Schema` says when a struct needs the line, and `Claudex.OutputFormat` lists what each type becomes.
 
 ### Tools on an MCP server
 
@@ -420,10 +440,12 @@ Data exchanged with an MCP server is not covered by zero data retention.
 
 ## Structured outputs
 
-`output_config.format` makes Claude answer with JSON, and Claudex derives the schema from a struct's `@type t`, the same way `:tools` reads a function's `@spec`:
+`output_config.format` makes Claude answer with JSON, and Claudex derives the schema from a struct's `@type t`, the same way `:tools` reads a function's `@spec`. The struct declares `use Claudex.Schema`, which builds the schema while it compiles:
 
 ```elixir
 defmodule MyApp.Ticket do
+  use Claudex.Schema
+
   defstruct [:id, :title, :priority, :tags]
 
   @type t :: %__MODULE__{
@@ -446,6 +468,10 @@ end
 ```
 
 `stop_reason` decides whether there is anything to decode: a reply cut short by `max_tokens`, or a refusal, is not the promised shape.
+
+Without `use Claudex.Schema`, the first request in a release raises `Claudex.Tool.SchemaError`.
+
+An Ecto schema works as an output format too, without the line. Ecto doesn't say which fields must be filled, so every field of one is optional unless `use Claudex.Schema, required: [...]` names them; see `Claudex.Schema`.
 
 The API takes a subset of JSON Schema, and Claudex fits the struct's schema to it. Every object is closed with `additionalProperties: false`, and a constraint the subset rejects, such as the `minimum: 0` a `non_neg_integer()` field implies, moves into that property's description where the model still reads it. A field typed `map()` becomes an object with no declared keys, since the API needs an object's keys named; give it a struct type to describe it. A field typed `any()`, and a struct that refers to itself, raise `Claudex.Tool.SchemaError`.
 

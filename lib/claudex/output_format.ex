@@ -12,6 +12,25 @@ defmodule Claudex.OutputFormat do
 
   The schema comes from the struct's `@type t`, the same way `:tools` reads a
   function's `@spec`, so `Claudex.Messages.create/2` takes the module itself.
+  The struct declares `use Claudex.Schema`, which builds that schema while
+  it compiles:
+
+      defmodule MyApp.Ticket do
+        use Claudex.Schema
+
+        defstruct [:title, :priority, :due]
+
+        @type t :: %__MODULE__{
+                title: String.t(),
+                priority: :low | :high,
+                due: Date.t() | nil
+              }
+      end
+
+  Without it, the first request in a release raises
+  `Claudex.Tool.SchemaError`. An Ecto schema doesn't need it except to name
+  its required fields, and `Claudex.Schema` says when a struct does.
+
   The reply is JSON text, which `Claudex.Message.text/1` returns for decoding.
   A reply cut short by `max_tokens`, or a refusal, is not the promised shape,
   so `stop_reason` says whether there is anything to decode.
@@ -50,9 +69,10 @@ defmodule Claudex.OutputFormat do
               due: Date.t() | nil
             }
 
-  A required field is one whose type doesn't include `nil`. An Ecto schema is
-  read through its own reflection instead, and Ecto doesn't say which fields
-  are `NOT NULL`, so nothing in one is ever required.
+  A required field is one whose type doesn't include `nil`. In an Ecto
+  schema, a required field is one named by
+  `use Claudex.Schema, required: [...]`, and without that list nothing in
+  one is required. See `Claudex.Schema`.
 
   A `map()` field has no keys to declare, and the API takes an object only with
   its keys named, so the model can fill it with `{}` and nothing else. A struct
@@ -106,28 +126,31 @@ defmodule Claudex.OutputFormat do
     end
   end
 
-  # A struct's schema is read from its compiled typespec, which `mix release`
-  # strips unless told not to. Without this the fields all come back untyped
-  # and the failure reads as a modelling mistake.
+  # A struct whose types can be read but hold no @type t would otherwise
+  # expand with every field unconstrained, which no output format can carry.
   defp readable!(module) do
-    struct? = Code.ensure_loaded?(module) and function_exported?(module, :__struct__, 0)
-    ecto? = function_exported?(module, :__schema__, 1)
-
-    if struct? and not ecto? and not declares_t?(module) do
+    if untyped_struct?(module) do
       raise SchemaError,
         message:
-          "can't read `#{inspect(module)}`'s `@type t`. An output format is built from it, " <>
-            "and this module either doesn't declare one or was compiled without typespecs: " <>
-            "`mix release` strips them unless it is given `strip_beams: [keep: [\"Dbgi\"]]`. " <>
-            "Build the schema where the types are readable instead: " <>
-            "`@format Claudex.OutputFormat.json_schema(#{inspect(module)})`"
+          "can't build an output format from `#{inspect(module)}`: it declares no `@type t`. " <>
+            "Add `@type t :: %__MODULE__{...}` and `use Claudex.Schema` to it"
     end
   end
 
+  defp untyped_struct?(module) do
+    Code.ensure_compiled(module) == {:module, module} and
+      function_exported?(module, :__struct__, 0) and
+      not function_exported?(module, :__json_schema__, 0) and
+      not function_exported?(module, :__schema__, 1) and
+      not declares_t?(module)
+  end
+
+  # Unreadable types count as declared here: StructExpansion raises for those
+  # with the message that names the fix.
   defp declares_t?(module) do
     case Code.Typespec.fetch_types(module) do
       {:ok, types} -> Enum.any?(types, &match?({:type, {:t, _ast, []}}, &1))
-      :error -> false
+      :error -> true
     end
   end
 end

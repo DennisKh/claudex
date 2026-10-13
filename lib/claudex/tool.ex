@@ -120,22 +120,46 @@ defmodule Claudex.Tool do
   read the same as leaving them bare. The property names come from the
   function's own parameters either way.
 
-  A struct type in a `@spec` — `Ticket.t()` for a plain `defstruct` with a
-  `@type t`, or for an Ecto schema — expands into a nested object schema
-  instead of an unconstrained one, recursively (an Ecto `embeds_one`/
-  `embeds_many` field included; `belongs_to`/`has_many`/`has_one` are
-  skipped, since they're not part of the data itself and expanding them
-  risks recursing through a relationship graph). This only shapes the
-  *schema* Claude sees — the argument your function actually receives is
-  still the plain decoded JSON map (string keys), never cast into a real
-  struct.
+  ## Structs as arguments
 
-  A `@spec` type Claudex genuinely can't map — an unsupported typespec
-  construct, or a `Mod.t()` that isn't a loaded struct or Ecto schema —
-  raises `Claudex.Tool.SchemaError` at compile time. Fix the spec, or pass
-  `:args_schema` to skip inference for that tool entirely. See
-  `Claudex.Tool.Schema.StructExpansion` for exactly what's supported, and
-  `Claudex.OutputFormat` for the same mapping listed type by type.
+  A struct type in a `@spec`, such as `Ticket.t()`, expands into a nested
+  object schema built from the struct's `@type t`. A struct of your own app
+  declares `use Claudex.Schema` for this, and so does every struct of your
+  app nested inside it:
+
+      defmodule MyApp.Ticket do
+        use Claudex.Schema
+
+        defstruct [:title, :priority]
+        @type t :: %__MODULE__{title: String.t(), priority: :low | :high}
+      end
+
+      defmodule MyApp.Tools do
+        use Claudex.Tool
+
+        @doc "Files a ticket."
+        @tool true
+        @spec file_ticket(MyApp.Ticket.t()) :: String.t()
+        def file_ticket(ticket), do: ...
+      end
+
+  Without it, a struct compiled in the same build as the tool raises
+  `Claudex.Tool.SchemaError`, naming the struct. `Claudex.Schema` says when
+  a struct needs it and when it doesn't.
+
+  An Ecto schema doesn't need `use Claudex.Schema` except to name the fields
+  Claude must fill, which `Claudex.Schema` shows. It expands with its
+  `embeds_one` and `embeds_many` fields included. `belongs_to`, `has_many`
+  and `has_one` are skipped: they aren't part of the data, and expanding
+  them risks recursing through a relationship graph.
+
+  This only shapes the schema Claude sees. The argument your function
+  receives is still the decoded JSON map, with string keys, never cast into
+  the struct.
+
+  A `@spec` type Claudex can't map raises `Claudex.Tool.SchemaError` at
+  compile time. Fix the spec, or pass `:args_schema` to skip inference for
+  that tool. `Claudex.OutputFormat` lists what each type becomes.
   """
 
   alias Claudex.ContentBlock.ToolUse

@@ -52,9 +52,9 @@ defmodule Claudex.OutputFormatTest do
                  fn -> OutputFormat.json_schema(Tupled) end
   end
 
-  test "a struct with no readable types says so, rather than blaming its fields" do
+  test "a struct with no @type t says so, rather than blaming its fields" do
     assert_raise SchemaError,
-                 ~r/can't read `Claudex.TestSupport.Bare`'s `@type t`.*strip_beams/s,
+                 ~r/`Claudex.TestSupport.Bare`: it declares no `@type t`/,
                  fn ->
                    OutputFormat.json_schema(Claudex.TestSupport.Bare)
                  end

@@ -90,6 +90,7 @@ defmodule Claudex.MixProject do
           Claudex.Tool.Error,
           Claudex.Tool.CallError,
           Claudex.Tool.SchemaError,
+          Claudex.Schema,
           Claudex.MCP.Server
         ],
         Files: [

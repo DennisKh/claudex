@@ -43,7 +43,7 @@ defmodule Claudex.TestSupport.Tupled do
 end
 
 defmodule Claudex.TestSupport.Bare do
-  @moduledoc "A struct with no `@type t` at all, the shape a stripped release leaves behind."
+  @moduledoc "A struct with no `@type t` at all."
 
   defstruct [:a, :b]
 end
