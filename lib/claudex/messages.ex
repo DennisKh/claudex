@@ -231,9 +231,9 @@ defmodule Claudex.Messages do
     * `{:claudex, ref, :done}` when the reply is complete
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
 
-  The forwarding process is linked to the caller, so it dies with it. The
-  process it delivers to is not, so by default the stream carries on when that
-  one goes away, and the caller decides what a missing reader means.
+  The forwarding process stops when the caller exits, normally or not. The
+  process it delivers to is not watched by default, so the stream carries on
+  when that one goes away, and the caller decides what a missing reader means.
 
   ## Options
 

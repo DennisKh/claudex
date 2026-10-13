@@ -520,6 +520,52 @@ defmodule Claudex.Stream.ForwarderTest do
     assert reason in [:normal, :noproc]
   end
 
+  test "a caller that exits normally takes the stream with it, mid-request" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: StallingTransport]
+      )
+
+    test = self()
+
+    {:ok, _caller} =
+      Task.start(fn ->
+        {:ok, %Handle{pid: pid}} = Messages.stream_to(client, @params, to: test)
+        send(test, {:forwarder, pid})
+      end)
+
+    assert_receive {:forwarder, pid}, 1_000
+    finished = Process.monitor(pid)
+
+    # The transport is five seconds into a stall, and the caller is already gone.
+    assert_receive {:DOWN, ^finished, :process, ^pid, _reason}, 1_000
+  end
+
+  test "a finished stream stops watching its caller" do
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: PacedTransport])
+
+    before = monitored_by()
+
+    {:ok, %Handle{ref: ref}} = Messages.stream_to(client, @params)
+
+    # The watcher sets up its monitor as soon as it starts, long before the
+    # first chunk reaches the forwarder.
+    assert_receive {:first_chunk_taken, _consumer}, 1_000
+    assert [watcher] = monitored_by() -- before
+    watched = Process.monitor(watcher)
+
+    assert_receive {:claudex, ^ref, :done}, 1_000
+    assert_receive {:DOWN, ^watched, :process, ^watcher, :normal}, 1_000
+  end
+
+  defp monitored_by do
+    {:monitored_by, pids} = Process.info(self(), :monitored_by)
+    pids
+  end
+
   test "there is no child_spec: a stream cannot be restarted" do
     refute function_exported?(Forwarder, :child_spec, 1)
     refute function_exported?(Forwarder, :start_link, 1)
