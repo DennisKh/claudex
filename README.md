@@ -164,7 +164,7 @@ def handle_info({:claudex, ref, :done}, socket), do: {:noreply, assign(socket, s
 def handle_info({:claudex, ref, {:error, error}}, socket), do: {:noreply, put_error(socket, error)}
 ```
 
-The forwarding process is linked to the caller, so it goes away with your LiveView. `Claudex.Stream.cancel/1` stops it early. Errors arrive as `{:error, %Claudex.Error{}}` messages rather than raising — that's the difference from `stream!/2`, which raises.
+The forwarding process stops when your LiveView does, however it exits. `Claudex.Stream.cancel/1` stops it early. Errors arrive as `{:error, %Claudex.Error{}}` messages rather than raising — that's the difference from `stream!/2`, which raises.
 
 ## Tool use
 

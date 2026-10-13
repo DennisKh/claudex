@@ -1314,6 +1314,22 @@ defmodule Claudex.ToolRunnerTest do
       refute_received {:claudex, ^ref, {:turn, _turn}}
     end
 
+    test "stops when the caller exits normally, mid-request" do
+      test = self()
+
+      {:ok, _caller} =
+        Task.start(fn ->
+          {:ok, %Handle{pid: pid}} = ToolRunner.stream_to(stalling_client(), @params, to: test)
+          send(test, {:forwarder, pid})
+        end)
+
+      assert_receive {:forwarder, pid}, 1_000
+      finished = Process.monitor(pid)
+
+      # The stub is five seconds into a stall, and the caller is already gone.
+      assert_receive {:DOWN, ^finished, :process, ^pid, _reason}, 1_000
+    end
+
     defp dead_pid do
       pid = spawn(fn -> :ok end)
       ref = Process.monitor(pid)

@@ -411,7 +411,7 @@ defmodule Claudex.ToolRunner do
   them. Every other option is the runner's own, listed in `Claudex.ToolRunner`,
   and an `:on_event` of your own still runs with the event forwarded either way.
 
-  The forwarding process is linked to the caller, so it dies with it, and it
+  The forwarding process stops when the caller exits, normally or not, and it
   is also where `:before_call` runs. A gate that asks another process for a
   decision blocks the forwarder rather than the caller, which is the point;
   send that process a message and wait for its answer rather than calling into
