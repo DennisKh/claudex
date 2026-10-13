@@ -40,7 +40,7 @@ defmodule Claudex.Messages.Batches do
   big to hold in memory is still fine to walk.
   """
 
-  alias Claudex.{API, ChunkStream, Client, Error, JSONL, Message, Page, Tool}
+  alias Claudex.{API, ChunkStream, Client, Error, JSONL, Messages, Page}
   alias Claudex.Messages.{Batch, BatchResult}
 
   @typedoc """
@@ -220,19 +220,10 @@ defmodule Claudex.Messages.Batches do
   end
 
   defp normalize_request(%{params: params} = request) do
-    %{request | params: params |> Map.new() |> normalize_tools() |> normalize_messages()}
+    %{request | params: Messages.to_body(params)}
   end
 
   defp normalize_request(request), do: request
-
-  defp normalize_tools(%{tools: tools} = params), do: %{params | tools: Tool.list(tools)}
-  defp normalize_tools(params), do: params
-
-  defp normalize_messages(%{messages: messages} = params) when is_list(messages) do
-    %{params | messages: Enum.map(messages, &Message.to_param/1)}
-  end
-
-  defp normalize_messages(params), do: params
 
   defp path(batch_id) do
     "/v1/messages/batches/" <> URI.encode(batch_id, &URI.char_unreserved?/1)
