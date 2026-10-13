@@ -261,14 +261,19 @@ defmodule Claudex.Messages do
     end
   end
 
+  @doc false
+  @spec to_body(map() | keyword()) :: map()
+  def to_body(params) do
+    params
+    |> Map.new()
+    |> normalize_tools()
+    |> normalize_mcp_servers()
+    |> normalize_messages()
+    |> normalize_format()
+  end
+
   defp build_body(params, required \\ @required_params) do
-    body =
-      params
-      |> Map.new()
-      |> normalize_tools()
-      |> normalize_mcp_servers()
-      |> normalize_messages()
-      |> normalize_format()
+    body = to_body(params)
 
     with :ok <- validate_required(body, required), do: {:ok, body}
   end
