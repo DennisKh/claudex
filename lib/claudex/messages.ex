@@ -17,6 +17,8 @@ defmodule Claudex.Messages do
   alias Claudex.Stream.{Connection, Forwarder, Handle}
 
   @required_params [:model, :messages, :max_tokens]
+
+  @max_nonstreaming_tokens div(128_000 * 10, 60)
   @count_tokens_required_params [:model, :messages]
 
   @typedoc """
@@ -70,6 +72,12 @@ defmodule Claudex.Messages do
   returns `{:error, %Claudex.Error{type: :bad_request}}`,
   use `stream!/2` or `stream_to/3` instead.
 
+  A reply can take up to an hour per 128,000 tokens, so with the client's
+  default 10-minute `:receive_timeout`, a `:max_tokens` above 21,333 returns
+  `{:error, %Claudex.Error{type: :bad_request}}` without sending the request.
+  `stream!/2` and `stream_to/3` take any `:max_tokens`, and so does a client
+  given its own `:receive_timeout`.
+
   `opts` takes `:session`, which names the conversation this request belongs
   to for tracing and never reaches the API. See
   `t:Claudex.Tracing.session_option/0`.
@@ -83,6 +91,7 @@ defmodule Claudex.Messages do
   def create(%Client{} = client, params, opts \\ []) do
     with {:ok, body} <- build_body(params),
          :ok <- validate_not_streaming(body),
+         :ok <- validate_duration(client, body),
          {:ok, response} <-
            API.post(client, "/v1/messages", Map.put(body, :stream, false), opts) do
       {:ok, Message.decode(response)}
@@ -309,6 +318,24 @@ defmodule Claudex.Messages do
   end
 
   defp validate_not_streaming(_body), do: :ok
+
+  defp validate_duration(client, %{max_tokens: max_tokens})
+       when is_integer(max_tokens) and max_tokens > @max_nonstreaming_tokens do
+    if Client.default_receive_timeout?(client) do
+      {:error,
+       %Error{
+         type: :bad_request,
+         message:
+           "a reply of up to #{max_tokens} tokens can take longer than the 10-minute " <>
+             "timeout, so create/2 doesn't send it: use stream!/2 or stream_to/3, or give " <>
+             "the client a longer :receive_timeout"
+       }}
+    else
+      :ok
+    end
+  end
+
+  defp validate_duration(_client, _body), do: :ok
 
   defp validate_required(body, required) do
     case Enum.filter(required, &(not Map.has_key?(body, &1))) do

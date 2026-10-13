@@ -65,7 +65,12 @@ defmodule Claudex.Client do
     * `:max_retries` - retries for transient errors (429, 5xx, timeouts),
       defaults to `#{@default_max_retries}`.
     * `:receive_timeout` - how long to wait for a response once connected,
-      in milliseconds, defaults to 10 minutes.
+      in milliseconds, defaults to 10 minutes. A non-streaming reply arrives
+      only once it is complete, and it can take up to an hour per 128,000
+      tokens of `max_tokens`. A request that times out is retried, up to
+      `:max_retries` times. With the default, `Claudex.Messages.create/2`
+      refuses a `max_tokens` that can outlast it; a timeout of your own is
+      not checked.
     * `:connect_timeout` - how long to wait for the TCP/TLS handshake, in
       milliseconds, defaults to 5 seconds — a slow or unreachable host
       fails fast instead of hanging for the full `:receive_timeout`.
@@ -155,6 +160,12 @@ defmodule Claudex.Client do
   end
 
   def retry_decision(_request, %{__exception__: true}), do: true
+
+  @doc false
+  @spec default_receive_timeout?(t()) :: boolean()
+  def default_receive_timeout?(%__MODULE__{req: req}) do
+    Req.Request.get_option(req, :receive_timeout) == @default_receive_timeout
+  end
 
   defp default_headers(api_key) do
     [
