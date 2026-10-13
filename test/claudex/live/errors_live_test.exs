@@ -55,4 +55,13 @@ defmodule Claudex.Live.ErrorsTest do
                messages: [%{role: "user", content: "Hello"}]
              })
   end
+
+  test "the API tells the client not to retry a bad API key" do
+    client = Claudex.new(api_key: "sk-ant-not-a-real-key", max_retries: 0)
+
+    assert {:ok, %Req.Response{status: 401} = response} =
+             Req.get(client.req, url: "/v1/models")
+
+    assert Req.Response.get_header(response, "x-should-retry") == ["false"]
+  end
 end
