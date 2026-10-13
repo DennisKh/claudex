@@ -19,7 +19,9 @@ defmodule Claudex.Live.ErrorsTest do
     assert error.message != ""
   end
 
-  test "an out-of-range max_tokens is a bad-request error", %{client: client} do
+  test "an out-of-range max_tokens is a bad-request error" do
+    client = Claudex.new(api_key: @api_key, receive_timeout: :timer.minutes(60))
+
     assert {:error, %Error{} = error} =
              client
              |> Recorder.record_json("error_400")
