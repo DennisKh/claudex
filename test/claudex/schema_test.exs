@@ -295,7 +295,8 @@ defmodule Claudex.SchemaTest do
 
   # The check runs in the compiler's verifier process after the module is
   # built. That process is linked to the one compiling, so the raise arrives
-  # as its exit rather than reaching assert_raise.
+  # as its exit rather than reaching assert_raise. Under a busy test run that
+  # exit takes up to about 90ms, too close to assert_receive's default 100ms.
   @tag :capture_log
   test "a required name that isn't a field of the Ecto schema fails the build" do
     {_pid, ref} =
@@ -312,7 +313,9 @@ defmodule Claudex.SchemaTest do
         """)
       end)
 
-    assert_receive {:DOWN, ^ref, :process, _pid, {%SchemaError{message: message}, _stacktrace}}
+    assert_receive {:DOWN, ^ref, :process, _pid, {%SchemaError{message: message}, _stacktrace}},
+                   2_000
+
     assert message =~ "names :old_strng, which isn't a field of the schema"
   end
 
