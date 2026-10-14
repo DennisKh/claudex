@@ -33,6 +33,9 @@ defmodule Claudex.ToolRunner.Turn do
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can
       be picked up again by passing that history back.
+    * `:cancelled` - a cancel arrived after this turn's reply, while its tools
+      ran or before the next request. The tools finished, their results are in
+      `messages` as with `:max_turns`, and no request followed.
     * any other atom - the one a `:before_call` halt named. `tool_results` holds
       what ran before it and `messages` ends with Claude's reply, so passing
       `messages` back to `Claudex.ToolRunner.run/3` with `tool_results: tool_results`
@@ -45,7 +48,8 @@ defmodule Claudex.ToolRunner.Turn do
   defstruct [:message, :index, :stop, tool_uses: [], tool_results: [], messages: []]
 
   @typedoc "Why a conversation ended. Any other atom is one a `:before_call` halt named."
-  @type stop :: :completed | :refusal | :truncated | :unknown | :max_turns | atom()
+  @type stop ::
+          :completed | :refusal | :truncated | :unknown | :max_turns | :cancelled | atom()
 
   @type t :: %__MODULE__{
           message: Message.t(),

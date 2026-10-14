@@ -110,6 +110,46 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
+  defmodule Gate do
+    @moduledoc """
+    Holds its call open until the test lets it finish, so a cancel can land
+    while a tool runs, between one request and the next.
+    """
+
+    use Claudex.Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b) do
+      [caller | _rest] = Process.get(:"$callers")
+      send(caller, {:tool_started, self()})
+
+      receive do
+        :finish -> a + b
+      end
+    end
+  end
+
+  defmodule CancelOn do
+    @moduledoc """
+    Sends a cancel from inside the process running the conversation the
+    `nth` time a telemetry event fires there, which lands it at an exact
+    point in the loop that no message from outside can reach reliably.
+    """
+
+    @doc false
+    def handle(_event, _measurements, _metadata, config) do
+      %{owner: owner, ref: ref, nth: nth, count: count} = config
+
+      if owner in [self() | Process.get(:"$callers", [])] do
+        :counters.add(count, 1, 1)
+
+        if :counters.get(count, 1) == nth, do: send(self(), {:claudex_cancel, ref})
+      end
+    end
+  end
+
   defmodule ToolThenStallTransport do
     @moduledoc """
     Emits a complete `tool_use` block, then stalls before `message_delta` and
@@ -811,7 +851,7 @@ defmodule Claudex.ToolRunnerTest do
     end
 
     test "a halt must name a stop of its own" do
-      for stop <- [nil, :completed, :truncated, :refusal, :unknown, :max_turns] do
+      for stop <- [nil, :completed, :truncated, :refusal, :unknown, :max_turns, :cancelled] do
         respond_with([message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use")])
 
         assert_raise ArgumentError, ~r/:halt/, fn ->
@@ -1131,6 +1171,350 @@ defmodule Claudex.ToolRunnerTest do
     assert [%ContentBlock.ToolUse{name: "add"}] = turn.tool_uses
     assert turn.tool_results == []
     refute_received {:tool_ran, _a, _b}
+  end
+
+  describe "a cancel while a tool runs" do
+    setup do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      %{cancel_ref: make_ref()}
+    end
+
+    defp cancel_during_tool(cancel_ref, run) do
+      parent = self()
+
+      spawn_link(fn ->
+        Process.put(:"$callers", [parent])
+        result = run.()
+        {:messages, left} = Process.info(self(), :messages)
+        send(parent, {:finished, result, left})
+      end)
+
+      assert_receive {:tool_started, runner}, 2_000
+      send(runner, {:claudex_cancel, cancel_ref})
+      send(runner, :finish)
+
+      assert_receive {:finished, result, left}, 2_000
+      {result, left}
+    end
+
+    test "run/3 returns the turn whose tools ran, cancelled", %{cancel_ref: cancel_ref} do
+      {result, left} =
+        cancel_during_tool(cancel_ref, fn ->
+          ToolRunner.run(client(), %{@params | tools: Gate}, cancel_ref: cancel_ref)
+        end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled} = turn} = result
+      assert [%{tool_use_id: "toolu_1", content: "3"}] = turn.tool_results
+      assert %{role: "user", content: [%{type: "tool_result"}]} = List.last(turn.messages)
+
+      assert left == []
+      assert_received {:sent, _first}
+      refute_received {:sent, _second}
+    end
+
+    test "stream/3 ends on the turn whose tools ran, cancelled", %{cancel_ref: cancel_ref} do
+      {turns, left} =
+        cancel_during_tool(cancel_ref, fn ->
+          client()
+          |> ToolRunner.stream(%{@params | tools: Gate}, cancel_ref: cancel_ref)
+          |> Enum.to_list()
+        end)
+
+      assert [%Turn{index: 1, stop: :cancelled}] = turns
+      assert left == []
+      refute_received {:sent, %{"messages" => [_, _, _]}}
+    end
+
+    test "stream_to/3 still reports :cancelled and never sends the turn" do
+      {:ok, %Handle{ref: ref} = handle} = ToolRunner.stream_to(client(), %{@params | tools: Gate})
+
+      assert_receive {:tool_started, runner}, 2_000
+      Claudex.Stream.cancel(handle)
+      send(runner, :finish)
+
+      assert_receive {:claudex, ^ref, :cancelled}, 2_000
+      refute_received {:claudex, ^ref, {:turn, _turn}}
+      refute_received {:sent, %{"messages" => [_, _, _]}}
+    end
+  end
+
+  describe "a cancel between turns" do
+    setup do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([tool_use("add", %{"a" => 3, "b" => 4})], "tool_use"),
+        message([text("done")], "end_turn")
+      ])
+
+      %{cancel_ref: make_ref()}
+    end
+
+    defp cancel_on(event, nth, ref) do
+      id = {__MODULE__, make_ref()}
+      config = %{owner: self(), ref: ref, nth: nth, count: :counters.new(1, [])}
+      :ok = :telemetry.attach(id, event, &CancelOn.handle/4, config)
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    defp in_own_process(run) do
+      parent = self()
+
+      spawn_link(fn ->
+        Process.put(:"$callers", [parent])
+        result = run.()
+        {:messages, left} = Process.info(self(), :messages)
+        send(parent, {:finished, result, left})
+      end)
+
+      assert_receive {:finished, result, left}, 2_000
+      {result, left}
+    end
+
+    defp requests_sent do
+      receive do
+        {:sent, _body} -> 1 + requests_sent()
+      after
+        0 -> 0
+      end
+    end
+
+    # Counts requests as they start, before anything reaches the server, so a
+    # request cut off by the cancel still counts.
+    defp count_requests do
+      id = {__MODULE__, make_ref()}
+      test = self()
+
+      :telemetry.attach(
+        id,
+        [:claudex, :request, :start],
+        fn _event, _measurements, _metadata, _config ->
+          if test in Process.get(:"$callers", []), do: send(test, :request_started)
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    defp requests_started do
+      receive do
+        :request_started -> 1 + requests_started()
+      after
+        0 -> 0
+      end
+    end
+
+    test "run/3: a cancel after the turn is handed over ends on it, cancelled",
+         %{cancel_ref: cancel_ref} do
+      cancel_on([:claudex, :tool_runner, :turn], 1, cancel_ref)
+      count_requests()
+
+      {result, left} =
+        in_own_process(fn -> ToolRunner.run(client(), @params, cancel_ref: cancel_ref) end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled} = turn} = result
+      assert [%{content: "3"}] = turn.tool_results
+      assert left == []
+      assert requests_started() == 1
+    end
+
+    test "run/3: a cancel as the next request starts ends on the turn before, cancelled",
+         %{cancel_ref: cancel_ref} do
+      cancel_on([:claudex, :request, :start], 2, cancel_ref)
+
+      {result, left} =
+        in_own_process(fn -> ToolRunner.run(client(), @params, cancel_ref: cancel_ref) end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled} = turn} = result
+      assert [%{content: "3"}] = turn.tool_results
+      assert left == []
+    end
+
+    test "stream/3: a cancel while the caller handles a turn ends the stream there",
+         %{cancel_ref: cancel_ref} do
+      count_requests()
+
+      {turns, left} =
+        in_own_process(fn ->
+          client()
+          |> ToolRunner.stream(@params, cancel_ref: cancel_ref)
+          |> Enum.map(fn turn ->
+            send(self(), {:claudex_cancel, cancel_ref})
+            {turn.index, turn.stop}
+          end)
+        end)
+
+      assert turns == [{1, nil}]
+      assert left == []
+      assert requests_started() == 1
+    end
+
+    test "stream_to/3: a cancel as the next request starts reports :cancelled after the turn before" do
+      ref = make_ref()
+      cancel_on([:claudex, :request, :start], 2, ref)
+
+      {:ok, %Handle{ref: ^ref}} = ToolRunner.stream_to(client(), @params, ref: ref)
+
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1, stop: nil}}}, 2_000
+      assert_receive {:claudex, ^ref, :cancelled}, 2_000
+      refute_received {:claudex, ^ref, {:turn, _turn}}
+      refute_received {:claudex, ^ref, :done}
+    end
+
+    test "a cancel in a later turn's tools ends on that turn", %{cancel_ref: cancel_ref} do
+      {turns, left} =
+        cancel_during_tool_in_turn(cancel_ref, 2, fn ->
+          client()
+          |> ToolRunner.stream(%{@params | tools: Gate}, cancel_ref: cancel_ref)
+          |> Enum.map(&{&1.index, &1.stop, Enum.map(&1.tool_results, fn r -> r.content end)})
+        end)
+
+      assert turns == [{1, nil, ["3"]}, {2, :cancelled, ["7"]}]
+      assert left == []
+      assert requests_sent() == 2
+    end
+
+    test "every call of the turn still runs, and all their results are kept",
+         %{cancel_ref: cancel_ref} do
+      respond_with([
+        message(
+          [
+            tool_use("add", %{"a" => 1, "b" => 2}),
+            tool_use("add", %{"a" => 3, "b" => 4}, "toolu_2")
+          ],
+          "tool_use"
+        ),
+        message([text("done")], "end_turn")
+      ])
+
+      {result, left} =
+        cancel_during_tool_in_turn(cancel_ref, 1, fn ->
+          ToolRunner.run(client(), %{@params | tools: Gate}, cancel_ref: cancel_ref)
+        end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled} = turn} = result
+      assert Enum.map(turn.tool_results, & &1.content) == ["3", "7"]
+      assert left == []
+      assert requests_sent() == 1
+    end
+
+    test "a cancel on the last allowed turn ends it cancelled", %{cancel_ref: cancel_ref} do
+      {result, left} =
+        cancel_during_tool_in_turn(cancel_ref, 1, fn ->
+          ToolRunner.run(client(), %{@params | tools: Gate},
+            cancel_ref: cancel_ref,
+            max_turns: 1
+          )
+        end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled}} = result
+      assert left == []
+    end
+
+    test "the conversation's stop telemetry reports :cancelled", %{cancel_ref: cancel_ref} do
+      id = {__MODULE__, make_ref()}
+      parent = self()
+
+      :telemetry.attach(
+        id,
+        [:claudex, :tool_runner, :stop],
+        fn _event, _measurements, metadata, _config ->
+          if parent in Process.get(:"$callers", []), do: send(parent, {:stopped, metadata.stop})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+      cancel_on([:claudex, :tool_runner, :turn], 1, cancel_ref)
+
+      in_own_process(fn -> ToolRunner.run(client(), @params, cancel_ref: cancel_ref) end)
+
+      assert_received {:stopped, :cancelled}
+    end
+
+    # Lets every Gate call finish, sending a cancel to the runner just before
+    # the `nth` one does.
+    defp cancel_during_tool_in_turn(cancel_ref, nth, run) do
+      parent = self()
+
+      spawn_link(fn ->
+        Process.put(:"$callers", [parent])
+        result = run.()
+        {:messages, left} = Process.info(self(), :messages)
+        send(parent, {:finished, result, left})
+      end)
+
+      release_tools(cancel_ref, nth, 1)
+    end
+
+    defp release_tools(cancel_ref, nth, call) do
+      receive do
+        {:tool_started, runner} ->
+          if call == nth, do: send(runner, {:claudex_cancel, cancel_ref})
+          send(runner, :finish)
+          release_tools(cancel_ref, nth, call + 1)
+
+        {:finished, result, left} ->
+          {result, left}
+      after
+        2_000 -> flunk("the conversation never finished")
+      end
+    end
+  end
+
+  test "a cancel mid-reply leaves nothing behind in the caller's mailbox" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: ToolThenStallTransport]
+      )
+
+    cancel_ref = make_ref()
+    parent = self()
+
+    pid =
+      spawn_link(fn ->
+        Process.put(:"$callers", [parent])
+
+        result =
+          ToolRunner.run(client, %{@params | tools: Tattler},
+            cancel_ref: cancel_ref,
+            on_event: &signal_block_stop(parent, &1)
+          )
+
+        {:messages, left} = Process.info(self(), :messages)
+        send(parent, {:finished, result, left})
+      end)
+
+    assert_receive :block_stopped, 2_000
+    send(pid, {:claudex_cancel, cancel_ref})
+
+    assert_receive {:finished, {:ok, %Turn{stop: :truncated}}, []}, 2_000
+  end
+
+  test "a cancel before the reply starts is an error that says so, and leaves nothing behind" do
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: SilentTransport])
+
+    cancel_ref = make_ref()
+    parent = self()
+
+    pid =
+      spawn_link(fn ->
+        result = ToolRunner.run(client, @params, cancel_ref: cancel_ref)
+        {:messages, left} = Process.info(self(), :messages)
+        send(parent, {:finished, result, left})
+      end)
+
+    send(pid, {:claudex_cancel, cancel_ref})
+
+    assert_receive {:finished, {:error, %Error{type: :stream, message: message}}, []}, 2_000
+    assert message =~ "cancelled"
   end
 
   defp signal_block_stop(parent, %Event.ContentBlockStop{}), do: send(parent, :block_stopped)

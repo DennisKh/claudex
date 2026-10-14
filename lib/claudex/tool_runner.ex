@@ -1,7 +1,17 @@
 defmodule Claudex.ToolRunner do
   @default_max_turns 20
   @failure_text_max 4096
-  @reserved_stops [nil, true, false, :completed, :truncated, :refusal, :unknown, :max_turns]
+  @reserved_stops [
+    nil,
+    true,
+    false,
+    :completed,
+    :truncated,
+    :refusal,
+    :unknown,
+    :max_turns,
+    :cancelled
+  ]
 
   @moduledoc """
   Runs a tool conversation: send, run whatever Claude asks for, send the
@@ -17,7 +27,7 @@ defmodule Claudex.ToolRunner do
 
       Claudex.Message.text(turn.message)  # the final reply
       turn.messages                       # the whole conversation
-      turn.stop                           # :completed | :truncated | :refusal | :max_turns
+      turn.stop                           # :completed | :truncated | :refusal | :max_turns | :cancelled
 
   `params` takes exactly what `Claudex.Messages.create/2` takes, so `:system`,
   `:thinking`, `:tool_choice` and the rest go in the same map. The options
@@ -98,8 +108,9 @@ defmodule Claudex.ToolRunner do
     * `:on_event` - a function run on each `Claudex.Stream.Event` as it
       arrives, for showing a reply while it is still being written
     * `:cancel_ref` - tags every request the loop makes, so a
-      `Claudex.Stream.Handle` carrying the same reference stops the one in
-      flight. `stream_to/3` sets it itself.
+      `Claudex.Stream.Handle` carrying the same reference stops the
+      conversation: the request in flight, or the next one when it arrives
+      between requests. `stream_to/3` sets it itself.
     * `:session` - names the conversation for tracing, as `session.id` on its
       span. Without one the trace stands alone, which is right for a conversation
       that belongs to nothing larger. See `Claudex.Tracing`.
@@ -285,6 +296,7 @@ defmodule Claudex.ToolRunner do
     |> stream(params, opts)
     |> Enum.reduce(nil, fn turn, _last -> turn end)
     |> case do
+      %Turn{stop: nil} = turn -> {:ok, %{turn | stop: :cancelled}}
       %Turn{} = turn -> {:ok, turn}
       nil -> {:error, %Error{type: :bad_request, message: "no turns ran"}}
     end
@@ -335,7 +347,11 @@ defmodule Claudex.ToolRunner do
 
   A cancel sent with `:cancel_ref` stops the request in flight. The turn it
   interrupts arrives with `stop: :truncated` and its tool calls unrun, and the
-  stream ends there.
+  stream ends there. A cancel that arrives while tools run lets them finish,
+  and their turn arrives with `stop: :cancelled` and its results. One that
+  arrives after a turn was handed over ends the stream on that turn as it was.
+  Either way no request follows. A cancel before the first reply has started
+  raises.
 
   Enumerating raises `Claudex.Error` if a request fails.
   """
@@ -352,6 +368,7 @@ defmodule Claudex.ToolRunner do
       before_call: Keyword.get(opts, :before_call),
       on_event: Keyword.get(opts, :on_event, &ignore/1),
       cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0),
+      forwarded: Keyword.get(opts, :forwarded, false),
       session: Keyword.get(opts, :session)
     }
 
@@ -465,7 +482,10 @@ defmodule Claudex.ToolRunner do
     Stream.transform(
       turns,
       start,
-      fn turn, {span, _previous} -> {[turn], {span, turn}} end,
+      fn
+        {:cancelled, _turns}, {span, last} -> {[], {span, %{last | stop: :cancelled}}}
+        turn, {span, _previous} -> {[turn], {span, turn}}
+      end,
       fn {span, last} -> finish_conversation(span, last) end
     )
   end
@@ -484,6 +504,7 @@ defmodule Claudex.ToolRunner do
 
     opts
     |> Keyword.put(:cancel_ref, sink.ref)
+    |> Keyword.put(:forwarded, true)
     |> Keyword.put(:on_event, fn event ->
       on_event.(event)
       Forwarder.deliver(sink, {:event, event})
@@ -504,14 +525,31 @@ defmodule Claudex.ToolRunner do
     turn
   end
 
+  defp emit_turn({:cancelled, turns} = cancelled) do
+    :telemetry.execute([:claudex, :tool_runner, :stop], %{turns: turns}, %{stop: :cancelled})
+
+    cancelled
+  end
+
   defp first_turn(history, nil), do: {history, 1}
   defp first_turn(history, results), do: {:resume, history, results}
 
-  defp next_turn(config, state) do
-    {turn, next} = take_turn(config, state)
-
-    {turn, {in_container(config, turn.message), next}}
+  defp next_turn(config, {:resume, _history, _results} = state) do
+    config |> take_turn(state) |> continue(config, 1)
   end
+
+  defp next_turn(config, {_history, index} = state) do
+    if index > 1 and take_cancel(config),
+      do: cancelled_after(index),
+      else: config |> take_turn(state) |> continue(config, index)
+  end
+
+  defp continue(:cancelled, _config, index), do: cancelled_after(index)
+
+  defp continue({turn, next}, config, _index),
+    do: {turn, {in_container(config, turn.message), next}}
+
+  defp cancelled_after(index), do: {{:cancelled, index - 1}, {nil, :done}}
 
   defp take_turn(config, {:resume, history, results}) do
     Tracing.span(fn -> Attributes.turn(1) end, fn _span ->
@@ -539,17 +577,25 @@ defmodule Claudex.ToolRunner do
   defp with_container_id(pinned, _id), do: pinned
 
   defp run_turn(config, history, index) do
-    message = request!(config, history)
+    case request(config, history) do
+      {:ok, message} ->
+        resolve_turn(
+          config,
+          %Turn{message: message, index: index, tool_uses: Message.tool_uses(message)},
+          history
+        )
 
-    resolve_turn(
-      config,
-      %Turn{message: message, index: index, tool_uses: Message.tool_uses(message)},
-      history
-    )
+      :cancelled when index > 1 ->
+        :cancelled
+
+      :cancelled ->
+        raise Error.stream_error("the request was cancelled before the reply started")
+    end
   end
 
   # canceled stream may carry stop_reason `nil`
-  defp resolve_turn(_config, %Turn{message: %Message{stop_reason: nil}} = turn, history) do
+  defp resolve_turn(config, %Turn{message: %Message{stop_reason: nil}} = turn, history) do
+    take_cancel(config)
     stop_without_running(turn, history, :truncated)
   end
 
@@ -676,14 +722,24 @@ defmodule Claudex.ToolRunner do
   end
 
   defp advance(config, %Turn{index: index, messages: messages} = turn) do
-    if index >= config.max_turns do
-      {%{turn | stop: :max_turns}, :done}
-    else
-      {turn, {messages, index + 1}}
+    cond do
+      take_cancel(config) -> {%{turn | stop: :cancelled}, :done}
+      index >= config.max_turns -> {%{turn | stop: :max_turns}, :done}
+      true -> {turn, {messages, index + 1}}
     end
   end
 
-  defp request!(config, messages) do
+  defp take_cancel(%{cancel_ref: ref, forwarded: forwarded}) do
+    receive do
+      {:claudex_cancel, ^ref} = cancel ->
+        if forwarded, do: send(self(), cancel)
+        true
+    after
+      0 -> false
+    end
+  end
+
+  defp request(config, messages) do
     config.client
     |> Messages.stream!(Map.put(config.params, :messages, messages),
       cancel_ref: config.cancel_ref,
@@ -695,9 +751,15 @@ defmodule Claudex.ToolRunner do
     end)
     |> Accumulator.message()
     |> case do
-      nil -> raise Error.stream_error("the stream ended without starting a message")
-      message -> message
+      nil -> no_message(config)
+      message -> {:ok, message}
     end
+  end
+
+  defp no_message(config) do
+    if take_cancel(config),
+      do: :cancelled,
+      else: raise(Error.stream_error("the stream ended without starting a message"))
   end
 
   defp ignore(_event), do: :ok
