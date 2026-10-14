@@ -32,6 +32,20 @@ defmodule Claudex.Live.StreamingTest do
     assert message.usage.output_tokens > 0
   end
 
+  test "stream!/2 stopped early leaves nothing in the caller's mailbox", %{client: client} do
+    assert [%Event.MessageStart{}] =
+             client
+             |> Messages.stream!(%{
+               model: @model,
+               max_tokens: 256,
+               messages: [%{role: "user", content: "Count from 1 to 40, one number per line."}]
+             })
+             |> Elixir.Stream.each(fn _event -> Process.sleep(500) end)
+             |> Enum.take(1)
+
+    assert Process.info(self(), :messages) == {:messages, []}
+  end
+
   test "stream_to/3 delivers events to a process and finishes with :done", %{client: client} do
     {:ok, handle} =
       Messages.stream_to(client, %{

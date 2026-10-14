@@ -74,6 +74,7 @@ defmodule Claudex.ChunkStream do
       producer: producer,
       producer_monitor: producer_monitor,
       producer_ref: producer_ref,
+      producer_down?: false,
       done?: false,
       failure: nil,
       metadata: metadata,
@@ -121,7 +122,7 @@ defmodule Claudex.ChunkStream do
       {:DOWN, ^producer_monitor, :process, _producer, reason} ->
         error = Error.stream_error("the process running the request exited: #{inspect(reason)}")
 
-        {:halt, %{state | failure: error}}
+        {:halt, %{state | failure: error, producer_down?: true}}
     end
   end
 
@@ -153,16 +154,28 @@ defmodule Claudex.ChunkStream do
     raise error
   end
 
-  defp close(%{
-         producer: producer,
-         producer_monitor: producer_monitor,
-         producer_ref: producer_ref
-       }) do
+  defp close(%{producer: producer, producer_ref: producer_ref} = state) do
     send(producer, {producer_ref, :cancel})
-    Process.demonitor(producer_monitor, [:flush])
     Process.exit(producer, :kill)
+    await_down(state)
+    flush(producer_ref)
+  end
 
-    :ok
+  defp await_down(%{producer_down?: true}), do: :ok
+
+  defp await_down(%{producer_monitor: producer_monitor}) do
+    receive do
+      {:DOWN, ^producer_monitor, :process, _producer, _reason} -> :ok
+    end
+  end
+
+  defp flush(producer_ref) do
+    receive do
+      {^producer_ref, _message} -> flush(producer_ref)
+      {^producer_ref, :chunk, _data} -> flush(producer_ref)
+    after
+      0 -> :ok
+    end
   end
 
   defp telemetry_measurements(state) do
