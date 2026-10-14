@@ -10,14 +10,18 @@ defmodule Claudex.JSONL do
   somewhere deeper.
   """
 
+  @behaviour Claudex.ChunkStream.Decoder
+
   defstruct buffer: ""
 
   @type t :: %__MODULE__{buffer: binary()}
 
+  @impl true
   @doc "Builds a decoder with an empty buffer."
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  @impl true
   @doc """
   Feeds `chunk` to the decoder, returning the lines it completed and a decoder
   holding the partial line at the end. Blank lines are dropped.
@@ -29,6 +33,7 @@ defmodule Claudex.JSONL do
     {complete |> Enum.reverse() |> Enum.reject(&blank?/1), %__MODULE__{buffer: partial}}
   end
 
+  @impl true
   @doc """
   Drains the buffer, returning a final line that arrived without a trailing
   newline.

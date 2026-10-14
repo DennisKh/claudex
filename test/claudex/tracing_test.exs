@@ -984,6 +984,36 @@ defmodule Claudex.TracingTest do
     assert Tracing.attach(:undefined) == :ok
   end
 
+  test "a stream the caller stops early is not an error" do
+    stream_reply(message())
+
+    assert [_event] = client() |> Messages.stream!(@params) |> Enum.take(1)
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert span(request, :status) == :undefined
+  end
+
+  test "an error event part-way through a stream marks the span with its message" do
+    sse = """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: error
+    data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+    """
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} = conn |> Plug.Conn.send_chunked(200) |> Plug.Conn.chunk(sse)
+      conn
+    end)
+
+    assert_raise Claudex.Error, fn -> client() |> Messages.stream!(@params) |> Enum.to_list() end
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert span(request, :status) == {:status, :error, "Overloaded"}
+  end
+
   test "a caller's own spans stay free of Claudex's attributes" do
     require OpenTelemetry.Tracer, as: Tracer
 

@@ -198,23 +198,14 @@ defmodule Claudex.Messages.Batches do
 
   defp stream_results(client, %Batch{results_url: results_url}) do
     stream =
-      client
-      |> ChunkStream.stream(method: :get, url: results_url)
-      |> Stream.transform(&JSONL.new/0, &decode_chunk/2, &flush/1, fn _decoder -> :ok end)
-      |> Stream.map(&decode_line/1)
+      ChunkStream.stream(client, [method: :get, url: results_url], {JSONL, &result/1})
 
     {:ok, stream}
   end
 
-  defp decode_chunk(chunk, decoder) do
-    JSONL.decode(decoder, chunk)
-  end
-
-  defp flush(decoder), do: JSONL.flush(decoder)
-
-  defp decode_line(line) do
+  defp result(line) do
     case JSON.decode(line) do
-      {:ok, json} when is_map(json) -> BatchResult.decode(json)
+      {:ok, json} when is_map(json) -> [BatchResult.decode(json)]
       _not_an_object -> raise Error.stream_error("a batch result line wasn't a JSON object", line)
     end
   end

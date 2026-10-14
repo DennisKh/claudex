@@ -29,9 +29,21 @@ defmodule Claudex.Telemetry do
   `:status`, `:request_id`, and — when the response carries usage —
   `:input_tokens`, `:output_tokens`, and the cache counters
   `:cache_creation_input_tokens` and `:cache_read_input_tokens` when caching
-  was in play. `:request_id` is the id Anthropic support asks for. On
-  `:exception` it has `:kind` and the `:error` module instead, and a request
-  reports one or the other, never both.
+  was in play. `:request_id` is the id Anthropic support asks for.
+
+  A request that got a response reports `:stop` with its `:status`, and a
+  4xx or 5xx one also carries `:error_type`, the `Claudex.Error` type such as
+  `:rate_limit` or `:overloaded`. A stream the caller stops early reports
+  `:stop` as well, with a nil `:status` if it stopped before reading the
+  response.
+
+  A request that got no response, one whose body couldn't be decoded, or a
+  stream that failed part-way, reports `:exception` instead, with `:kind` and
+  the `:error` module. It carries
+  `:error_type` when the failure is one `Claudex.Error` describes, such as
+  `:timeout` or a mid-stream `:overloaded`, and a stream's also has the
+  `:status` and `:request_id` of the response it failed in. A request reports
+  one or the other, never both.
 
   A streamed request reports the same events from the process reading it, and
   its `:stop` and `:exception` measurements carry `:chunks` and `:bytes`
@@ -131,7 +143,7 @@ defmodule Claudex.Telemetry do
 
   def handle_event([:claudex, :request, :exception], measurements, metadata, config) do
     log(config, fn ->
-      "#{method(metadata)} #{metadata.path} raised #{inspect(metadata[:kind])} " <>
+      "#{method(metadata)} #{metadata.path}#{model(metadata)} failed: #{failure(metadata)} " <>
         "after #{ms(measurements)}ms"
     end)
   end
@@ -160,6 +172,9 @@ defmodule Claudex.Telemetry do
     # credo:disable-for-next-line Credo.Check.Warning.MissedMetadataKeyInLoggerConfig
     Logger.log(level, fn -> "claudex " <> message.() end, domain: [:claudex])
   end
+
+  defp failure(%{error_type: type}), do: to_string(type)
+  defp failure(metadata), do: "#{inspect(metadata[:kind])} #{inspect(metadata[:error])}"
 
   defp streamed(%{chunks: chunks, bytes: bytes}),
     do: ", streamed #{bytes} B in #{chunks} chunk(s)"
