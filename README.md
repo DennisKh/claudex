@@ -236,7 +236,7 @@ Claude sees the reason and can try something else; [Deciding whether a call runs
 
 Claudex.Message.text(turn.message)  # the final reply
 turn.messages                       # the whole conversation
-turn.stop                           # :completed | :truncated | :refusal | :max_turns
+turn.stop                           # :completed | :truncated | :refusal | :max_turns | :cancelled
 ```
 
 The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options — `:max_turns`, `:before_call`, `:on_event` — go in a keyword list after it.

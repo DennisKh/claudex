@@ -78,6 +78,20 @@ defmodule Claudex.Live.ToolRunnerTest do
     def checkpoint, do: "Saved. Now print the file."
   end
 
+  defmodule Interrupted do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Adds two integers together."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b) do
+      send(self(), {:claudex_cancel, Process.get(:cancel_ref)})
+
+      a + b
+    end
+  end
+
   defp params(messages, extra \\ %{}) do
     Map.merge(
       %{
@@ -134,6 +148,24 @@ defmodule Claudex.Live.ToolRunnerTest do
                  &match?(%{type: "tool_use", name: "subtract", input: %{"a" => 42}}, &1)
                )
            end)
+  end
+
+  test "a cancel while a tool runs ends on its turn, and that history carries on",
+       %{client: client} do
+    cancel_ref = make_ref()
+    Process.put(:cancel_ref, cancel_ref)
+
+    params = params([Message.user("What is 12 plus 30?")], %{tools: Interrupted})
+
+    assert {:ok, %Turn{stop: :cancelled, index: 1} = cancelled} =
+             ToolRunner.run(client, params, cancel_ref: cancel_ref)
+
+    assert [%{content: "42"}] = cancelled.tool_results
+
+    assert {:ok, %Turn{stop: :completed} = resumed} =
+             ToolRunner.run(client, %{params | tools: Calculator, messages: cancelled.messages})
+
+    assert Message.text(resumed.message) =~ "42"
   end
 
   test "a tool that refuses sends its reason back and the conversation goes on", %{client: client} do

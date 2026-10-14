@@ -235,6 +235,58 @@ defmodule Claudex.TracingTest do
     assert attributes(first_turn)["claudex.turn.index"] == 1
   end
 
+  test "a tool conversation cancelled before its next request records the stop" do
+    replies = [
+      %{
+        message()
+        | "content" => [
+            %{
+              "type" => "tool_use",
+              "id" => "t1",
+              "name" => "add",
+              "input" => %{"a" => 1, "b" => 2}
+            }
+          ],
+          "stop_reason" => "tool_use"
+      },
+      message()
+    ]
+
+    {:ok, counter} = Agent.start_link(fn -> replies end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      reply = Agent.get_and_update(counter, fn [head | tail] -> {head, tail} end)
+      MessageStream.respond(conn, reply)
+    end)
+
+    cancel_ref = make_ref()
+    test = self()
+    id = {__MODULE__, cancel_ref}
+
+    :telemetry.attach(
+      id,
+      [:claudex, :request, :start],
+      fn _event, _measurements, _metadata, _config ->
+        if self() == test do
+          started = Process.get(:requests_started, 0) + 1
+          Process.put(:requests_started, started)
+          if started == 2, do: send(self(), {:claudex_cancel, cancel_ref})
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    assert {:ok, %{stop: :cancelled}} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator),
+               cancel_ref: cancel_ref
+             )
+
+    [conversation] = named(collect_spans([]), "invoke_agent claude-haiku-4-5")
+    assert attributes(conversation)["claudex.stop"] == "cancelled"
+  end
+
   defp named(spans, name), do: Enum.filter(spans, &(span(&1, :name) == name))
 
   defp collect_spans(collected) do
