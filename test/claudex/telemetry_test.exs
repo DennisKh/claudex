@@ -2,7 +2,8 @@ defmodule Claudex.TelemetryTest do
   use ExUnit.Case, async: false
 
   alias Claudex.{Client, Message, Messages, Telemetry, ToolRunner}
-  alias Claudex.TestSupport.MessageStream
+  alias Claudex.Messages.Batches
+  alias Claudex.TestSupport.{Fixtures, MessageStream}
 
   defmodule Calculator do
     use Claudex.Tool
@@ -261,14 +262,81 @@ defmodule Claudex.TelemetryTest do
     assert_receive {:telemetry, [:claudex, :tool_runner, :stop], %{turns: 2}, %{stop: :max_turns}}
   end
 
-  test "a streamed request that fails reports an exception, not a stop" do
+  defp overloaded(conn) do
+    conn
+    |> Plug.Conn.put_resp_header("request-id", "req_overloaded")
+    |> Plug.Conn.put_status(529)
+    |> Req.Test.json(%{
+      "type" => "error",
+      "error" => %{"type" => "overloaded_error", "message" => "Overloaded"}
+    })
+  end
+
+  test "a streamed error response reports a stop with its status, as a plain one does" do
+    Req.Test.stub(__MODULE__, &overloaded/1)
+
+    assert_raise Claudex.Error, "Overloaded", fn ->
+      client() |> Messages.stream!(@params) |> Enum.to_list()
+    end
+
+    assert {:error, %Claudex.Error{status: 529}} = Messages.create(client(), @params)
+
+    for _transport <- [:streamed, :plain] do
+      assert_receive {:telemetry, [:claudex, :request, :stop], measurements, metadata}
+      assert metadata.status == 529
+      assert metadata.error_type == :overloaded
+      assert metadata.request_id == "req_overloaded"
+      assert metadata.path == "/v1/messages"
+      assert is_integer(measurements.duration)
+    end
+
+    refute_receive {:telemetry, [:claudex, :request, :exception], _measurements, _metadata}
+  end
+
+  defmodule RefusedAdapter do
+    @moduledoc false
+
+    @doc false
+    def run(request), do: {request, %Req.TransportError{reason: :econnrefused}}
+  end
+
+  test "a request that gets no response reports an exception, streamed or not" do
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: RefusedAdapter])
+
+    assert {:error, %Claudex.Error{type: :connection}} = Messages.create(client, @params)
+
+    assert_raise Claudex.Error, fn -> client |> Messages.stream!(@params) |> Enum.to_list() end
+
+    for _transport <- [:plain, :streamed] do
+      assert_receive {:telemetry, [:claudex, :request, :exception], measurements, metadata}
+      assert metadata.kind == :error
+      assert metadata.error == Req.TransportError
+      assert metadata.error_type == :connection
+      assert is_integer(measurements.duration)
+    end
+
+    refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, _metadata}
+  end
+
+  test "an error event part-way through a stream reports an exception with its type" do
+    sse = """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: error
+    data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+    """
+
     Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} =
+        conn
+        |> Plug.Conn.put_resp_header("request-id", "req_midstream")
+        |> Plug.Conn.send_chunked(200)
+        |> Plug.Conn.chunk(sse)
+
       conn
-      |> Plug.Conn.put_status(529)
-      |> Req.Test.json(%{
-        "type" => "error",
-        "error" => %{"type" => "overloaded_error", "message" => "Overloaded"}
-      })
     end)
 
     assert_raise Claudex.Error, "Overloaded", fn ->
@@ -276,12 +344,12 @@ defmodule Claudex.TelemetryTest do
     end
 
     assert_receive {:telemetry, [:claudex, :request, :exception], measurements, metadata}
-
     assert metadata.kind == :error
     assert metadata.error == Claudex.Error
-    assert metadata.method == :post
-    assert metadata.path == "/v1/messages"
-    assert is_integer(measurements.duration)
+    assert metadata.error_type == :overloaded
+    assert metadata.status == 200
+    assert metadata.request_id == "req_midstream"
+    assert measurements.chunks > 0
 
     refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, _metadata}
   end
@@ -330,6 +398,181 @@ defmodule Claudex.TelemetryTest do
     assert logged =~ "claudex POST /v1/messages claude-haiku-4-5 → 200"
     assert logged =~ "request_id=req_test_1"
     assert logged =~ "(11 in / 7 out)"
+  end
+
+  test "a plain response whose body can't be decoded reports an exception without a type" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(200, "{not json")
+    end)
+
+    assert {:error, _error} = Messages.create(client(), @params)
+
+    assert_receive {:telemetry, [:claudex, :request, :exception], _measurements, metadata}
+    assert metadata.error == Jason.DecodeError
+    refute Map.has_key?(metadata, :error_type)
+  end
+
+  test "events decoded before an error event in the same chunk still reach the caller" do
+    sse = """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: error
+    data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+    """
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} = conn |> Plug.Conn.send_chunked(200) |> Plug.Conn.chunk(sse)
+      conn
+    end)
+
+    assert_raise Claudex.Error, "Overloaded", fn ->
+      client() |> Messages.stream!(@params) |> Enum.each(&send(self(), {:event, &1}))
+    end
+
+    assert_received {:event, %Claudex.Stream.Event.MessageStart{}}
+  end
+
+  defmodule ErrorThenMoreTransport do
+    @moduledoc """
+    Sends an error event in one chunk and another event in the next, so a
+    stream that read past a failure would hand that event on.
+    """
+
+    @chunks [
+      """
+      event: message_start
+      data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+      event: error
+      data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+      """,
+      """
+      event: content_block_start
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+      """
+    ]
+
+    @doc false
+    def run(request) do
+      Enum.reduce_while(@chunks, {request, Req.Response.new(status: 200)}, fn chunk, acc ->
+        request.into.({:data, chunk}, acc)
+      end)
+    end
+  end
+
+  test "nothing after an error event reaches the caller" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 0,
+        req_options: [adapter: ErrorThenMoreTransport]
+      )
+
+    assert_raise Claudex.Error, "Overloaded", fn ->
+      client |> Messages.stream!(@params) |> Enum.each(&send(self(), {:event, &1}))
+    end
+
+    assert_received {:event, %Claudex.Stream.Event.MessageStart{}}
+    refute_received {:event, %Claudex.Stream.Event.ContentBlockStart{}}
+  end
+
+  test "a stream the caller stops early reports the status it got" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      MessageStream.respond(conn, message([%{"type" => "text", "text" => "hello"}]))
+    end)
+
+    assert [_event] = client() |> Messages.stream!(@params) |> Enum.take(1)
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, metadata}
+    assert metadata.status == 200
+    refute Map.has_key?(metadata, :error_type)
+  end
+
+  test "a stream whose body crashes the decoder reports the exception it raised" do
+    sse = """
+    event: message_start
+    data: {"type":"message_start","message":1}
+
+    """
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} = conn |> Plug.Conn.send_chunked(200) |> Plug.Conn.chunk(sse)
+      conn
+    end)
+
+    {error, [{raised_in, _function, _arity, _location} | _frames]} =
+      try do
+        client() |> Messages.stream!(@params) |> Enum.to_list()
+      rescue
+        error -> {error, __STACKTRACE__}
+      end
+
+    refute match?(%Claudex.Error{}, error)
+    refute raised_in == Claudex.ChunkStream
+
+    assert_receive {:telemetry, [:claudex, :request, :exception], measurements, metadata}
+    assert metadata.error == error.__struct__
+    refute Map.has_key?(metadata, :error_type)
+    assert measurements.chunks == 1
+
+    refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, _metadata}
+  end
+
+  test "a batch results line that isn't JSON reports an exception, not a stop" do
+    results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
+
+    batch =
+      "batch"
+      |> Fixtures.json!()
+      |> Map.merge(%{
+        "id" => "msgbatch_1",
+        "processing_status" => "ended",
+        "results_url" => results_url
+      })
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      case conn.request_path do
+        "/v1/messages/batches/msgbatch_1" ->
+          Req.Test.json(conn, batch)
+
+        "/v1/messages/batches/msgbatch_1/results" ->
+          {:ok, conn} = conn |> Plug.Conn.send_chunked(200) |> Plug.Conn.chunk("123\n")
+          conn
+      end
+    end)
+
+    assert {:ok, stream} = Batches.results(client(), "msgbatch_1")
+    assert_raise Claudex.Error, fn -> Enum.to_list(stream) end
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements,
+                    %{path: "/v1/messages/batches/msgbatch_1"}}
+
+    assert_receive {:telemetry, [:claudex, :request, :exception], _measurements, metadata}
+    assert metadata.path == results_url
+    assert metadata.error_type == :stream
+
+    refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, %{path: ^results_url}}
+  end
+
+  test "the default logger names the error type of a request that got no response" do
+    Telemetry.attach_default_logger(level: :info)
+    on_exit(&Telemetry.detach_default_logger/0)
+
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: RefusedAdapter])
+
+    logged =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, _error} = Messages.create(client, @params)
+      end)
+
+    assert logged =~ "claudex POST /v1/messages claude-haiku-4-5 failed: connection after"
   end
 
   test "a streaming request reports the same span as a non-streaming one" do

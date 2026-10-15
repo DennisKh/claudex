@@ -15,6 +15,8 @@ defmodule Claudex.Stream.SSE do
   without its terminator.
   """
 
+  @behaviour Claudex.ChunkStream.Decoder
+
   alias Claudex.Stream.SSE.Event
 
   @event_terminators ["\n\n", "\r\n\r\n", "\r\r"]
@@ -24,10 +26,12 @@ defmodule Claudex.Stream.SSE do
 
   @type t :: %__MODULE__{buffer: binary()}
 
+  @impl true
   @doc "Builds a decoder with an empty buffer."
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  @impl true
   @doc """
   Feeds `chunk` to the decoder, returning the events it completed and a
   decoder carrying whatever is still incomplete.
@@ -43,6 +47,7 @@ defmodule Claudex.Stream.SSE do
     {events, %__MODULE__{buffer: rest}}
   end
 
+  @impl true
   @doc """
   Drains the buffer, returning any event held in it and an empty decoder.
 

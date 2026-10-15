@@ -46,6 +46,15 @@ defmodule Claudex.API do
     )
   end
 
+  @doc false
+  @spec failure_metadata(Exception.t()) :: map()
+  def failure_metadata(%module{} = exception)
+      when module in [Req.TransportError, Req.HTTPError] do
+    %{kind: :error, error: module, error_type: Error.from_transport(exception).type}
+  end
+
+  def failure_metadata(exception), do: %{kind: :error, error: exception.__struct__}
+
   defp traced(client, options, metadata, span) do
     started = System.monotonic_time()
 
@@ -58,12 +67,7 @@ defmodule Claudex.API do
     try do
       raw = Req.request(client.req, options)
 
-      :telemetry.execute(
-        [:claudex, :request, :stop],
-        %{duration: System.monotonic_time() - started},
-        Map.merge(metadata, response_metadata(raw))
-      )
-
+      report(raw, %{duration: System.monotonic_time() - started}, metadata)
       record_response(raw, span)
 
       handle(raw)
@@ -141,14 +145,32 @@ defmodule Claudex.API do
 
   defp maybe_put_model(metadata, _model), do: metadata
 
-  defp response_metadata({:ok, %Req.Response{} = response}) do
-    %{status: response.status, request_id: request_id(response)}
-    |> Map.merge(usage(response.body))
+  defp report({:ok, %Req.Response{} = response}, measurements, metadata) do
+    :telemetry.execute(
+      [:claudex, :request, :stop],
+      measurements,
+      Map.merge(metadata, response_metadata(response))
+    )
   end
 
-  defp response_metadata({:error, exception}) do
-    %{status: nil, error: exception.__struct__}
+  defp report({:error, exception}, measurements, metadata) do
+    :telemetry.execute(
+      [:claudex, :request, :exception],
+      measurements,
+      Map.merge(metadata, failure_metadata(exception))
+    )
   end
+
+  defp response_metadata(response) do
+    %{status: response.status, request_id: request_id(response)}
+    |> Map.merge(usage(response.body))
+    |> Map.merge(error_type(response))
+  end
+
+  defp error_type(%Req.Response{status: status}) when status in 200..299, do: %{}
+
+  defp error_type(%Req.Response{status: status, body: body}),
+    do: %{error_type: Error.from_response(status, body, nil).type}
 
   defp usage(%{"usage" => %{} = usage}) do
     %{input_tokens: usage["input_tokens"], output_tokens: usage["output_tokens"]}
