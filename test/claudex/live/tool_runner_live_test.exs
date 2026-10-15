@@ -440,6 +440,41 @@ defmodule Claudex.Live.ToolRunnerTest do
     assert Message.text(last.message) =~ "zebra-42"
   end
 
+  test "a turn paused after compaction resumes, and the run completes" do
+    client = Claudex.new(api_key: @api_key, beta: ["compact-2026-01-12"])
+
+    log =
+      for i <- 1..2600, into: "" do
+        "Log line #{i}: the sensor in bay #{rem(i * 7, 97)} reported #{rem(i * 13, 1000)} units.\n"
+      end
+
+    messages = [
+      Message.user("Here is a log:\n" <> log <> "\nReply with just OK."),
+      Message.assistant("OK."),
+      Message.user("Add the bay numbers in lines 5 and 6.")
+    ]
+
+    context_management = %{
+      edits: [
+        %{
+          type: "compact_20260112",
+          trigger: %{type: "input_tokens", value: 50_000},
+          pause_after_compaction: true
+        }
+      ]
+    }
+
+    turns =
+      client
+      |> ToolRunner.stream(
+        params(messages, %{model: "claude-haiku-5-5", context_management: context_management})
+      )
+      |> Enum.to_list()
+
+    assert [%Turn{stop: nil, message: %{stop_reason: "compaction"}} | _rest] = turns
+    assert %Turn{stop: :completed} = List.last(turns)
+  end
+
   describe "stream_to/3" do
     test "delivers a whole tool conversation to another process's mailbox", %{client: client} do
       {:ok, handle} =

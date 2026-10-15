@@ -16,6 +16,7 @@ defmodule Claudex.Message do
     "stop_sequence" => :completed,
     "tool_use" => :tool_use,
     "pause_turn" => :paused,
+    "compaction" => :compacted,
     "max_tokens" => :truncated,
     "model_context_window_exceeded" => :truncated,
     "refusal" => :refusal
@@ -40,7 +41,8 @@ defmodule Claudex.Message do
   ]
 
   @typedoc "How a reply ended, from `stop/1`."
-  @type stop :: :completed | :tool_use | :paused | :truncated | :refusal | :unknown
+  @type stop ::
+          :completed | :tool_use | :paused | :compacted | :truncated | :refusal | :unknown
 
   @type t :: %__MODULE__{
           raw: map() | nil,
@@ -280,8 +282,8 @@ defmodule Claudex.Message do
   end
 
   @doc """
-  How a reply ended, as one of six answers rather than the seven strings the
-  API sends.
+  Returns how a reply ended. Takes a message, or its `stop_reason` string on
+  its own.
 
       iex> Claudex.Message.stop(%Claudex.Message{stop_reason: "max_tokens"})
       :truncated
@@ -293,6 +295,12 @@ defmodule Claudex.Message do
     * `:tool_use` - it called one of your tools and is waiting for the results.
     * `:paused` - it is part-way through a server-side tool loop. Send the
       reply back unchanged to let it carry on.
+    * `:compacted` - it summarised the conversation instead of answering,
+      because the request set `:compaction` or because `pause_after_compaction`
+      paused it there. The reply holds the summary alone. After a pause, send
+      it back to let Claude carry on. A summary you asked for with
+      `:compaction` goes first in `messages`, in place of the messages it
+      summarises.
     * `:truncated` - it ran out of room, hitting this request's `max_tokens`
       or the model's context window.
     * `:refusal` - it declined.
@@ -304,9 +312,6 @@ defmodule Claudex.Message do
   unfinished as the sentence before it, and results for a call it never
   confirmed cannot be replayed. `Claudex.ToolRunner` stops on all three for
   that reason, and `to_param/1` leaves those calls out of the history.
-
-  Takes the reason on its own as readily as a message, since an app that
-  persists its turns asks this of a database column rather than a struct.
   """
   @spec stop(t() | String.t() | nil) :: stop()
   def stop(%__MODULE__{stop_reason: reason}), do: stop(reason)

@@ -46,7 +46,8 @@ defmodule Claudex.ToolRunner do
   > action, `tool_choice: %{type: "any"}` is your only option.
 
   A turn the API pauses part-way through a server-side tool loop
-  (`stop_reason: "pause_turn"`) resumes on its own. The history goes back
+  (`stop_reason: "pause_turn"`), or after compacting the conversation
+  (`stop_reason: "compaction"`), resumes on its own. The history goes back
   unchanged and the conversation carries on, so a pause costs a turn but does
   not end anything.
 
@@ -307,8 +308,10 @@ defmodule Claudex.ToolRunner do
   @doc """
   Returns a lazy stream of `Claudex.ToolRunner.Turn` structs, one per reply.
 
-  `params` takes exactly what `Claudex.Messages.create/2` takes; `opts` are the
-  runner's own, listed in `Claudex.ToolRunner`.
+  `params` takes exactly what `Claudex.Messages.create/2` takes, except
+  `:compaction`, which raises `ArgumentError`: a compaction request returns a
+  summary instead of an answer, so every request in the loop would compact
+  again. `opts` are the runner's own, listed in `Claudex.ToolRunner`.
 
   Nothing happens until you enumerate it. Tools for a turn have already run by
   the time you see that turn, so halting stops the conversation rather than
@@ -359,6 +362,7 @@ defmodule Claudex.ToolRunner do
   @spec stream(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
   def stream(%Client{} = client, params, opts \\ []) do
     params = Map.new(params)
+    reject_compaction!(params)
 
     config = %{
       client: client,
@@ -604,7 +608,7 @@ defmodule Claudex.ToolRunner do
       stop when stop in [:refusal, :truncated, :unknown] ->
         stop_without_running(turn, history, stop)
 
-      :paused when turn.tool_uses == [] ->
+      stop when stop in [:paused, :compacted] and turn.tool_uses == [] ->
         advance(config, with_reply(turn, history))
 
       _other when turn.tool_uses != [] ->
@@ -635,6 +639,14 @@ defmodule Claudex.ToolRunner do
       answered!(results, tool_uses)
     )
   end
+
+  defp reject_compaction!(%{compaction: compaction}) when not is_nil(compaction) do
+    raise ArgumentError,
+          "`:compaction` can't be set on a tool runner: a compaction request returns a summary " <>
+            "instead of an answer, so every request in the loop would compact again"
+  end
+
+  defp reject_compaction!(_params), do: :ok
 
   defp trailing_reply!(history) do
     with %{} = last <- List.last(history),

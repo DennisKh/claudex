@@ -323,6 +323,7 @@ defmodule Claudex.MessageTest do
         "stop_sequence" => :completed,
         "tool_use" => :tool_use,
         "pause_turn" => :paused,
+        "compaction" => :compacted,
         "max_tokens" => :truncated,
         "model_context_window_exceeded" => :truncated,
         "refusal" => :refusal
