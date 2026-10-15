@@ -53,8 +53,6 @@ defmodule Claudex.API do
     %{kind: :error, error: module, error_type: Error.from_transport(exception).type}
   end
 
-  # Req returns a body it couldn't decode the same way as a lost connection,
-  # but that one did reach the API, so it isn't given a transport type.
   def failure_metadata(exception), do: %{kind: :error, error: exception.__struct__}
 
   defp traced(client, options, metadata, span) do

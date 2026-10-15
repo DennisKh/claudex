@@ -303,8 +303,6 @@ defmodule Claudex.ChunkStream do
     end
   end
 
-  # Sent once, ahead of the first chunk, so a stream that fails or is stopped
-  # part-way still reports the status and request id it got.
   defp announce_response(request, response, consumer, producer_ref) do
     if not Req.Request.get_private(request, :claudex_streamed, false) do
       send(consumer, {producer_ref, :response, response_metadata(response)})
