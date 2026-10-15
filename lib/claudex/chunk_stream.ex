@@ -124,10 +124,10 @@ defmodule Claudex.ChunkStream do
         |> count(data)
         |> decode({:chunk, data})
 
-      {^producer_ref, {:done, response}} ->
+      {^producer_ref, :done, response} ->
         decode(%{state | done?: true, response: response}, :done)
 
-      {^producer_ref, {:error, %Error{} = error}} ->
+      {^producer_ref, :error, %Error{} = error} ->
         {:halt,
          %{
            state
@@ -135,7 +135,7 @@ defmodule Claudex.ChunkStream do
              response: %{status: error.status, request_id: error.request_id}
          }}
 
-      {^producer_ref, {:transport_error, exception}} ->
+      {^producer_ref, :transport_error, exception} ->
         {:halt, %{state | failure: Error.from_transport(exception), cause: exception}}
 
       {:DOWN, ^producer_monitor, :process, _producer, reason} ->
@@ -236,7 +236,6 @@ defmodule Claudex.ChunkStream do
 
   defp flush(producer_ref) do
     receive do
-      {^producer_ref, _message} -> flush(producer_ref)
       {^producer_ref, _tag, _payload} -> flush(producer_ref)
     after
       0 -> :ok
@@ -285,7 +284,8 @@ defmodule Claudex.ChunkStream do
         retry: &retry_decision/2
       )
 
-    send(consumer, {producer_ref, outcome(Req.request(client.req, options))})
+    {tag, payload} = outcome(Req.request(client.req, options))
+    send(consumer, {producer_ref, tag, payload})
   end
 
   defp collector(consumer, producer_ref, consumer_monitor) do
