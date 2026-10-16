@@ -5,8 +5,13 @@ defmodule Claudex.Message do
   here turn either into the maps `Claudex.Messages.create/2` takes back.
 
   `raw` holds the response exactly as it arrived, so a field the API adds
-  before Claudex models it is still readable. It's hidden from `inspect/1` to
-  keep output readable.
+  before Claudex models it is still readable. A streamed reply arrives in
+  pieces, so its `raw` is the message `message_start` carried with the fields
+  of `message_delta` merged in, and its `content` stays as `message_start`
+  sent it. It's hidden from `inspect/1` to keep output readable.
+
+  `context_management` reports the context edits the request applied, when it
+  asked for any.
   """
 
   alias Claudex.{ContentBlock, Usage}
@@ -37,6 +42,7 @@ defmodule Claudex.Message do
     :stop_sequence,
     :stop_details,
     :container,
+    :context_management,
     :usage
   ]
 
@@ -55,6 +61,7 @@ defmodule Claudex.Message do
           stop_sequence: String.t() | nil,
           stop_details: map() | nil,
           container: map() | nil,
+          context_management: map() | nil,
           usage: Usage.t() | nil
         }
 
@@ -72,6 +79,7 @@ defmodule Claudex.Message do
       stop_sequence: json["stop_sequence"],
       stop_details: json["stop_details"],
       container: json["container"],
+      context_management: json["context_management"],
       usage: Usage.decode(json["usage"] || %{})
     }
   end

@@ -189,6 +189,26 @@ defmodule Claudex.Live.StreamingTest do
     assert message.usage.input_tokens == opening.input_tokens
   end
 
+  test "a streamed reply keeps the iterations and context edits a created one has" do
+    client = Claudex.new(api_key: @api_key, beta: ["compact-2026-01-12"])
+
+    params = %{
+      model: "claude-haiku-5-5",
+      max_tokens: 16,
+      messages: [Message.user("Say OK.")],
+      context_management: %{edits: [%{type: "compact_20260112"}]}
+    }
+
+    {:ok, created} = Messages.create(client, params)
+    {:ok, streamed} = client |> Messages.stream!(params) |> Stream.final_message()
+
+    for message <- [created, streamed] do
+      assert message.context_management == %{"applied_edits" => []}
+      assert message.raw["context_management"] == %{"applied_edits" => []}
+      assert [%{"type" => "message"}] = message.usage.iterations
+    end
+  end
+
   test "a programmatic tool call carried by message_start reassembles into the message",
        %{client: client} do
     tools = [

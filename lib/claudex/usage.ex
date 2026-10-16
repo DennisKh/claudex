@@ -1,8 +1,15 @@
 defmodule Claudex.Usage do
   @moduledoc """
   Token counts for one Messages API request. `input_tokens` and
-  `output_tokens` are what you're billed for; the rest breaks that down
-  further (cache hits, server tool calls, and so on).
+  `output_tokens` are the requested model's, summed over every step it took.
+  `input_tokens` counts only what follows the last cache breakpoint: the
+  tokens read from the cache and written to it are in
+  `cache_read_input_tokens` and `cache_creation_input_tokens`.
+
+  `iterations`, when the API sends it, lists each step with its own counts,
+  including the steps the top-level counts leave out: a `compaction` step that
+  summarised the conversation, and an `advisor_message` step, which names its
+  own `model` and is billed at that model's rates.
 
   `raw` holds the usage object exactly as it arrived, so a counter the API adds
   before Claudex models it is still readable. It's hidden from `inspect/1` to
@@ -32,7 +39,8 @@ defmodule Claudex.Usage do
     :server_tool_use,
     :output_tokens_details,
     :service_tier,
-    :inference_geo
+    :inference_geo,
+    :iterations
   ]
 
   @type t :: %__MODULE__{
@@ -46,7 +54,8 @@ defmodule Claudex.Usage do
           server_tool_use: map() | nil,
           output_tokens_details: map() | nil,
           service_tier: String.t() | nil,
-          inference_geo: String.t() | nil
+          inference_geo: String.t() | nil,
+          iterations: [map()] | nil
         }
 
   @doc """
@@ -67,7 +76,8 @@ defmodule Claudex.Usage do
 
   It merges field by field because the later object carries fewer fields:
   `service_tier`, for one, arrives only in `message_start`. Anything the later
-  object leaves `nil` keeps the earlier value.
+  object leaves `nil` keeps the earlier value, and `raw` is merged the same
+  way.
   """
   @spec merge(t() | nil, t() | nil) :: t() | nil
   def merge(usage, nil), do: usage
@@ -75,12 +85,15 @@ defmodule Claudex.Usage do
   def merge(nil, %__MODULE__{} = later), do: later
 
   def merge(%__MODULE__{} = earlier, %__MODULE__{} = later) do
-    later
-    |> Map.from_struct()
-    |> Enum.reduce(earlier, fn
-      {_field, nil}, usage -> usage
-      {field, value}, usage -> Map.put(usage, field, value)
-    end)
+    merged =
+      later
+      |> Map.from_struct()
+      |> Enum.reduce(earlier, fn
+        {_field, nil}, usage -> usage
+        {field, value}, usage -> Map.put(usage, field, value)
+      end)
+
+    %{merged | raw: merge_raw(earlier.raw, later.raw)}
   end
 
   @doc """
@@ -117,9 +130,17 @@ defmodule Claudex.Usage do
       server_tool_use: json["server_tool_use"],
       output_tokens_details: json["output_tokens_details"],
       service_tier: json["service_tier"],
-      inference_geo: json["inference_geo"]
+      inference_geo: json["inference_geo"],
+      iterations: json["iterations"]
     }
   end
+
+  defp merge_raw(earlier, nil), do: earlier
+  defp merge_raw(nil, later), do: later
+  defp merge_raw(earlier, later), do: Map.merge(earlier, later, &keep_earlier_on_nil/3)
+
+  defp keep_earlier_on_nil(_key, earlier, nil), do: earlier
+  defp keep_earlier_on_nil(_key, _earlier, later), do: later
 
   defp counted(nil), do: 0
   defp counted(tokens), do: tokens
