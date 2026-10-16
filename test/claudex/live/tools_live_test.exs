@@ -47,6 +47,37 @@ defmodule Claudex.Live.ToolsTest do
     def repeat(word, times), do: String.duplicate(word, times)
   end
 
+  defmodule Arithmetic do
+    @moduledoc false
+    use Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+  end
+
+  defmodule Strings do
+    @moduledoc false
+    use Tool
+
+    @doc "Joins two strings."
+    @tool true
+    @spec add(String.t(), String.t()) :: String.t()
+    def add(a, b), do: a <> b
+  end
+
+  test "two modules with a tool of the same name are refused", %{client: client} do
+    assert {:error, %Claudex.Error{status: 400, message: message}} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: [Arithmetic, Strings],
+               messages: [Message.user("Add 2 and 3.")]
+             })
+
+    assert message =~ "unique"
+  end
+
   test "a strict tool with a bounded integer is accepted and called", %{client: client} do
     assert {:ok, message} =
              Messages.create(client, %{

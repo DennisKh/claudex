@@ -203,6 +203,62 @@ defmodule Claudex.ToolTest do
       end
     end
 
+    test "two arities of one function can't both be tools, since they share its name" do
+      assert_raise Claudex.Tool.SchemaError, ~r/add\/2 and add\/3 .* both the tool "add"/s, fn ->
+        Code.compile_string("""
+        defmodule TwoArities#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Adds two."
+          @tool true
+          @spec add(integer(), integer()) :: integer()
+          def add(a, b), do: a + b
+
+          @doc "Adds three."
+          @tool true
+          @spec add(integer(), integer(), integer()) :: integer()
+          def add(a, b, c), do: a + b + c
+        end
+        """)
+      end
+    end
+
+    test "@tool on a second clause of the same function says it belongs once" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/on two clauses of add\/2 .* once, above the first/s,
+                   fn ->
+                     Code.compile_string("""
+                     defmodule TwoClauses#{System.unique_integer([:positive])} do
+                       use Claudex.Tool
+
+                       @doc "Adds."
+                       @tool true
+                       @spec add(integer(), integer()) :: integer()
+                       def add(0, b), do: b
+
+                       @tool true
+                       def add(a, b), do: a + b
+                     end
+                     """)
+                   end
+    end
+
+    test "a defaulted argument is still one tool" do
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule Defaulted#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Adds."
+          @tool true
+          @spec add(integer(), integer()) :: integer()
+          def add(a, b \\\\ 0), do: a + b
+        end
+        """)
+
+      assert [%{name: "add"}] = Claudex.Tool.list(module)
+    end
+
     test "a tool with no @doc warns and falls back to a placeholder" do
       warning =
         ExUnit.CaptureIO.capture_io(:stderr, fn ->
