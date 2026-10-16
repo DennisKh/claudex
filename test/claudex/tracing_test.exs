@@ -95,6 +95,19 @@ defmodule Claudex.TracingTest do
            } = attributes(recorded)
   end
 
+  test "a cached request's input tokens include what it read from and wrote to the cache" do
+    reply(Fixtures.json!("cached"))
+
+    assert {:ok, _message} = Messages.create(client(), @params)
+    assert_receive {:span, recorded}, 2_000
+
+    assert %{
+             "gen_ai.usage.input_tokens" => 11_714,
+             "gen_ai.usage.cache_write.input_tokens" => 11_702,
+             "gen_ai.usage.cache_read.input_tokens" => 0
+           } = attributes(recorded)
+  end
+
   test "the request and response models are both recorded, because they differ" do
     reply(message())
 
@@ -839,6 +852,20 @@ defmodule Claudex.TracingTest do
     for span <- collect_spans([]) do
       refute Map.has_key?(attributes(span), "gen_ai.tool.call.arguments")
     end
+  end
+
+  test "a streamed cached reply counts its input tokens the same way" do
+    stream_reply(Fixtures.json!("cached"))
+
+    assert {:ok, _turn} = ToolRunner.run(client(), Map.put(@params, :tools, Calculator))
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+
+    assert %{
+             "gen_ai.usage.input_tokens" => 11_714,
+             "gen_ai.usage.cache_write.input_tokens" => 11_702,
+             "gen_ai.usage.cache_read.input_tokens" => 0
+           } = attributes(request)
   end
 
   test "a streamed reply records the model, the tokens and the stop reason" do
