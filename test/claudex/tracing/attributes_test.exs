@@ -40,6 +40,21 @@ defmodule Claudex.Tracing.AttributesTest do
     Map.merge(%{method: :post, path: path}, extra)
   end
 
+  test "every span that has a provider names it under both keys" do
+    {_name, request} =
+      Attributes.request(metadata(@messages_path, %{model: "claude-opus-5"}),
+        json: %{model: "claude-opus-5", messages: []}
+      )
+
+    {_name, conversation} = Attributes.conversation(%{model: "claude-opus-5"}, 20, nil)
+    {_name, tool} = Attributes.tool("add", %{})
+
+    for attributes <- [request, conversation, tool] do
+      assert attributes["gen_ai.provider.name"] == "anthropic"
+      assert attributes["gen_ai.system"] == "anthropic"
+    end
+  end
+
   describe "request/2" do
     test "a messages request is named and marked as a generation" do
       {name, attributes} =
@@ -67,6 +82,26 @@ defmodule Claudex.Tracing.AttributesTest do
   end
 
   describe "response/2" do
+    # The counts of a warm cache, as the API reported them for a 4096+ token
+    # prompt read back in full.
+    test "the input tokens include what was read from the cache" do
+      usage = %{
+        "input_tokens" => 12,
+        "cache_creation_input_tokens" => 0,
+        "cache_read_input_tokens" => 11_702,
+        "output_tokens" => 4
+      }
+
+      attributes = Attributes.response(%{"usage" => usage}, 200)
+
+      assert attributes["gen_ai.usage.input_tokens"] == 11_714
+      assert attributes["gen_ai.usage.cache_read.input_tokens"] == 11_702
+
+      streamed = Attributes.reply(%Message{usage: Usage.decode(usage), content: []})
+
+      assert streamed["gen_ai.usage.input_tokens"] == 11_714
+    end
+
     test "reads the id, the snapshot model, the tokens and the stop reason" do
       body = %{
         "id" => "msg_1",

@@ -181,6 +181,34 @@ defmodule Claudex.Live.TracingTest do
     end
   end
 
+  # Claude Haiku 4.5 caches nothing under 4096 tokens, hence a prompt this long.
+  test "a cached request's span counts the input the way the conventions do", %{client: client} do
+    system = String.duplicate("The archivist catalogued every ledger before the winter. ", 900)
+
+    {:ok, message} =
+      Messages.create(client, %{
+        model: @model,
+        max_tokens: 16,
+        system: [%{type: "text", text: system, cache_control: %{type: "ephemeral"}}],
+        messages: [Message.user("Reply with one word: ok")]
+      })
+
+    usage = message.usage
+    assert usage.cache_creation_input_tokens + usage.cache_read_input_tokens > 0
+
+    [request] = named(collect([]), "chat " <> @model)
+    recorded = attributes(request)
+
+    assert recorded["gen_ai.provider.name"] == "anthropic"
+
+    assert recorded["gen_ai.usage.input_tokens"] ==
+             usage.input_tokens + usage.cache_creation_input_tokens +
+               usage.cache_read_input_tokens
+
+    assert recorded["gen_ai.usage.cache_write.input_tokens"] == usage.cache_creation_input_tokens
+    assert recorded["gen_ai.usage.cache_read.input_tokens"] == usage.cache_read_input_tokens
+  end
+
   describe "requests that are not generations" do
     test "count_tokens carries a model and is still not one", %{client: client} do
       params = %{model: @model, messages: [Message.user("What is 12 plus 30?")]}

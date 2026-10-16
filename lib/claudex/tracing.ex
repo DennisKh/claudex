@@ -53,7 +53,9 @@ defmodule Claudex.Tracing do
   Attributes follow the
   [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
   so any backend that reads them shows the model, the token counts and the
-  stop reason without a Claudex-specific integration.
+  stop reason without a Claudex-specific integration. Their input count
+  includes the tokens read from and written to the cache, which
+  `Claudex.Usage`'s `input_tokens` leaves out.
 
   ## What a trace looks like
 
