@@ -308,6 +308,7 @@ Claudex.ToolRunner.run(client, params,
 case Claudex.Message.stop(message) do
   :tool_use -> run(Claudex.Message.tool_uses(message))
   :paused -> resend(history)
+  :compacted -> continue_from_summary(history, message)
   stop when stop in [:refusal, :truncated, :unknown] -> stop_here(stop)
   :completed -> render(message)
 end

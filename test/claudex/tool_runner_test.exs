@@ -988,6 +988,51 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
+  test "a turn paused after compaction resumes on its summary, adding nothing" do
+    {:ok, replies} =
+      Agent.start_link(fn ->
+        [
+          &Plug.Conn.send_resp(&1, 200, Fixtures.sse!("compaction_stream")),
+          &MessageStream.respond(&1, message([text("Bay 35.")], "end_turn"))
+        ]
+      end)
+
+    test_pid = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:sent, Jason.decode!(raw_body)})
+      Agent.get_and_update(replies, fn [reply | rest] -> {reply, rest} end).(conn)
+    end)
+
+    assert [first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+
+    assert first.stop == nil
+    assert first.message.stop_reason == "compaction"
+    assert second.stop == :completed
+
+    assert_received {:sent, _first}
+    assert_received {:sent, %{"messages" => [%{"role" => "user"}, resumed]}}
+
+    assert %{
+             "role" => "assistant",
+             "content" => [%{"type" => "compaction", "content" => summary}]
+           } =
+             resumed
+
+    assert is_binary(summary) and summary != ""
+  end
+
+  test "a compaction request can't run as a tool conversation" do
+    respond_with([])
+
+    assert_raise ArgumentError, ~r/`:compaction` can't be set on a tool runner/, fn ->
+      ToolRunner.stream(client(), Map.put(@params, :compaction, %{type: "summarize"}))
+    end
+
+    refute_received {:sent, _request}
+  end
+
   test "a paused turn resumes carrying the server tool's arguments" do
     # The search the API is part-way through is what makes the paused reply
     # resumable; a history that replays it with an empty input starts it again.
