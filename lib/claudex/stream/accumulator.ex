@@ -85,14 +85,18 @@ defmodule Claudex.Stream.Accumulator do
     end
   end
 
-  def add(%__MODULE__{} = accumulator, %MessageDelta{} = event) do
+  def add(%__MODULE__{message: started} = accumulator, %MessageDelta{} = event) do
+    usage = Usage.merge(started.usage, event.usage)
+
     message = %{
-      accumulator.message
-      | stop_reason: event.stop_reason,
+      started
+      | raw: fold_raw(started.raw, event.raw, usage),
+        stop_reason: event.stop_reason,
         stop_sequence: event.stop_sequence,
-        stop_details: event.stop_details || accumulator.message.stop_details,
-        container: event.container || accumulator.message.container,
-        usage: Usage.merge(accumulator.message.usage, event.usage)
+        stop_details: event.stop_details || started.stop_details,
+        container: event.container || started.container,
+        context_management: event.context_management || started.context_management,
+        usage: usage
     }
 
     %{accumulator | message: message}
@@ -146,6 +150,23 @@ defmodule Claudex.Stream.Accumulator do
       message -> Message.text(message)
     end
   end
+
+  defp fold_raw(nil, _event, _usage), do: nil
+  defp fold_raw(raw, nil, _usage), do: raw
+
+  defp fold_raw(raw, event, usage) do
+    fields = Map.merge(event["delta"] || %{}, Map.drop(event, ["type", "delta", "usage"]))
+
+    raw
+    |> Map.merge(fields, fn
+      _key, earlier, nil -> earlier
+      _key, _earlier, later -> later
+    end)
+    |> put_usage_raw(usage)
+  end
+
+  defp put_usage_raw(raw, %Usage{raw: %{} = usage}), do: Map.put(raw, "usage", usage)
+  defp put_usage_raw(raw, _usage), do: raw
 
   defp apply_delta(accumulator, index, {:input_json, chunk}) do
     %{accumulator | tool_input: Map.update(accumulator.tool_input, index, chunk, &(&1 <> chunk))}

@@ -316,6 +316,14 @@ defmodule Claudex.MessageTest do
     assert Message.to_param(%URI{path: "/x"}) == %URI{path: "/x"}
   end
 
+  test "decode/1 keeps the context edits a reply reports" do
+    applied = %{
+      "applied_edits" => [%{"type" => "clear_tool_uses_20250919", "cleared_tool_uses" => 2}]
+    }
+
+    assert Message.decode(%{"context_management" => applied}).context_management == applied
+  end
+
   describe "stop/1" do
     test "answers for every reason the API documents" do
       mapping = %{

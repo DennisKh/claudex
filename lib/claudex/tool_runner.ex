@@ -317,8 +317,8 @@ defmodule Claudex.ToolRunner do
   the time you see that turn, so halting stops the conversation rather than
   cancelling work — a tool that shouldn't run guards itself instead.
 
-  Each turn carries the usage of its own request, so a run's cost is the sum
-  over the stream:
+  Each turn carries the usage of its own request, so a run's token counts are
+  the sum over the stream:
 
       client
       |> Claudex.ToolRunner.stream(params)
@@ -328,6 +328,9 @@ defmodule Claudex.ToolRunner do
           output: total.output + turn.message.usage.output_tokens
         }
       end)
+
+  Those are the requested model's counts. A compaction or advisor step is left
+  out of them and listed in the turn's `usage.iterations`.
 
   `Claudex.Usage.merge/2` is not that sum. It folds the two halves of one
   streamed reply and replaces field by field, so reducing turns with it reports
