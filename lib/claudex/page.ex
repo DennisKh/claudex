@@ -53,11 +53,13 @@ defmodule Claudex.Page do
   @doc false
   @spec stream!(keyword(), (keyword() -> {:ok, t()} | {:error, Error.t()})) :: Enumerable.t()
   def stream!(opts, fetch) do
+    backward = opts[:before_id] not in [nil, ""]
+
     Stream.resource(
       fn -> {:cont, opts} end,
       fn
         :halt -> {:halt, :done}
-        {:cont, opts} -> page(fetch.(opts), opts)
+        {:cont, opts} -> page(fetch.(opts), opts, backward)
       end,
       fn _state -> :ok end
     )
@@ -75,16 +77,23 @@ defmodule Claudex.Page do
     }
   end
 
-  defp page({:ok, %__MODULE__{} = page}, opts), do: {page.data, after_page(page, opts)}
-  defp page({:error, error}, _opts), do: raise(error)
+  defp page({:ok, %__MODULE__{} = page}, opts, backward) do
+    {page.data, after_page(page, opts, backward)}
+  end
 
-  defp after_page(%__MODULE__{has_more: true, last_id: id}, opts) when is_binary(id) do
+  defp page({:error, error}, _opts, _backward), do: raise(error)
+
+  defp after_page(%__MODULE__{has_more: true, first_id: id}, opts, true) when is_binary(id) do
+    {:cont, Keyword.put(opts, :before_id, id)}
+  end
+
+  defp after_page(%__MODULE__{has_more: true, last_id: id}, opts, false) when is_binary(id) do
     {:cont, Keyword.put(opts, :after_id, id)}
   end
 
-  defp after_page(%__MODULE__{next_page: cursor}, opts) when is_binary(cursor) do
+  defp after_page(%__MODULE__{next_page: cursor}, opts, _backward) when is_binary(cursor) do
     {:cont, Keyword.put(opts, :page, cursor)}
   end
 
-  defp after_page(%__MODULE__{}, _opts), do: :halt
+  defp after_page(%__MODULE__{}, _opts, _backward), do: :halt
 end

@@ -45,6 +45,42 @@ defmodule Claudex.PageTest do
     refute_received {:query, _third}
   end
 
+  test "stream!/2 started with before_id walks back with first_id, never sending after_id" do
+    respond_with([
+      %{
+        "data" => [model("c"), model("d")],
+        "has_more" => true,
+        "first_id" => "c",
+        "last_id" => "d"
+      },
+      %{"data" => [model("b")], "has_more" => false, "first_id" => "b", "last_id" => "b"}
+    ])
+
+    assert client() |> Models.stream!(before_id: "e") |> Enum.map(& &1.id) == ["c", "d", "b"]
+
+    assert_received {:query, %{"before_id" => "e"} = first}
+    refute Map.has_key?(first, "after_id")
+
+    assert_received {:query, %{"before_id" => "c"} = second}
+    refute Map.has_key?(second, "after_id")
+
+    refute_received {:query, _third}
+  end
+
+  test "stream!/2 with an empty before_id walks forward, as with none" do
+    for before_id <- [nil, ""] do
+      respond_with([
+        %{"data" => [model("a")], "has_more" => true, "first_id" => "a", "last_id" => "a"},
+        %{"data" => [model("b")], "has_more" => false, "first_id" => "b", "last_id" => "b"}
+      ])
+
+      assert client() |> Models.stream!(before_id: before_id) |> Enum.map(& &1.id) == ["a", "b"]
+
+      assert_received {:query, _first}
+      assert_received {:query, %{"after_id" => "a"}}
+    end
+  end
+
   test "stream!/2 walks the opaque cursor until it runs out" do
     respond_with([
       %{"data" => [file("f1")], "next_page" => "cursor_2"},

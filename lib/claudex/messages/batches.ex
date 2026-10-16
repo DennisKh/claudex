@@ -128,8 +128,12 @@ defmodule Claudex.Messages.Batches do
   batches rather than pages.
 
   Pages are fetched as you consume them, so taking the first few costs one
-  request. Takes the same options as `list/2`; a cursor among them says
-  where to start, and is threaded from there. Enumerating raises `Claudex.Error` if a request fails.
+  request. Takes the same options as `list/2`. `:after_id` starts after that
+  id and walks forward. `:before_id` walks the other way, towards the first
+  item an uncursored `list/2` returns, a page at a time. Each page keeps
+  `list/2`'s order, so the item right before the cursor ends the first page
+  rather than opening it. Enumerating raises `Claudex.Error` if a request
+  fails.
   """
   @spec stream!(Client.t()) :: Enumerable.t()
   @spec stream!(Client.t(), [option()]) :: Enumerable.t()
