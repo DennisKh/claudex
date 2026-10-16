@@ -23,6 +23,22 @@ defmodule Claudex.Live.PaginationTest do
     assert all == Enum.uniq(all), "a repeated id means the cursor didn't advance"
   end
 
+  test "walks back from a before_id, a page at a time", %{client: client} do
+    all = client |> Models.stream!(limit: 100) |> Enum.map(& &1.id)
+    assert length(all) > 5, "the key sees too few models for this to page back"
+
+    backward = client |> Models.stream!(before_id: Enum.at(all, 5), limit: 2) |> Enum.map(& &1.id)
+
+    expected =
+      all
+      |> Enum.take(5)
+      |> Enum.reverse()
+      |> Enum.chunk_every(2)
+      |> Enum.flat_map(&Enum.reverse/1)
+
+    assert backward == expected
+  end
+
   test "stops as soon as the caller does", %{client: client} do
     assert client |> Models.stream!(limit: 2) |> Enum.take(3) |> length() == 3
   end
