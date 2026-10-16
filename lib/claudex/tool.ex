@@ -116,6 +116,10 @@ defmodule Claudex.Tool do
   and both properties come out unconstrained. Writing one `@spec` per arity
   is fine — the matching one is picked whichever order they're in.
 
+  A tool is named for its function, so `@tool` goes on one arity of a
+  function at most. Tagging `add/2` and `add/3` both fails to compile, since
+  they would be two tools named `"add"`.
+
   Naming the arguments in a `@spec`, `add(a :: number(), b :: number())`, is
   read the same as leaving them bare. The property names come from the
   function's own parameters either way.
@@ -337,6 +341,9 @@ defmodule Claudex.Tool do
   tools list ahead of time, or for something other than
   `Messages.create/2` (Batches, a hand-rolled request).
 
+  Tool names must be unique across the whole list, server tools included: the
+  API refuses a request that lists two tools with the same name.
+
   The maps use atom keys, while the property names inside `input_schema` are
   strings, since those come from the function's parameters:
 
@@ -401,8 +408,33 @@ defmodule Claudex.Tool do
       "is a #{kind} — Claudex would register a tool it can't call"
   end
 
+  defp reject_taken_name!(module, name, arity) do
+    module
+    |> Module.get_attribute(:tool_dispatch_entries)
+    |> Enum.find(&(&1.function == name))
+    |> reject_taken(module, name, arity)
+  end
+
+  defp reject_taken(nil, _module, _name, _arity), do: :ok
+
+  defp reject_taken(%{params: params}, module, name, arity) when length(params) == arity do
+    raise SchemaError,
+      message:
+        "`@tool` is on two clauses of #{name}/#{arity} in #{inspect(module)}. " <>
+          "A function is one tool, so put `@tool` once, above the first clause"
+  end
+
+  defp reject_taken(%{params: params}, module, name, arity) do
+    raise SchemaError,
+      message:
+        "`@tool` is on #{name}/#{length(params)} and #{name}/#{arity} in " <>
+          "#{inspect(module)}, which would be both the tool #{inspect(Atom.to_string(name))}. " <>
+          "Tool names must be unique, so keep `@tool` on one of them"
+  end
+
   defp register(env, name, args, tool_opts) do
     module = env.module
+    reject_taken_name!(module, name, length(args))
     opts = normalize_opts(tool_opts)
     {properties, params} = schema_for(opts, name, args, module, env)
     properties = describe_args(properties, opts, name)

@@ -92,9 +92,8 @@ defmodule Claudex.ToolRunner do
   is success; raising is failure. A tool's return value is your own data, so
   it can't double as an error channel.
 
-  `:tools` takes several modules as a list. Keep tool names unique across
-  them — Claude is told about both, but only the one from the last module
-  listed can be called.
+  `:tools` takes several modules as a list, and their tool names must be
+  unique, as `Claudex.Tool.list/1` says.
 
   ## Options
 
