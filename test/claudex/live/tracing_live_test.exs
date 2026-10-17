@@ -36,7 +36,7 @@ defmodule Claudex.Live.TracingTest do
     @doc "Divides the first integer by the second."
     @tool true
     @spec divide(integer(), integer()) :: integer()
-    def divide(_a, 0), do: raise(Claudex.Tool.Error, "cannot divide by zero")
+    def divide(_a, 0 = _b), do: raise(Claudex.Tool.Error, "cannot divide by zero")
     def divide(a, b), do: div(a, b)
   end
 

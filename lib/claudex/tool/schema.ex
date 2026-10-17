@@ -83,12 +83,22 @@ defmodule Claudex.Tool.Schema do
 
   @doc """
   Extracts each parameter's name and whether it has a default value, from
-  the argument AST alone — no `@spec` involved, so this never raises.
+  the argument AST alone, with no `@spec` involved, so this never raises.
   `Claudex.Tool` uses this on its own when a tool is registered with an
   explicit `args_schema:`, since that skips `@spec` inspection entirely.
+
+  A parameter is named for the variable bound to it as a whole, on either
+  side of `=`, without its leading underscores. One with no such variable,
+  or whose variable is only underscores, is `"arg"`.
   """
   @spec params([Macro.t()]) :: [param()]
   def params(args), do: Enum.map(args, &param_info/1)
+
+  @doc false
+  @spec unnamed([Macro.t()]) :: [Macro.t()]
+  def unnamed(args) do
+    args |> Enum.map(&without_default/1) |> Enum.filter(&(bound_name(&1) == nil))
+  end
 
   @doc """
   Builds the `input_schema` properties for a function, given its argument
@@ -203,13 +213,23 @@ defmodule Claudex.Tool.Schema do
 
   defp param_info(pattern), do: {param_name(pattern), false}
 
+  defp param_name(pattern), do: bound_name(pattern) || "arg"
+
+  defp bound_name({:=, _meta, [left, right]}), do: bound_name(left) || bound_name(right)
+
   # `def read(_path)` would otherwise publish a property literally named
   # "_path", which Claude never sends.
-  defp param_name({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
-    name |> Atom.to_string() |> String.trim_leading("_")
+  defp bound_name({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
+    case name |> Atom.to_string() |> String.trim_leading("_") do
+      "" -> nil
+      trimmed -> trimmed
+    end
   end
 
-  defp param_name(_pattern), do: "arg"
+  defp bound_name(_pattern), do: nil
+
+  defp without_default({:\\, _meta, [pattern, _default]}), do: pattern
+  defp without_default(pattern), do: pattern
 
   defp spec_arg_types(name, arity, module_specs) do
     Enum.find_value(module_specs, [], fn

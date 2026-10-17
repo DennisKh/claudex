@@ -17,7 +17,7 @@ defmodule Claudex.Live.ToolsTest do
     @doc "Returns the current temperature, in Celsius, for a city."
     @tool true
     @spec get_temperature(String.t()) :: String.t()
-    def get_temperature("Tokyo"), do: "24"
+    def get_temperature("Tokyo" = _city), do: "24"
     def get_temperature(_city), do: "18"
 
     @doc "Returns the average of the temperatures given, in Celsius."
@@ -65,6 +65,27 @@ defmodule Claudex.Live.ToolsTest do
     @tool true
     @spec add(String.t(), String.t()) :: String.t()
     def add(a, b), do: a <> b
+  end
+
+  defmodule Maps do
+    @moduledoc false
+    use Tool
+
+    @doc "Merges two maps."
+    @tool true
+    @spec merge(map(), map()) :: map()
+    def merge(%{} = left, %{} = right), do: Map.merge(left, right)
+  end
+
+  test "parameters written as bound patterns are a schema the API accepts", %{client: client} do
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: Maps,
+               messages: [Message.user("Merge two maps.")]
+             })
+
+    assert tokens > 0
   end
 
   test "two modules with a tool of the same name are refused", %{client: client} do
