@@ -172,8 +172,7 @@ defmodule Claudex.Live.TracingTest do
       spans = collect([])
 
       assert [call | _rest] = named(spans, "execute_tool divide")
-      assert {:status, :error, message} = span(call, :status)
-      assert message =~ "cannot divide by zero"
+      assert span(call, :status) == {:status, :error, "tool_refused"}
 
       assert [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
       assert attributes(root)["claudex.stop"] == "completed"
