@@ -36,7 +36,7 @@ defmodule Claudex.Live.TracingTest do
     @doc "Divides the first integer by the second."
     @tool true
     @spec divide(integer(), integer()) :: integer()
-    def divide(_a, 0), do: raise(Claudex.Tool.Error, "cannot divide by zero")
+    def divide(_a, 0 = _b), do: raise(Claudex.Tool.Error, "cannot divide by zero")
     def divide(a, b), do: div(a, b)
   end
 
@@ -172,8 +172,7 @@ defmodule Claudex.Live.TracingTest do
       spans = collect([])
 
       assert [call | _rest] = named(spans, "execute_tool divide")
-      assert {:status, :error, message} = span(call, :status)
-      assert message =~ "cannot divide by zero"
+      assert span(call, :status) == {:status, :error, "tool_refused"}
 
       assert [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
       assert attributes(root)["claudex.stop"] == "completed"

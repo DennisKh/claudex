@@ -57,7 +57,8 @@ defmodule Claudex.Tool do
       inferring one from `@spec`. Takes full priority: when it's set, the
       `@spec` is never even inspected, so it's also the way out of a type
       Claudex can't map (see below), or when you need something a
-      typespec can't express (an `enum`, say)
+      typespec can't express (an `enum`, say). It needs a property for
+      every parameter without a default, named as the parameter is
 
   Claude picks arguments from their descriptions, so an argument named
   `path` tells it less than one described as an absolute path. `:args` merges
@@ -124,7 +125,11 @@ defmodule Claudex.Tool do
 
   Naming the arguments in a `@spec`, `add(a :: number(), b :: number())`, is
   read the same as leaving them bare. The property names come from the
-  function's own parameters either way.
+  function's own parameters either way. A pattern takes the name of the
+  variable bound to the whole of it, as in `%{} = opts`, and one with no such
+  variable, as in `def get_temperature("Tokyo")`, is published as `"arg"`,
+  with a compile warning unless `:args_schema` is set. Two parameters that
+  would share a name fail to compile.
 
   ## Structs as arguments
 
@@ -449,6 +454,9 @@ defmodule Claudex.Tool do
     reject_taken_name!(module, name, length(args))
     opts = normalize_opts(tool_opts)
     {properties, params} = schema_for(opts, name, args, module, env)
+    reject_shared_names!(module, name, args, params)
+    reject_uncovered_params!(module, name, args, opts, params)
+    warn_unnamed(env, name, args, opts)
     properties = describe_args(properties, opts, name)
 
     input_schema =
@@ -481,6 +489,57 @@ defmodule Claudex.Tool do
     Module.delete_attribute(module, :tool)
 
     :ok
+  end
+
+  defp reject_shared_names!(module, name, args, params) do
+    names = Enum.map(params, &elem(&1, 0))
+
+    case names -- Enum.uniq(names) do
+      [] -> :ok
+      [shared | _] -> raise_shared_name!(module, name, args, names, shared)
+    end
+  end
+
+  defp raise_shared_name!(module, name, args, names, shared) do
+    [first, second | _] = for {arg, ^shared} <- Enum.zip(args, names), do: Macro.to_string(arg)
+
+    raise SchemaError,
+      message:
+        "`@tool` is on #{name}/#{length(args)} in #{inspect(module)}, but `#{first}` and " <>
+          "`#{second}` would both be the property #{inspect(shared)}. " <>
+          "Give each parameter its own name"
+  end
+
+  defp reject_uncovered_params!(module, name, args, %{args_schema: schema}, params) do
+    keys = for {key, _property} <- schema, do: to_string(key)
+
+    case for({param, false} <- params, param not in keys, do: param) do
+      [] ->
+        :ok
+
+      [missing | _] ->
+        raise SchemaError,
+          message:
+            "`@tool` is on #{name}/#{length(args)} in #{inspect(module)}, but its " <>
+              ":args_schema has no property #{inspect(missing)}, the name the parameter " <>
+              "is read by. Add it, or rename the parameter to match"
+    end
+  end
+
+  defp reject_uncovered_params!(_module, _name, _args, _opts, _params), do: :ok
+
+  defp warn_unnamed(_env, _name, _args, %{args_schema: _schema}), do: :ok
+
+  defp warn_unnamed(env, name, args, _opts) do
+    for pattern <- Schema.unnamed(args) do
+      source = Macro.to_string(pattern)
+
+      IO.warn(
+        "#{inspect(env.module)}.#{name}/#{length(args)} has a parameter, `#{source}`, " <>
+          "with no name to publish, so Claude sees it as \"arg\". Name it, as in `#{source} = _name`",
+        env
+      )
+    end
   end
 
   # args_schema: takes full priority over @spec — when it's set, the spec
