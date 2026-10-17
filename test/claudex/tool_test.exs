@@ -231,6 +231,34 @@ defmodule Claudex.ToolTest do
       end
     end
 
+    test "the API's own tool-definition fields go onto the definition as given" do
+      fields = %{
+        allowed_callers: ["code_execution_20260521"],
+        cache_control: %{type: "ephemeral", ttl: "1h"},
+        defer_loading: true,
+        eager_input_streaming: true,
+        input_examples: [%{}]
+      }
+
+      [{module, _bytecode}] = define(inspect(fields))
+      [tool] = module.__tools__()
+
+      assert Map.take(tool, Map.keys(fields)) == fields
+    end
+
+    test "a definition field left out isn't sent" do
+      [{module, _bytecode}] = define("true")
+      [tool] = module.__tools__()
+
+      assert Map.keys(tool) |> Enum.sort() == [:description, :input_schema, :name]
+    end
+
+    test "an unknown key lists every option @tool takes" do
+      assert_raise Claudex.Tool.SchemaError, ~r/:defer_loading.*:input_examples/, fn ->
+        define(~s(%{defer_load: true}))
+      end
+    end
+
     test ":strict must be a boolean, not merely truthy" do
       assert_raise Claudex.Tool.SchemaError, ~r/:strict must be true or false, got: 0/, fn ->
         define("%{strict: 0}")

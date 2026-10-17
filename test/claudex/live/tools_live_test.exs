@@ -77,6 +77,76 @@ defmodule Claudex.Live.ToolsTest do
     def merge(%{} = left, %{} = right), do: Map.merge(left, right)
   end
 
+  defmodule Annotated do
+    @moduledoc false
+    use Tool
+
+    @doc "Adds two integers."
+    @tool %{
+      allowed_callers: ["direct"],
+      cache_control: %{type: "ephemeral"},
+      eager_input_streaming: true,
+      input_examples: [%{"a" => 1, "b" => 2}]
+    }
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+
+    @doc "Subtracts the second integer from the first."
+    @tool %{defer_loading: true}
+    @spec subtract(integer(), integer()) :: integer()
+    def subtract(a, b), do: a - b
+  end
+
+  defmodule Unannotated do
+    @moduledoc false
+    use Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+
+    @doc "Subtracts the second integer from the first."
+    @tool true
+    @spec subtract(integer(), integer()) :: integer()
+    def subtract(a, b), do: a - b
+  end
+
+  defmodule Deferred do
+    @moduledoc false
+    use Tool
+
+    @doc "Subtracts the second integer from the first."
+    @tool %{defer_loading: true}
+    @spec subtract(integer(), integer()) :: integer()
+    def subtract(a, b), do: a - b
+  end
+
+  test "a tool's definition fields are ones the API accepts and counts", %{client: client} do
+    count = fn tools ->
+      Messages.count_tokens(client, %{
+        model: @model,
+        tools: tools,
+        messages: [Message.user("Add 2 and 3.")]
+      })
+    end
+
+    assert {:ok, annotated} = count.(Annotated)
+    assert {:ok, unannotated} = count.(Unannotated)
+    assert annotated != unannotated
+  end
+
+  test "a tool's definition fields reach the API", %{client: client} do
+    assert {:error, %Claudex.Error{status: 400, message: message}} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: Deferred,
+               messages: [Message.user("Subtract 2 from 3.")]
+             })
+
+    assert message =~ "cannot be deferred"
+  end
+
   test "parameters written as bound patterns are a schema the API accepts", %{client: client} do
     assert {:ok, tokens} =
              Messages.count_tokens(client, %{

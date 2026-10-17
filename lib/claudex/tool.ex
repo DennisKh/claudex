@@ -59,6 +59,11 @@ defmodule Claudex.Tool do
       Claudex can't map (see below), or when you need something a
       typespec can't express (an `enum`, say). It needs a property for
       every parameter without a default, named as the parameter is
+    * `:allowed_callers`, `:cache_control`, `:defer_loading`,
+      `:eager_input_streaming` and `:input_examples` - copied onto the tool
+      definition as given. The
+      [tool reference](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference#tool-definition-properties)
+      says what each one does
 
   Claude picks arguments from their descriptions, so an argument named
   `path` tells it less than one described as an absolute path. `:args` merges
@@ -186,7 +191,14 @@ defmodule Claudex.Tool do
   alias Claudex.Tracing
   alias Claudex.Tracing.Attributes
 
-  @tool_opts [:args, :args_schema, :strict]
+  @definition_fields [
+    :allowed_callers,
+    :cache_control,
+    :defer_loading,
+    :eager_input_streaming,
+    :input_examples
+  ]
+  @tool_opts [:args, :args_schema, :strict | @definition_fields]
   @strict_unexpressible "A strict tool needs a concrete type for every argument, and `any()`, " <>
                           "`term()` and a struct that refers to itself have none. Give it one, " <>
                           "or pass args_schema: in the @tool options to describe it explicitly"
@@ -485,6 +497,7 @@ defmodule Claudex.Tool do
     }
 
     tool = if Map.get(opts, :strict, false), do: Map.put(tool, :strict, true), else: tool
+    tool = Map.merge(tool, Map.take(opts, @definition_fields))
 
     Module.put_attribute(module, :registered_tools, tool)
 
@@ -587,7 +600,7 @@ defmodule Claudex.Tool do
         raise SchemaError,
           message:
             "unknown `@tool` option #{inspect(unknown)} — " <>
-              "`@tool` takes #{Enum.map_join(@tool_opts, " and ", &inspect/1)}"
+              "`@tool` takes #{Enum.map_join(@tool_opts, ", ", &inspect/1)}"
     end
   end
 
