@@ -74,7 +74,7 @@ system: [
 
 `cache_control` at the top of the request caches automatically; on a content block, as above, it pins a breakpoint there, which is what a long `system` prompt wants.
 
-A breakpoint goes on any block: a `system` block, a message block from either role, or a tool definition. Four per request is the ceiling, and a fifth is a 400. Each one caches everything before it, so they go on the parts that don't change, and the request-level form exists because pinning one to the newest message every turn spends all four within a few turns.
+A breakpoint goes on any block: a `system` block, a message block from either role, or a tool definition, which for a `@tool` function is `@tool %{cache_control: ...}`. Four per request is the ceiling, and a fifth is a 400. Each one caches everything before it, so they go on the parts that don't change, and the request-level form exists because pinning one to the newest message every turn spends all four within a few turns.
 
 `ttl` belongs to the `cache_control` object wherever it sits, and takes `"5m"`, the default, or `"1h"`, which costs more to write and keeps the prefix alive between turns that are minutes apart. `Claudex.Usage` reports what happened: `cache_creation_input_tokens` for what was written, `cache_read_input_tokens` for what was read back, and `cache_creation` for the split between the two lifetimes.
 
@@ -203,6 +203,8 @@ end
 The `@doc` becomes the tool's description and the `@spec` becomes its schema, so both are prompt material. `:args` adds a description per argument, merged into the inferred schema — worth writing for any argument whose name doesn't say it all, since that description is how Claude decides what to pass.
 
 The function receives each argument as Claude sent it, decoded from JSON: an atom or a date in the `@spec` arrives as a string, and a struct as a map with string keys.
+
+`@tool` also takes the API's own tool-definition fields, `:cache_control`, `:defer_loading`, `:allowed_callers`, `:eager_input_streaming` and `:input_examples`, and copies them onto the definition as given.
 
 `mix claudex.gen.tool MyApp.Tools read_file path` writes that module for you, with every attribute in place and a description slot per argument.
 
