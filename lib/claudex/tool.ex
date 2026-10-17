@@ -118,7 +118,9 @@ defmodule Claudex.Tool do
 
   A tool is named for its function, so `@tool` goes on one arity of a
   function at most. Tagging `add/2` and `add/3` both fails to compile, since
-  they would be two tools named `"add"`.
+  they would be two tools named `"add"`. A tool name holds only ASCII
+  letters, digits, `_` and `-`, up to 128 characters, so a function such as
+  `valid?` or `run!` can't be a tool either.
 
   Naming the arguments in a `@spec`, `add(a :: number(), b :: number())`, is
   read the same as leaving them bare. The property names come from the
@@ -408,6 +410,15 @@ defmodule Claudex.Tool do
       "is a #{kind} — Claudex would register a tool it can't call"
   end
 
+  defp check_tool_name!(module, name, arity) do
+    unless Regex.match?(~r/\A[a-zA-Z0-9_-]{1,128}\z/, Atom.to_string(name)) do
+      raise SchemaError,
+        message:
+          "`@tool` is on #{name}/#{arity} in #{inspect(module)}, but a tool name may hold only " <>
+            "ASCII letters, digits, _ and -, up to 128 characters. Rename the function"
+    end
+  end
+
   defp reject_taken_name!(module, name, arity) do
     module
     |> Module.get_attribute(:tool_dispatch_entries)
@@ -434,6 +445,7 @@ defmodule Claudex.Tool do
 
   defp register(env, name, args, tool_opts) do
     module = env.module
+    check_tool_name!(module, name, length(args))
     reject_taken_name!(module, name, length(args))
     opts = normalize_opts(tool_opts)
     {properties, params} = schema_for(opts, name, args, module, env)

@@ -259,6 +259,57 @@ defmodule Claudex.ToolTest do
       assert [%{name: "add"}] = Claudex.Tool.list(module)
     end
 
+    for name <- ["valid?", "run!", "café", String.duplicate("a", 129)] do
+      test "a function named #{String.slice(name, 0, 12)} (#{String.length(name)} chars) can't be a tool" do
+        assert_raise Claudex.Tool.SchemaError,
+                     ~r/ASCII letters, digits, _ and -, up to 128/,
+                     fn ->
+                       Code.compile_string("""
+                       defmodule BadName#{System.unique_integer([:positive])} do
+                         use Claudex.Tool
+
+                         @doc "Checks."
+                         @tool true
+                         @spec #{unquote(name)}() :: boolean()
+                         def #{unquote(name)}, do: true
+                       end
+                       """)
+                     end
+      end
+    end
+
+    test "a name ending in a newline can't be a tool" do
+      assert_raise Claudex.Tool.SchemaError, ~r/ASCII letters, digits, _ and -, up to 128/, fn ->
+        Code.compile_string("""
+        defmodule NewlineName#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Checks."
+          @tool true
+          def unquote(:"ping\\n")(), do: true
+        end
+        """)
+      end
+    end
+
+    test "a 128-character name is a tool" do
+      name = String.duplicate("a", 128)
+
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule LongName#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Checks."
+          @tool true
+          @spec #{name}() :: boolean()
+          def #{name}, do: true
+        end
+        """)
+
+      assert [%{name: ^name}] = Claudex.Tool.list(module)
+    end
+
     test "a tool with no @doc warns and falls back to a placeholder" do
       warning =
         ExUnit.CaptureIO.capture_io(:stderr, fn ->
