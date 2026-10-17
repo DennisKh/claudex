@@ -129,6 +129,50 @@ defmodule Claudex.ToolTest do
     assert Enum.sort(ticket_schema.required) == ["id", "status", "subject"]
   end
 
+  defmodule DecodedTools do
+    use Claudex.Tool
+
+    @doc "Echoes a level."
+    @tool true
+    @spec echo_level(:low | :high) :: term()
+    def echo_level(level), do: level
+
+    @doc "Echoes a count, or all."
+    @tool true
+    @spec echo_count(:all | pos_integer()) :: term()
+    def echo_count(count), do: count
+
+    @doc "Echoes a date."
+    @tool true
+    @spec echo_date(Date.t()) :: term()
+    def echo_date(date), do: date
+
+    @doc "Echoes options."
+    @tool true
+    @spec echo_opts(keyword()) :: term()
+    def echo_opts(opts), do: opts
+  end
+
+  describe "an argument arrives as Claude sent it" do
+    test "for atom literals, as a string" do
+      assert DecodedTools.__call_tool__("echo_level", %{"level" => "low"}) == {:ok, "low"}
+    end
+
+    test "for a union mixing an atom with another type, as a string" do
+      assert DecodedTools.__call_tool__("echo_count", %{"count" => "all"}) == {:ok, "all"}
+    end
+
+    test "for a date, as a string" do
+      assert DecodedTools.__call_tool__("echo_date", %{"date" => "2026-10-17"}) ==
+               {:ok, "2026-10-17"}
+    end
+
+    test "for a keyword list, as a map with string keys" do
+      assert DecodedTools.__call_tool__("echo_opts", %{"opts" => %{"limit" => 3}}) ==
+               {:ok, %{"limit" => 3}}
+    end
+  end
+
   test "__tools__/0 expands an Ecto-schema-typed argument into a nested object schema" do
     [tool] = StructTools.__tools__() |> Enum.filter(&(&1.name == "summarize_ecto_ticket"))
 
