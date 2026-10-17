@@ -12,7 +12,7 @@ defmodule Arithmetix do
   def run do
     Claudex.Telemetry.attach_default_logger()
 
-    tast = "Compute (5+3)*2 - 6/0"
+    task = "Compute (5+3)*2 - 6/0"
 
     Claudex.new()
     |> Claudex.ToolRunner.stream(%{
