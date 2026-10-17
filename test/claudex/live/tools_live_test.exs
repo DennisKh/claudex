@@ -78,6 +78,31 @@ defmodule Claudex.Live.ToolsTest do
     assert message =~ "unique"
   end
 
+  test "the longest tool name a function may take is accepted", %{client: client} do
+    name = String.duplicate("a", 128)
+
+    [{module, _bytecode}] =
+      Code.compile_string("""
+      defmodule LongestName do
+        use Claudex.Tool
+
+        @doc "Returns true."
+        @tool true
+        @spec #{name}() :: boolean()
+        def #{name}, do: true
+      end
+      """)
+
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: module,
+               messages: [Message.user("Call the tool.")]
+             })
+
+    assert tokens > 0
+  end
+
   test "a strict tool with a bounded integer is accepted and called", %{client: client} do
     assert {:ok, message} =
              Messages.create(client, %{
