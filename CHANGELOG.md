@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.11.0](https://github.com/DennisKh/claudex/compare/v0.10.0...v0.11.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tool:** name a pattern parameter for the variable bound to it ([#111](https://github.com/DennisKh/claudex/issues/111))
+* **tool:** refuse @tool on a function whose name the API rejects ([#110](https://github.com/DennisKh/claudex/issues/110))
+* **tool:** refuse two @tool functions that would share a name ([#108](https://github.com/DennisKh/claudex/issues/108))
+* **tracing:** report provider and token counts the way the GenAI conventions define them ([#106](https://github.com/DennisKh/claudex/issues/106))
+* **message:** map the compaction stop reason and resume it in the tool runner ([#104](https://github.com/DennisKh/claudex/issues/104))
+* **telemetry:** a streamed 4xx/5xx moves from `:exception` to `:stop`, and a plain request that got no response moves from `:stop` with
+
+### Features
+
+* **schema:** build a struct's JSON schema while it compiles with use Claudex.Schema ([#95](https://github.com/DennisKh/claudex/issues/95)) ([9d059eb](https://github.com/DennisKh/claudex/commit/9d059ebfd68b8888054634f3e095b6fca3aaf4bc))
+* send :every batches on a timer and add ContentBlock.replayable?/1 ([#88](https://github.com/DennisKh/claudex/issues/88)) ([164eb30](https://github.com/DennisKh/claudex/commit/164eb30dc940ff5d97b14b0ea222cd1e41df4733))
+* **streaming:** batch stream_to/3 events over a window ([#78](https://github.com/DennisKh/claudex/issues/78)) ([417bdf7](https://github.com/DennisKh/claudex/commit/417bdf78e3cccbe716add8cea9f5d1d185196049))
+* **tool_runner:** halt a run and resume it from its own history ([#82](https://github.com/DennisKh/claudex/issues/82)) ([26c1c22](https://github.com/DennisKh/claudex/commit/26c1c228521d8f8a8658961b81aacec36ba5bb0c))
+* **tool:** set the API's tool-definition fields from [@tool](https://github.com/tool) ([#113](https://github.com/DennisKh/claudex/issues/113)) ([5f112ef](https://github.com/DennisKh/claudex/commit/5f112ef6b0ee55752a60120654872498ff1abb09))
+* **tracing:** run a conversation in a block ([#81](https://github.com/DennisKh/claudex/issues/81)) ([cc4c030](https://github.com/DennisKh/claudex/commit/cc4c030424329af806ad06a6c50482144c90cc8c))
+* **usage:** answer whether prompt caching did anything ([#83](https://github.com/DennisKh/claudex/issues/83)) ([6dcd640](https://github.com/DennisKh/claudex/commit/6dcd640b30f73dfa9fabd924b5802fa2087ba5a3))
+
+
+### Bug Fixes
+
+* 0.11.0 review findings ([#87](https://github.com/DennisKh/claudex/issues/87)) ([708e442](https://github.com/DennisKh/claudex/commit/708e442d817b5b5ed26b9d0dbe71fdf7f955453f))
+* **batches:** prepare each request's params the way Messages.create/2 does ([#96](https://github.com/DennisKh/claudex/issues/96)) ([03b5812](https://github.com/DennisKh/claudex/commit/03b581271db6da939ed5670aa1123655d0042ba3))
+* **client:** retry failed requests the way the official SDKs do ([#99](https://github.com/DennisKh/claudex/issues/99)) ([f0935cd](https://github.com/DennisKh/claudex/commit/f0935cdf9aaac0a98964ad8f6100b48828544432))
+* **deps:** bump req from 0.7.4 to 0.7.5 ([#97](https://github.com/DennisKh/claudex/issues/97)) ([cad56f5](https://github.com/DennisKh/claudex/commit/cad56f5f7f05dfefc4a2a78d5818a9c3b62835fe))
+* **message:** leave a cut-off reply's unanswered tool calls out of the history ([#91](https://github.com/DennisKh/claudex/issues/91)) ([5154bfe](https://github.com/DennisKh/claudex/commit/5154bfe4ebc92be2bceee93839bc91e2d1901d83))
+* **message:** leave a cut-off stream's unsendable blocks out of the history ([#86](https://github.com/DennisKh/claudex/issues/86)) ([88974a8](https://github.com/DennisKh/claudex/commit/88974a85c86bfd68075eda3b23db9cd2e484f0aa))
+* **message:** map the compaction stop reason and resume it in the tool runner ([#104](https://github.com/DennisKh/claudex/issues/104)) ([d436c26](https://github.com/DennisKh/claudex/commit/d436c26c7c5911a1ef0441f1023f2066c521582f))
+* **messages:** refuse a non-streaming request that can outlast the default timeout ([#98](https://github.com/DennisKh/claudex/issues/98)) ([d055eb2](https://github.com/DennisKh/claudex/commit/d055eb2d981b81e59dddb1ba94717644c664389f))
+* **page:** walk back with before_id instead of sending both cursors ([#107](https://github.com/DennisKh/claudex/issues/107)) ([8906a0e](https://github.com/DennisKh/claudex/commit/8906a0e4b588b8ae6888f2ed1dd1b5a4970e6fa8))
+* **streaming:** keep the content a message_start event carries ([bf08e91](https://github.com/DennisKh/claudex/commit/bf08e916426382b0f477e0d87a134e79c0b7a280))
+* **streaming:** keep the summary a compaction delta carries ([#90](https://github.com/DennisKh/claudex/issues/90)) ([0b21499](https://github.com/DennisKh/claudex/commit/0b21499284105759a8f66062c5c73c16e2595397))
+* **stream:** keep iterations, context edits and raw fields from message_delta ([#105](https://github.com/DennisKh/claudex/issues/105)) ([132a372](https://github.com/DennisKh/claudex/commit/132a37280a42c2ec460350c68ff8fb0cf167d96e))
+* **stream:** leave nothing in the caller's mailbox when a stream stops early ([#102](https://github.com/DennisKh/claudex/issues/102)) ([3b8698d](https://github.com/DennisKh/claudex/commit/3b8698de53be1e357c2c3bcb1cae4a8549d30951))
+* **stream:** stop a forwarded stream when its caller exits normally ([#100](https://github.com/DennisKh/claudex/issues/100)) ([0dd2955](https://github.com/DennisKh/claudex/commit/0dd295597a7cb3db3aec86343ef32697b8eaeb7c))
+* **telemetry:** report a failed request the same way on both transports ([#103](https://github.com/DennisKh/claudex/issues/103)) ([4a2ca30](https://github.com/DennisKh/claudex/commit/4a2ca304a177f68636aeb735b4e217b1d78dbaa0))
+* **tool_runner:** encode tool results with Jason so a struct sends only the fields it exposes ([#92](https://github.com/DennisKh/claudex/issues/92)) ([f1a8f39](https://github.com/DennisKh/claudex/commit/f1a8f395152af05e0723615a67fc3e9e844b98b3))
+* **tool_runner:** end on the finished turn when a cancel arrives between turns ([#101](https://github.com/DennisKh/claudex/issues/101)) ([4dc2096](https://github.com/DennisKh/claudex/commit/4dc209631d2fea7d70be8fc8c0cf6af8fc871269))
+* **tool_runner:** keep an unfinished reply's calls out of the history ([#84](https://github.com/DennisKh/claudex/issues/84)) ([e70a6e7](https://github.com/DennisKh/claudex/commit/e70a6e770a09d4cce1589bca9ab277cbfecfde72))
+* **tool_runner:** stop instead of running calls under an unknown stop reason ([#85](https://github.com/DennisKh/claudex/issues/85)) ([c6ffb8d](https://github.com/DennisKh/claudex/commit/c6ffb8d9fd531c6f25adcdf7e7f992fe019693e5))
+* **tool:** fit a strict tool's inferred schema to the subset strict mode takes ([#94](https://github.com/DennisKh/claudex/issues/94)) ([a73c46e](https://github.com/DennisKh/claudex/commit/a73c46e11767d1ab9a854f4ad9cb1e9f99fc7d9e))
+* **tool:** name a pattern parameter for the variable bound to it ([#111](https://github.com/DennisKh/claudex/issues/111)) ([907b1b3](https://github.com/DennisKh/claudex/commit/907b1b3b88bdd3171887d0f94987a4364b3bbba9))
+* **tool:** refuse [@tool](https://github.com/tool) on a function whose name the API rejects ([#110](https://github.com/DennisKh/claudex/issues/110)) ([ff351dc](https://github.com/DennisKh/claudex/commit/ff351dc72149180d352dd070d398530352ee1f70))
+* **tool:** refuse two [@tool](https://github.com/tool) functions that would share a name ([#108](https://github.com/DennisKh/claudex/issues/108)) ([fc195a4](https://github.com/DennisKh/claudex/commit/fc195a48212467dbbce05222e9f55201532ff348))
+* **tool:** send a tool call's caller and toolset back, and keep the runner in its container ([#89](https://github.com/DennisKh/claudex/issues/89)) ([a951ea7](https://github.com/DennisKh/claudex/commit/a951ea7c3e456353f79ed3c8ccf32defa1dd8170))
+* **tracing:** keep a failure's message and arguments off spans unless trace_content is on ([#93](https://github.com/DennisKh/claudex/issues/93)) ([f3d039d](https://github.com/DennisKh/claudex/commit/f3d039d45792b6a85a6a80265a985f3a20861062))
+* **tracing:** report provider and token counts the way the GenAI conventions define them ([#106](https://github.com/DennisKh/claudex/issues/106)) ([3168ea9](https://github.com/DennisKh/claudex/commit/3168ea9b1ba9c039ada2fbeef14eef5079f0c61d))
+
 ## [0.10.0](https://github.com/DennisKh/claudex/compare/v0.9.1...v0.10.0) (2026-09-20)
 
 
