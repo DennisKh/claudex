@@ -19,14 +19,7 @@ defmodule Arithmetix do
       model: "claude-haiku-4-5",
       max_tokens: 612,
       tools: Tools,
-      # Dev tip:
-      # tool_choice 'any' forces Claude to run at least one tool. This means no 'end_turn' will ever occur on its own.
-      # You need to handle this yourself: provide an 'exit' tool as shown in this example, and catch it to stop execution.
-      # Yes, you can skip tool_choice 'any', but the model will not run all your tools, even if the system prompt says so,
-      # especially weaker models.
-      # Also, sometimes a model can perform an operation without calling your tool, even if it's valid to do so. So if it's
-      # required that a tool must be used, because, let's say, you log it or important checks must happen for every
-      # action, tool_choice 'any' is your only option.
+      # claude-haiku-4-5 accepts a forced tool_choice; see the tip in Claudex.ToolRunner.
       tool_choice: %{type: "any"},
       system: system(),
       messages: [Claudex.Message.user(task)]
