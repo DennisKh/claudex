@@ -102,6 +102,13 @@ defmodule Claudex.Tool do
       Claudex.Tool.call(MyApp.Tools, "add", %{"a" => 1, "b" => 2})
       #=> {:ok, 3}
 
+  The function receives each argument as Claude sent it, decoded from JSON,
+  whatever its `@spec` type. An atom other than `true`, `false` and `nil`
+  arrives as a string, so `@spec set_priority(:low | :high)` publishes
+  `enum: ["low", "high"]` and is called with `"low"`. A date or time arrives as
+  the string Claude sent, and a struct or keyword list as a map with string
+  keys.
+
   `Claudex.ToolRunner` does this natively — it runs the tools Claude asks for
   and feeds the results back, so a whole tool conversation is one call.
 
@@ -243,7 +250,8 @@ defmodule Claudex.Tool do
       #=> {:ok, 3}
 
   Arguments are matched to the function's parameters by name, so their order in
-  the map doesn't matter, and a trailing optional parameter can be left out.
+  the map doesn't matter, and a trailing optional parameter can be left out. Each
+  one is passed as decoded JSON, whatever its `@spec` type.
 
   A tool that fails returns a `Claudex.Tool.CallError` instead of taking the
   caller down with it. Its `type` separates a refusal from a bug,
