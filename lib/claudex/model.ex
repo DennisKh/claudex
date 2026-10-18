@@ -7,6 +7,12 @@ defmodule Claudex.Model do
   (batch, citations, thinking, structured outputs, and so on), so Claudex
   hands it to you as the API sent it. `supports?/2` answers the usual question
   about it without reaching in.
+
+  `lifecycle` is `"active"`, `"deprecated"` or `"retired"`, and is what says a
+  model has retired: a `retires_at` in the past on a deprecated model means
+  retirement is overdue, not that it happened. `deprecated_at` is nil while a
+  model is active, and so is `retires_at` until a retirement is scheduled.
+  `line` is the family a model belongs to, such as `"opus"`, or nil for none.
   """
 
   alias Claudex.Timestamp
@@ -18,7 +24,11 @@ defmodule Claudex.Model do
     :created_at,
     :max_tokens,
     :max_input_tokens,
-    :capabilities
+    :capabilities,
+    :lifecycle,
+    :line,
+    :deprecated_at,
+    :retires_at
   ]
 
   @type t :: %__MODULE__{
@@ -28,7 +38,11 @@ defmodule Claudex.Model do
           created_at: DateTime.t() | nil,
           max_tokens: pos_integer() | nil,
           max_input_tokens: pos_integer() | nil,
-          capabilities: map() | nil
+          capabilities: map() | nil,
+          lifecycle: String.t() | nil,
+          line: String.t() | nil,
+          deprecated_at: DateTime.t() | nil,
+          retires_at: DateTime.t() | nil
         }
 
   @doc """
@@ -65,7 +79,11 @@ defmodule Claudex.Model do
       created_at: Timestamp.decode(json["created_at"]),
       max_tokens: json["max_tokens"],
       max_input_tokens: json["max_input_tokens"],
-      capabilities: json["capabilities"]
+      capabilities: json["capabilities"],
+      lifecycle: json["lifecycle"],
+      line: json["line"],
+      deprecated_at: Timestamp.decode(json["deprecated_at"]),
+      retires_at: Timestamp.decode(json["retires_at"])
     }
   end
 

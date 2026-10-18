@@ -160,6 +160,26 @@ defmodule Claudex.ModelsTest do
              Models.retrieve(client(), "claude-nope")
   end
 
+  test "retrieve/2 decodes a deprecated model's lifecycle and dates" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(
+        conn,
+        Map.merge(model("claude-opus-4-1"), %{
+          "lifecycle" => "deprecated",
+          "line" => "opus",
+          "deprecated_at" => "2026-08-01T00:00:00Z",
+          "retires_at" => "2027-02-01T00:00:00Z"
+        })
+      )
+    end)
+
+    assert {:ok, %Model{} = model} = Models.retrieve(client(), "claude-opus-4-1")
+    assert model.lifecycle == "deprecated"
+    assert model.line == "opus"
+    assert model.deprecated_at == ~U[2026-08-01 00:00:00Z]
+    assert model.retires_at == ~U[2027-02-01 00:00:00Z]
+  end
+
   test "list/2 leaves created_at nil when it isn't a timestamp" do
     Req.Test.stub(__MODULE__, fn conn ->
       Req.Test.json(conn, %{"data" => [%{model("claude-opus-5") | "created_at" => "1740009600"}]})
