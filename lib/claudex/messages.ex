@@ -13,7 +13,7 @@ defmodule Claudex.Messages do
   request at a time.
   """
 
-  alias Claudex.{API, Client, Error, MCP, Message, OutputFormat, Tool, Tracing}
+  alias Claudex.{API, Client, ContentBlock, Error, MCP, Message, OutputFormat, Tool, Tracing}
   alias Claudex.Stream.{Connection, Forwarder, Handle}
 
   @required_params [:model, :messages, :max_tokens]
@@ -53,11 +53,14 @@ defmodule Claudex.Messages do
       message.stop_reason  #=> "end_turn"
       message.usage.output_tokens
 
-  `params` must include `:model`, `:messages`, and `:max_tokens`. Everything
-  else the Messages API accepts (`:system`, `:temperature`, `:thinking`,
-  ...) is optional and passed straight through, so any parameter the API
-  supports works here — see the
+  `params` must include `:model`, `:messages`, and `:max_tokens`, with atom
+  keys throughout. Everything else the Messages API accepts (`:system`,
+  `:temperature`, `:thinking`, ...) is optional and passed straight through, so
+  any parameter the API supports works here — see the
   [Messages API reference](https://platform.claude.com/docs/en/api/messages).
+
+  `:system` takes a string or a list of text blocks, and a block can be a
+  `Claudex.ContentBlock.Text` struct.
 
   `:tools` takes a module that `use`s `Claudex.Tool`, a list of them, plain
   tool maps, or any mix of the two — see `Claudex.Tool.list/1`.
@@ -273,13 +276,15 @@ defmodule Claudex.Messages do
     |> normalize_tools()
     |> normalize_mcp_servers()
     |> normalize_messages()
+    |> normalize_system()
     |> normalize_format()
   end
 
   defp build_body(params, required \\ @required_params) do
-    body = to_body(params)
-
-    with :ok <- validate_required(body, required), do: {:ok, body}
+    with :ok <- validate_atom_keys(params),
+         body = to_body(params),
+         :ok <- validate_required(body, required),
+         do: {:ok, body}
   end
 
   defp normalize_tools(%{tools: tools} = body), do: %{body | tools: Tool.list(tools)}
@@ -296,6 +301,15 @@ defmodule Claudex.Messages do
   end
 
   defp normalize_messages(body), do: body
+
+  defp normalize_system(%{system: blocks} = body) when is_list(blocks) do
+    %{body | system: Enum.map(blocks, &system_block/1)}
+  end
+
+  defp normalize_system(body), do: body
+
+  defp system_block(%{} = block), do: ContentBlock.to_param(block)
+  defp system_block(block), do: block
 
   defp normalize_format(%{output_config: %{format: module} = config} = body)
        when is_atom(module) and not is_nil(module) do
@@ -332,8 +346,23 @@ defmodule Claudex.Messages do
 
   defp validate_duration(_client, _body), do: :ok
 
+  defp validate_atom_keys(params) do
+    case for({key, _value} <- params, is_binary(key), do: key) do
+      [] ->
+        :ok
+
+      strings ->
+        {:error,
+         %Error{
+           type: :bad_request,
+           message:
+             "params need atom keys, but these are strings: #{Enum.map_join(strings, ", ", &inspect/1)}"
+         }}
+    end
+  end
+
   defp validate_required(body, required) do
-    case Enum.filter(required, &(not Map.has_key?(body, &1))) do
+    case Enum.reject(required, &Map.has_key?(body, &1)) do
       [] ->
         :ok
 
