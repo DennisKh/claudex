@@ -115,11 +115,6 @@ defmodule Claudex.Messages do
   `:tool_choice`) is optional and passed through, and `:tools` takes a module
   the same way `create/2` does.
 
-  Server tools are rejected here with a 400. Passing `web_search` or
-  `code_execution` in `:tools` fails with "Server tools are not supported in
-  the count_tokens endpoint", so this cannot be used to check whether a model
-  accepts a given server tool.
-
   The number is an estimate; a real request can come out a little different.
 
   `opts` takes `:session`, the same as `create/2`.
