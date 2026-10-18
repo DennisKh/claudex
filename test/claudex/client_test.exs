@@ -241,6 +241,64 @@ defmodule Claudex.ClientTest do
     end
   end
 
+  describe "put_header/3" do
+    test "sets a header alongside the ones the client already sends" do
+      client =
+        Client.new(api_key: "sk-ant-test")
+        |> Client.put_header("anthropic-workspace-id", "wrkspc_1")
+
+      assert Req.Request.get_header(client.req, "anthropic-workspace-id") == ["wrkspc_1"]
+      assert Req.Request.get_header(client.req, "x-api-key") == ["sk-ant-test"]
+    end
+
+    test "replaces a header of the same name" do
+      client =
+        Client.new(api_key: "sk-ant-test")
+        |> Client.put_header("anthropic-workspace-id", "wrkspc_1")
+        |> Client.put_header("Anthropic-Workspace-Id", "wrkspc_2")
+
+      assert Req.Request.get_header(client.req, "anthropic-workspace-id") == ["wrkspc_2"]
+    end
+
+    test "is sent with a request made through the client" do
+      Req.Test.stub(__MODULE__, fn conn ->
+        Req.Test.json(conn, %{
+          "input_tokens" => 1,
+          "sent" => Plug.Conn.get_req_header(conn, "anthropic-workspace-id")
+        })
+      end)
+
+      client =
+        Client.new(api_key: "sk-ant-test", req_options: [plug: {Req.Test, __MODULE__}])
+        |> Client.put_header("anthropic-workspace-id", "wrkspc_1")
+
+      assert {:ok, %{"sent" => ["wrkspc_1"]}} = Claudex.API.get(client, "/v1/models")
+    end
+  end
+
+  describe "put_beta/2" do
+    test "sets the beta header on a client without one" do
+      client = Client.new(api_key: "sk-ant-test") |> Client.put_beta("files-api-2025-04-14")
+
+      assert Req.Request.get_header(client.req, "anthropic-beta") == ["files-api-2025-04-14"]
+    end
+
+    test "adds to the client's own betas in the one header" do
+      client =
+        Client.new(api_key: "sk-ant-test", beta: "files-api-2025-04-14")
+        |> Client.put_beta(["fast-mode-2026-02-01", "user-profiles-2026-08-18"])
+
+      assert Req.Request.get_header(client.req, "anthropic-beta") ==
+               ["files-api-2025-04-14,fast-mode-2026-02-01,user-profiles-2026-08-18"]
+    end
+
+    test "adds no header for an empty list" do
+      client = Client.new(api_key: "sk-ant-test") |> Client.put_beta([])
+
+      assert Req.Request.get_header(client.req, "anthropic-beta") == []
+    end
+  end
+
   describe "inspect/1" do
     test "never prints the API key" do
       client = Client.new(api_key: "sk-ant-hunter2")
