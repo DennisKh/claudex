@@ -39,6 +39,15 @@ defmodule Claudex.Live.ModelsTest do
              Models.list(client, lifecycle: ["active", "retired"])
   end
 
+  test "an active-only list holds active models, each with its line", %{client: client} do
+    assert {:ok, %Page{data: [_first | _rest] = models}} =
+             Models.list(client, lifecycle: ["active"], limit: 100)
+
+    assert Enum.all?(models, &(&1.lifecycle == "active"))
+    assert Enum.all?(models, &(&1.deprecated_at == nil))
+    assert Enum.any?(models, &(&1.line == "haiku"))
+  end
+
   test "sends lifecycle under the name the API reads", %{client: client} do
     assert {:error, %Claudex.Error{status: 400, message: message}} =
              Models.list(client, lifecycle: ["claudex-probe"])

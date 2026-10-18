@@ -328,6 +328,7 @@ defmodule Claudex.ReplayTest do
     assert model.type == "model"
     assert %DateTime{} = model.created_at
     assert model.max_input_tokens > 0
+    assert model.lifecycle in ["active", "deprecated", "retired"]
   end
 
   test "a recorded model decodes with its capabilities" do
@@ -338,6 +339,8 @@ defmodule Claudex.ReplayTest do
     assert model.id =~ "claude-haiku-4-5"
     assert model.display_name != ""
     assert model.capabilities["thinking"]["supported"] == true
+    assert model.lifecycle == "active"
+    assert model.line == "haiku"
   end
 
   test "a recorded file decodes with the GA shape" do
