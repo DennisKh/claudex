@@ -121,6 +121,14 @@ client = Claudex.new()                    # picks all of that up
 scoped = Claudex.new(api_key: other_key)  # one override, the rest from config
 ```
 
+`Claudex.Client.put_header/3` returns a copy of a client that sends one more header, such as `anthropic-workspace-id` for a key that can act on more than one workspace:
+
+```elixir
+client
+|> Claudex.Client.put_header("anthropic-workspace-id", workspace_id)
+|> Claudex.Messages.create(params)
+```
+
 Anything passed to `Claudex.new/1` wins over config. `:api_key` has one more fallback below config — the `ANTHROPIC_API_KEY` environment variable — so scripts and `iex` work with nothing configured at all.
 
 ## Streaming
@@ -484,7 +492,7 @@ A schema written by hand goes through untouched, so `output_config: %{format: %{
 
 ## Beta features
 
-A beta feature needs two things: the `anthropic-beta` header, which `Claudex.new(beta: ...)` sets on every request, and its parameter, which passes through like any other. No separate client and no separate endpoint.
+A beta feature needs two things: the `anthropic-beta` header, which `Claudex.new(beta: ...)` sets on every request, and its parameter, which passes through like any other. No separate endpoint.
 
 ```elixir
 client = Claudex.new(beta: ["context-management-2025-06-27", "fast-mode-2026-02-01"])
@@ -497,6 +505,8 @@ Claudex.Messages.create(client, %{
   messages: history
 })
 ```
+
+`Claudex.Client.put_beta/2` adds a beta to a copy of a client, alongside the ones it already sends, for the requests that need it: `client |> Claudex.Client.put_beta("fast-mode-2026-02-01") |> Claudex.Messages.create(params)`.
 
 These were checked against the API with `Claudex.Messages.count_tokens/2`, which validates a request for free:
 
@@ -864,6 +874,7 @@ The workflow pins Elixir and OTP explicitly, so a CI run doesn't drift from the 
 | `thinking_live_test.exs` | thinking blocks, streamed and not |
 | `caching_live_test.exs` | `cache_control`, cache write and read token counts |
 | `errors_live_test.exs` | 404, 400, 401, and `count_tokens` rejecting `max_tokens` |
+| `client_live_test.exs` | headers and betas a derived client adds, plain and streamed |
 | `models_live_test.exs` | list, paging, alias resolution, `count_tokens` |
 | `files_live_test.exs` | upload, metadata, list, download refusal, delete |
 | `batches_live_test.exs` | create, retrieve, cancel, list, results-not-ready |

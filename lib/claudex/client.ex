@@ -6,7 +6,8 @@ defmodule Claudex.Client do
   Build one with `new/1` and pass it to functions like
   `Claudex.Messages.create/2`. Clients are plain structs, so you can hold
   several at once (different keys, different workspaces) without any shared
-  process state.
+  process state. `put_header/3` and `put_beta/2` return a copy with a header
+  or a beta added, for the requests that need it.
   """
 
   @default_base_url "https://api.anthropic.com"
@@ -135,6 +136,44 @@ defmodule Claudex.Client do
       |> Req.new()
 
     %__MODULE__{api_key: api_key, req: req, base_url: base_url, max_retries: max_retries}
+  end
+
+  @doc """
+  Returns a copy of the client that sends header `name` with `value` on every
+  request, replacing a header of the same name. The original client is
+  unchanged, and building the copy opens no connection.
+
+  Picks the workspace for a credential that can act on more than one:
+
+      client
+      |> Claudex.Client.put_header("anthropic-workspace-id", "wrkspc_011CZkZaBF1tNoB5wlCeusgy")
+      |> Claudex.Messages.create(params)
+
+  `anthropic-user-profile-id` attributes a request to a user profile, and
+  needs the user profiles beta from `put_beta/2` as well.
+  """
+  @spec put_header(t(), String.t(), String.t()) :: t()
+  def put_header(%__MODULE__{} = client, name, value) when is_binary(name) and is_binary(value) do
+    %{client | req: Req.Request.put_header(client.req, name, value)}
+  end
+
+  @doc """
+  Returns a copy of the client with more beta features, as a string or a list
+  of them, added to the ones it already sends. The original client is
+  unchanged. `put_header/3` with `"anthropic-beta"` replaces the client's betas
+  instead.
+
+      client
+      |> Claudex.Client.put_beta("fast-mode-2026-02-01")
+      |> Claudex.Messages.create(params)
+  """
+  @spec put_beta(t(), String.t() | [String.t()]) :: t()
+  def put_beta(%__MODULE__{} = client, []), do: client
+
+  def put_beta(%__MODULE__{} = client, beta) when is_binary(beta) or is_list(beta) do
+    betas = Req.Request.get_header(client.req, "anthropic-beta") ++ List.wrap(beta)
+
+    put_header(client, "anthropic-beta", Enum.join(betas, ","))
   end
 
   @doc """
