@@ -35,7 +35,14 @@ defmodule Claudex.ClientConfigTest do
   end
 
   defp header(client, name) do
-    client.req.headers |> Map.get(name, []) |> List.first()
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(conn, Plug.Conn.get_req_header(conn, name))
+    end)
+
+    req = Req.merge(client.req, plug: {Req.Test, __MODULE__}, retry: false)
+    {:ok, %Req.Response{body: sent}} = Req.get(req, url: "/v1/models")
+
+    List.first(sent)
   end
 
   describe "api key" do

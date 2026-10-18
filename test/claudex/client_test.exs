@@ -27,7 +27,7 @@ defmodule Claudex.ClientTest do
   test "new/1 sets the required headers" do
     client = Client.new(api_key: "sk-ant-test")
 
-    assert Req.Request.get_header(client.req, "x-api-key") == ["sk-ant-test"]
+    assert sent_header(client, "x-api-key") == ["sk-ant-test"]
     assert Req.Request.get_header(client.req, "anthropic-version") == ["2023-06-01"]
   end
 
@@ -35,7 +35,7 @@ defmodule Claudex.ClientTest do
     client =
       Client.new(api_key: "sk-ant-test", req_options: [headers: [{"x-request-id", "abc"}]])
 
-    assert Req.Request.get_header(client.req, "x-api-key") == ["sk-ant-test"]
+    assert sent_header(client, "x-api-key") == ["sk-ant-test"]
     assert Req.Request.get_header(client.req, "anthropic-version") == ["2023-06-01"]
     assert Req.Request.get_header(client.req, "x-request-id") == ["abc"]
   end
@@ -48,7 +48,7 @@ defmodule Claudex.ClientTest do
       )
 
     assert Req.Request.get_header(client.req, "anthropic-version") == ["2099-01-01"]
-    assert Req.Request.get_header(client.req, "x-api-key") == ["sk-ant-test"]
+    assert sent_header(client, "x-api-key") == ["sk-ant-test"]
   end
 
   test "new/1 sets a connect timeout, overridable and mergeable" do
@@ -248,7 +248,7 @@ defmodule Claudex.ClientTest do
         |> Client.put_header("anthropic-workspace-id", "wrkspc_1")
 
       assert Req.Request.get_header(client.req, "anthropic-workspace-id") == ["wrkspc_1"]
-      assert Req.Request.get_header(client.req, "x-api-key") == ["sk-ant-test"]
+      assert sent_header(client, "x-api-key") == ["sk-ant-test"]
     end
 
     test "replaces a header of the same name" do
@@ -299,6 +299,40 @@ defmodule Claudex.ClientTest do
     end
   end
 
+  defp sent_header(client, name) do
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(conn, Plug.Conn.get_req_header(conn, name))
+    end)
+
+    req = Req.merge(client.req, plug: {Req.Test, __MODULE__}, retry: false)
+    {:ok, %Req.Response{body: sent}} = Req.get(req, url: "/v1/models")
+
+    sent
+  end
+
+  describe "the API key" do
+    test "a request still sends the key" do
+      client = Client.new(api_key: "sk-ant-hunter2")
+
+      assert sent_header(client, "x-api-key") == ["sk-ant-hunter2"]
+    end
+
+    test "an x-api-key header given to the client wins over its key" do
+      client = Client.new(api_key: "sk-ant-hunter2")
+
+      assert client |> Client.put_header("x-api-key", "sk-ant-other") |> sent_header("x-api-key") ==
+               ["sk-ant-other"]
+
+      configured =
+        Client.new(
+          api_key: "sk-ant-hunter2",
+          req_options: [headers: [{"x-api-key", "sk-ant-other"}]]
+        )
+
+      assert sent_header(configured, "x-api-key") == ["sk-ant-other"]
+    end
+  end
+
   describe "inspect/1" do
     test "never prints the API key" do
       client = Client.new(api_key: "sk-ant-hunter2")
@@ -318,6 +352,13 @@ defmodule Claudex.ClientTest do
       refute inspect([client]) =~ "hunter2"
       refute inspect({:ok, client}) =~ "hunter2"
       refute "#{inspect(client)}" =~ "hunter2"
+    end
+
+    test "never prints the API key through the Req request it holds" do
+      client = Client.new(api_key: "sk-ant-hunter2")
+
+      refute inspect(client.req) =~ "hunter2"
+      refute inspect(Client.put_beta(client, "x").req) =~ "hunter2"
     end
 
     test "the key is still there to use" do
