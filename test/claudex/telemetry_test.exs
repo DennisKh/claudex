@@ -524,6 +524,96 @@ defmodule Claudex.TelemetryTest do
     refute_receive {:telemetry, [:claudex, :request, :stop], _measurements, _metadata}
   end
 
+  defp stream_fixture(name) do
+    Req.Test.stub(__MODULE__, fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("text/event-stream")
+      |> Plug.Conn.send_resp(200, Fixtures.sse!(name))
+    end)
+  end
+
+  # The fixture's message_start says 12 output tokens and its message_delta 33.
+  test "a streamed request's stop carries the token counts its events reported" do
+    stream_fixture("tool_use_stream")
+
+    client() |> Messages.stream!(@params) |> Enum.to_list()
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, metadata}
+    assert metadata.input_tokens == 856
+    assert metadata.output_tokens == 33
+    assert metadata.cache_creation_input_tokens == 0
+    assert metadata.cache_read_input_tokens == 0
+  end
+
+  test "a stream the caller stops early reports the counts it had received" do
+    [start | rest] =
+      "message_stream" |> Fixtures.sse!() |> String.split("\n\n", trim: true)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      conn =
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.send_chunked(200)
+
+      {:ok, conn} = Plug.Conn.chunk(conn, start <> "\n\n")
+      {:ok, conn} = Plug.Conn.chunk(conn, Enum.join(rest, "\n\n") <> "\n\n")
+      conn
+    end)
+
+    assert [_message_start] = client() |> Messages.stream!(@params) |> Enum.take(1)
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], measurements, metadata}
+    assert measurements.chunks == 1
+    assert metadata.input_tokens == 15
+  end
+
+  test "the default logger shows a streamed request's token counts" do
+    stream_fixture("message_stream")
+    Telemetry.attach_default_logger(level: :info)
+    on_exit(&Telemetry.detach_default_logger/0)
+
+    logged =
+      ExUnit.CaptureLog.capture_log(fn ->
+        client() |> Messages.stream!(@params) |> Enum.to_list()
+      end)
+
+    assert logged =~ "(15 in / 6 out)"
+  end
+
+  test "a batch's results stream carries no token counts" do
+    results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
+
+    batch =
+      "batch"
+      |> Fixtures.json!()
+      |> Map.merge(%{
+        "id" => "msgbatch_1",
+        "processing_status" => "ended",
+        "results_url" => results_url
+      })
+
+    line =
+      Jason.encode!(%{
+        "custom_id" => "a",
+        "result" => %{"type" => "succeeded", "message" => message([])}
+      })
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      case conn.request_path do
+        "/v1/messages/batches/msgbatch_1" -> Req.Test.json(conn, batch)
+        "/v1/messages/batches/msgbatch_1/results" -> Plug.Conn.send_resp(conn, 200, line <> "\n")
+      end
+    end)
+
+    assert {:ok, stream} = Batches.results(client(), "msgbatch_1")
+    assert [_result] = Enum.to_list(stream)
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements,
+                    %{path: ^results_url} = metadata}
+
+    refute Map.has_key?(metadata, :input_tokens)
+  end
+
   test "a batch results line that isn't JSON reports an exception, not a stop" do
     results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
 

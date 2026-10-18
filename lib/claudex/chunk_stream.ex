@@ -1,7 +1,8 @@
 defmodule Claudex.ChunkStream do
   @moduledoc false
 
-  alias Claudex.{API, Client, Error, Tracing}
+  alias Claudex.{API, Client, Error, Tracing, Usage}
+  alias Claudex.Stream.Event.{MessageDelta, MessageStart}
   alias Claudex.Tracing.Attributes
 
   @typedoc """
@@ -94,6 +95,7 @@ defmodule Claudex.ChunkStream do
       first_chunk: nil,
       chunks: 0,
       bytes: 0,
+      usage: nil,
       response: %{status: nil, request_id: nil},
       started: System.monotonic_time()
     }
@@ -183,7 +185,7 @@ defmodule Claudex.ChunkStream do
 
   defp to_items([piece | rest], items, state) do
     case piece_items(state.decoder.parse, piece) do
-      {:ok, parsed} -> to_items(rest, items ++ parsed, state)
+      {:ok, parsed} -> to_items(rest, items ++ parsed, take_usage(state, parsed))
       {:error, error, stacktrace} -> {items, failed(state, error, stacktrace)}
     end
   end
@@ -194,10 +196,18 @@ defmodule Claudex.ChunkStream do
     error -> {:error, error, __STACKTRACE__}
   end
 
+  defp take_usage(state, items) do
+    %{state | usage: Enum.reduce(items, state.usage, &merge_usage/2)}
+  end
+
+  defp merge_usage(%MessageStart{message: %{usage: usage}}, acc), do: Usage.merge(acc, usage)
+  defp merge_usage(%MessageDelta{usage: usage}, acc), do: Usage.merge(acc, usage)
+  defp merge_usage(_item, acc), do: acc
+
   defp failed(state, %Error{} = error, _stacktrace), do: %{state | failure: error}
   defp failed(state, error, stacktrace), do: %{state | failure: error, stacktrace: stacktrace}
 
-  defp report(%{failure: nil} = state), do: report(state, :stop, %{})
+  defp report(%{failure: nil} = state), do: report(state, :stop, API.usage_metadata(state.usage))
 
   defp report(%{failure: %Error{status: status} = error} = state) when is_integer(status),
     do: report(state, :stop, %{error_type: error.type})
