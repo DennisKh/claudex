@@ -629,7 +629,7 @@ results it has so far.
 
 ## Telemetry and logging
 
-Claudex writes nothing to your logs on its own. It emits `:telemetry` events, and ships a logger you can turn on in one line while debugging:
+Claudex logs a warning in three cases: Req logs each retry it makes, `Claudex.ToolRunner` logs a tool that raised, threw or exited, with its message, and a stream sending to a process name nobody registered logs once that its messages are dropped. `req_options: [retry_log_level: false]` turns the retry warning off. Everything else goes out as `:telemetry` events, and Claudex ships a logger for them you can turn on in one line while debugging:
 
 ```elixir
 Claudex.Telemetry.attach_default_logger()
@@ -637,16 +637,13 @@ Claudex.Telemetry.attach_default_logger()
 
 ```
 [debug] claudex POST /v1/messages claude-opus-5 → 200 in 890.4ms (8 in / 16 out) request_id=req_011CQ...
-[debug] claudex POST /v1/messages claude-opus-5 → 200 in 6531.5ms, streamed 4821 B in 10 chunk(s) request_id=req_011CQ...
+[debug] claudex POST /v1/messages claude-opus-5 → 200 in 6531.5ms, streamed 4821 B in 10 chunk(s) (8 in / 212 out) request_id=req_011CQ...
 [debug] claudex tool add → ok in 0.1ms
 [debug] claudex tool_runner turn 1 → 1 tool call(s)
 [debug] claudex tool_runner finished after 2 turn(s): completed
 ```
 
-Streaming and non-streaming report the same `[:claudex, :request, :*]` span; a
-streamed one adds the chunk and byte counts. Token counts arrive in the
-response body, so a streamed span has none — read `usage` off the message from
-`Claudex.Stream.final_message/1`.
+Streaming and non-streaming report the same `[:claudex, :request, :*]` span, with the same token counts; a streamed one adds the chunk and byte counts.
 
 Every line carries the Logger domain `[:elixir, :claudex]`, so an application
 can tell them apart from its own — useful in a Phoenix app, where Ecto and

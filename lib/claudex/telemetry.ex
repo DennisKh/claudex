@@ -2,10 +2,15 @@ defmodule Claudex.Telemetry do
   @moduledoc """
   Events Claudex emits, and a ready-made logger for them.
 
-  Claudex writes nothing to your logs on its own. It emits `:telemetry` events,
-  and you decide what happens to them. Retries and timeouts, which two of these
-  events report on, are configured on `Claudex.Client`. To see what the SDK is doing while
-  you're debugging, attach the logger that ships with it:
+  Claudex logs a warning in three cases: Req logs each retry it makes,
+  `Claudex.ToolRunner` logs a tool that raised, threw or exited, with its
+  message, and a stream sending to a process name nobody registered logs once
+  that its messages are dropped. `req_options: [retry_log_level: false]` on
+  `Claudex.Client.new/1` turns the retry warning off. Everything else goes out
+  as `:telemetry` events, and you decide what happens to them. Retries and
+  timeouts, which two of these events report on, are configured on
+  `Claudex.Client`. To see what the SDK is doing while you're debugging,
+  attach the logger that ships with it:
 
       Claudex.Telemetry.attach_default_logger()
 
@@ -28,8 +33,8 @@ defmodule Claudex.Telemetry do
   throughout, `:model` when the request names one, and on `:stop` also
   `:status`, `:request_id`, and — when the response carries usage —
   `:input_tokens`, `:output_tokens`, and the cache counters
-  `:cache_creation_input_tokens` and `:cache_read_input_tokens` when caching
-  was in play. `:request_id` is the id Anthropic support asks for.
+  `:cache_creation_input_tokens` and `:cache_read_input_tokens` when the
+  response reports them. `:request_id` is the id Anthropic support asks for.
 
   A request that got a response reports `:stop` with its `:status`, and a
   4xx or 5xx one also carries `:error_type`, the `Claudex.Error` type such as
@@ -47,7 +52,9 @@ defmodule Claudex.Telemetry do
 
   A streamed request reports the same events from the process reading it, and
   its `:stop` and `:exception` measurements carry `:chunks` and `:bytes`
-  alongside `:duration`.
+  alongside `:duration`. Its token counts come from the stream's events, so a
+  stream the caller stops early carries the counts from every event that had
+  arrived by then, including ones the caller never took.
 
   ### `[:claudex, :retry, :declined]`
 

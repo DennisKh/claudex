@@ -1,7 +1,7 @@
 defmodule Claudex.API do
   @moduledoc false
 
-  alias Claudex.{Client, Error, Tracing}
+  alias Claudex.{Client, Error, Tracing, Usage}
   alias Claudex.Tracing.Attributes
 
   @doc """
@@ -114,6 +114,16 @@ defmodule Claudex.API do
   end
 
   @doc false
+  @spec usage_metadata(Usage.t() | nil) :: map()
+  def usage_metadata(nil), do: %{}
+
+  def usage_metadata(%Usage{} = usage) do
+    %{input_tokens: usage.input_tokens, output_tokens: usage.output_tokens}
+    |> put_present(:cache_creation_input_tokens, usage.cache_creation_input_tokens)
+    |> put_present(:cache_read_input_tokens, usage.cache_read_input_tokens)
+  end
+
+  @doc false
   @spec request_id(Req.Response.t()) :: String.t() | nil
   def request_id(response) do
     case Req.Response.get_header(response, "request-id") do
@@ -172,12 +182,7 @@ defmodule Claudex.API do
   defp error_type(%Req.Response{status: status, body: body}),
     do: %{error_type: Error.from_response(status, body, nil).type}
 
-  defp usage(%{"usage" => %{} = usage}) do
-    %{input_tokens: usage["input_tokens"], output_tokens: usage["output_tokens"]}
-    |> put_present(:cache_creation_input_tokens, usage["cache_creation_input_tokens"])
-    |> put_present(:cache_read_input_tokens, usage["cache_read_input_tokens"])
-  end
-
+  defp usage(%{"usage" => %{} = usage}), do: usage_metadata(Usage.decode(usage))
   defp usage(_body), do: %{}
 
   defp put_present(metadata, _key, nil), do: metadata
