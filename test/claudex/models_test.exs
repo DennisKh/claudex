@@ -61,6 +61,50 @@ defmodule Claudex.ModelsTest do
     assert {:ok, %Page{data: []}} = Models.list(client(), limit: 5, after_id: "claude-opus-5")
   end
 
+  test "list/2 sends a list option as one bracketed parameter per value" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      assert URI.decode(conn.query_string) == "lifecycle[]=active&lifecycle[]=retired&limit=5"
+
+      Req.Test.json(conn, %{"data" => []})
+    end)
+
+    assert {:ok, %Page{data: []}} =
+             Models.list(client(), lifecycle: ["active", "retired"], limit: 5)
+  end
+
+  test "list/2 refuses a list in an option the API reads as one value" do
+    Req.Test.stub(__MODULE__, &Req.Test.json(&1, %{"data" => []}))
+
+    assert_raise ArgumentError, ~r/cannot be lists/, fn ->
+      Models.list(client(), after_id: ~c"claude-opus-5")
+    end
+  end
+
+  test "stream!/2 keeps a list option on every page" do
+    parent = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      send(
+        parent,
+        {:query, conn.query_string |> URI.decode() |> String.split("&") |> Enum.sort()}
+      )
+
+      conn = Plug.Conn.fetch_query_params(conn)
+
+      case conn.query_params["after_id"] do
+        nil ->
+          Req.Test.json(conn, %{"data" => [model("a")], "has_more" => true, "last_id" => "a"})
+
+        "a" ->
+          Req.Test.json(conn, %{"data" => [model("b")], "has_more" => false})
+      end
+    end)
+
+    assert client() |> Models.stream!(lifecycle: ["retired"]) |> Enum.map(& &1.id) == ["a", "b"]
+    assert_received {:query, ["lifecycle[]=retired"]}
+    assert_received {:query, ["after_id=a", "lifecycle[]=retired"]}
+  end
+
   test "list/2 sends no query string when given no options" do
     Req.Test.stub(__MODULE__, fn conn ->
       assert conn.query_string == ""
