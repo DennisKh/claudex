@@ -229,6 +229,77 @@ defmodule Claudex.MessagesTest do
     assert message =~ "max_tokens"
   end
 
+  test "create/2 says when a required param has a string key" do
+    params = %{"model" => "claude-opus-5", "max_tokens" => 16, "messages" => []}
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.create(client(), params)
+
+    assert message =~ ~s("model")
+    assert message =~ ~s("messages")
+    assert message =~ "atom keys"
+    refute message =~ "missing"
+  end
+
+  test "create/2 refuses a string key next to its atom twin" do
+    params = %{"model" => "claude-opus-5", model: "claude-opus-5", max_tokens: 16, messages: []}
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.create(client(), params)
+
+    assert message =~ ~s("model")
+  end
+
+  test "create/2 refuses a string key for a param it doesn't read" do
+    params = %{"temperature" => 0.5, model: "claude-opus-5", max_tokens: 16, messages: []}
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.create(client(), params)
+
+    assert message =~ ~s("temperature")
+  end
+
+  test "count_tokens/2 refuses system given under a string key" do
+    params = %{
+      "system" => [%Claudex.ContentBlock.Text{text: "Be brief."}],
+      model: "claude-opus-5",
+      messages: [Message.user("hi")]
+    }
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.count_tokens(client(), params)
+
+    assert message =~ ~s("system")
+  end
+
+  test "count_tokens/2 sends system blocks given as structs as the maps the API takes" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+
+      assert Jason.decode!(raw_body)["system"] == [
+               %{"type" => "text", "text" => "Be brief."},
+               %{
+                 "type" => "text",
+                 "text" => "Answer in French.",
+                 "cache_control" => %{"type" => "ephemeral"}
+               }
+             ]
+
+      Req.Test.json(conn, %{"input_tokens" => 9})
+    end)
+
+    params = %{
+      model: "claude-opus-5",
+      system: [
+        %Claudex.ContentBlock.Text{text: "Be brief."},
+        %{type: "text", text: "Answer in French.", cache_control: %{type: "ephemeral"}}
+      ],
+      messages: [Message.user("hi")]
+    }
+
+    assert {:ok, 9} = Messages.count_tokens(client(), params)
+  end
+
   test "count_tokens/2 returns the input token count" do
     Req.Test.stub(__MODULE__, fn conn ->
       assert conn.request_path == "/v1/messages/count_tokens"

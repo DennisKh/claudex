@@ -553,6 +553,15 @@ defmodule Claudex.ToolRunnerTest do
              ToolRunner.run(client(), @params)
   end
 
+  test "run/3 refuses messages under a string key instead of running without them" do
+    params = @params |> Map.delete(:messages) |> Map.put("messages", @params.messages)
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             ToolRunner.run(client(), params)
+
+    assert message =~ ~s("messages")
+  end
+
   test "run/3 reports a stream that ends without starting a message" do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, conn} =
