@@ -130,10 +130,11 @@ defmodule Claudex.Client do
         connect_options: [timeout: connect_timeout],
         max_retries: max_retries,
         retry: &retry_decision/2,
-        headers: default_headers(api_key) ++ beta_headers(beta)
+        headers: default_headers() ++ beta_headers(beta)
       ]
       |> merge_req_options(req_options)
       |> Req.new()
+      |> Req.Request.append_request_steps(claudex_api_key: api_key_step(api_key))
 
     %__MODULE__{api_key: api_key, req: req, base_url: base_url, max_retries: max_retries}
   end
@@ -212,9 +213,12 @@ defmodule Claudex.Client do
     Req.Request.get_option(req, :receive_timeout) == @default_receive_timeout
   end
 
-  defp default_headers(api_key) do
+  defp api_key_step(api_key) do
+    &Req.Request.put_new_header(&1, "x-api-key", api_key)
+  end
+
+  defp default_headers do
     [
-      {"x-api-key", api_key},
       {"anthropic-version", @anthropic_version},
       {"user-agent", user_agent()}
     ]
