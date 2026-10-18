@@ -14,7 +14,7 @@ defmodule Claudex.Stream.Forwarder do
 
   require Logger
 
-  alias Claudex.{Client, Error, Tracing}
+  alias Claudex.{ChunkStream, Client, Error, Tracing}
   alias Claudex.Stream.{Connection, Handle}
 
   @typedoc """
@@ -47,7 +47,8 @@ defmodule Claudex.Stream.Forwarder do
         forward(consume, %{to: to, ref: ref, monitor: monitor})
       end)
 
-    watch_caller(self(), pid)
+    ChunkStream.watch(self(), pid, fn -> Process.exit(pid, :shutdown) end)
+    if monitor?, do: ChunkStream.watch(to, pid, fn -> send(pid, {:claudex_cancel, ref}) end)
 
     {:ok, %Handle{ref: ref, pid: pid}}
   end
@@ -91,21 +92,6 @@ defmodule Claudex.Stream.Forwarder do
     :ok
   rescue
     ArgumentError -> warn_unreachable(to)
-  end
-
-  defp watch_caller(caller, forwarder) do
-    spawn(fn ->
-      caller_monitor = Process.monitor(caller)
-      forwarder_monitor = Process.monitor(forwarder)
-
-      receive do
-        {:DOWN, ^caller_monitor, :process, _caller, _reason} ->
-          Process.exit(forwarder, :shutdown)
-
-        {:DOWN, ^forwarder_monitor, :process, _forwarder, _reason} ->
-          :ok
-      end
-    end)
   end
 
   defp validate_every(nil), do: nil

@@ -36,6 +36,45 @@ defmodule Claudex.ChunkStreamTest do
     def flush(state), do: {[], state}
   end
 
+  defmodule OverloadedTransport do
+    @moduledoc """
+    Answers every attempt with a 529 that asks for a short wait, telling the
+    test each time. The test is the last of the request's `$callers`.
+    """
+
+    @doc false
+    def run(request) do
+      send(List.last(Process.get(:"$callers")), :attempt)
+
+      {request, Req.Response.new(status: 529, headers: [{"retry-after-ms", "100"}], body: "")}
+    end
+  end
+
+  test "a consumer that dies stops the request between retries" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 5,
+        req_options: [adapter: OverloadedTransport]
+      )
+
+    test = self()
+
+    consumer =
+      spawn(fn ->
+        Process.put(:"$callers", [test])
+
+        client
+        |> ChunkStream.stream([method: :get, url: "/v1/models"], {Chunks, &[&1]})
+        |> Enum.to_list()
+      end)
+
+    assert_receive :attempt, 1_000
+    Process.exit(consumer, :kill)
+
+    refute_receive :attempt, 500
+  end
+
   test "a consumer that stalls holds the request back to one chunk ahead of it" do
     counter = :counters.new(1, [])
     path = "/results/#{System.unique_integer([:positive])}"

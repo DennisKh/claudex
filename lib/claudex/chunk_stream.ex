@@ -52,6 +52,25 @@ defmodule Claudex.ChunkStream do
     )
   end
 
+  @doc """
+  Runs `on_down` as soon as `watched` goes down, unless `worker` has ended
+  first. It runs from a process of its own, so it fires while `worker` is
+  blocked, such as waiting for a response or sleeping between retries. A
+  `watched` name with no process registered under it counts as down at once.
+  """
+  @spec watch(Process.dest(), pid(), (-> term())) :: pid()
+  def watch(watched, worker, on_down) do
+    spawn(fn ->
+      watched_monitor = Process.monitor(watched)
+      worker_monitor = Process.monitor(worker)
+
+      receive do
+        {:DOWN, ^watched_monitor, :process, _watched, _reason} -> on_down.()
+        {:DOWN, ^worker_monitor, :process, _worker, _reason} -> :ok
+      end
+    end)
+  end
+
   defp connect(client, request_options, decode, cancel_ref, opts) do
     consumer = self()
     producer_ref = make_ref()
@@ -65,6 +84,8 @@ defmodule Claudex.ChunkStream do
         Process.put(:"$callers", callers)
         run(client, request_options, consumer, producer_ref)
       end)
+
+    watch(consumer, producer, fn -> Process.exit(producer, :shutdown) end)
 
     metadata =
       %{
@@ -286,11 +307,9 @@ defmodule Claudex.ChunkStream do
   end
 
   defp run(client, request_options, consumer, producer_ref) do
-    consumer_monitor = Process.monitor(consumer)
-
     options =
       Keyword.merge(request_options,
-        into: collector(consumer, producer_ref, consumer_monitor),
+        into: collector(consumer, producer_ref),
         retry: &retry_decision/2
       )
 
@@ -298,7 +317,7 @@ defmodule Claudex.ChunkStream do
     send(consumer, {producer_ref, tag, payload})
   end
 
-  defp collector(consumer, producer_ref, consumer_monitor) do
+  defp collector(consumer, producer_ref) do
     fn {:data, data}, {request, response} ->
       if response.status in 200..299 do
         announce_response(request, response, consumer, producer_ref)
@@ -306,7 +325,7 @@ defmodule Claudex.ChunkStream do
 
         request
         |> Req.Request.put_private(:claudex_streamed, true)
-        |> await_demand(response, producer_ref, consumer_monitor)
+        |> await_demand(response, producer_ref)
       else
         {:cont, {request, %{response | body: response.body <> data}}}
       end
@@ -319,11 +338,10 @@ defmodule Claudex.ChunkStream do
     end
   end
 
-  defp await_demand(request, response, producer_ref, consumer_monitor) do
+  defp await_demand(request, response, producer_ref) do
     receive do
       {^producer_ref, :demand} -> {:cont, {request, response}}
       {^producer_ref, :cancel} -> {:halt, {request, response}}
-      {:DOWN, ^consumer_monitor, :process, _consumer, _reason} -> {:halt, {request, response}}
     end
   end
 

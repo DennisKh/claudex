@@ -498,6 +498,40 @@ defmodule Claudex.Stream.ForwarderTest do
     end)
   end
 
+  defmodule OverloadedTransport do
+    @moduledoc """
+    Answers every attempt with a 529 that asks for a short wait, telling the
+    test each time. The test is the last of the request's `$callers`.
+    """
+
+    @doc false
+    def run(request) do
+      send(List.last(Process.get(:"$callers")), :attempt)
+
+      {request, Req.Response.new(status: 529, headers: [{"retry-after-ms", "100"}], body: "")}
+    end
+  end
+
+  test "monitor: true stops the stream between retries when that process dies" do
+    client =
+      Client.new(
+        api_key: "sk-ant-test",
+        max_retries: 5,
+        req_options: [adapter: OverloadedTransport]
+      )
+
+    reader = spawn(fn -> Process.sleep(:infinity) end)
+
+    {:ok, %Handle{pid: pid}} = Messages.stream_to(client, @params, to: reader, monitor: true)
+    finished = Process.monitor(pid)
+
+    assert_receive :attempt, 1_000
+    Process.exit(reader, :kill)
+
+    assert_receive {:DOWN, ^finished, :process, ^pid, _reason}, 500
+    refute_receive :attempt, 300
+  end
+
   test "Messages.stream_to/3 passes monitor: true through, and it stops the stream" do
     client =
       Client.new(
