@@ -38,41 +38,144 @@ defmodule Claudex.ChunkStreamTest do
 
   defmodule OverloadedTransport do
     @moduledoc """
-    Answers every attempt with a 529 that asks for a short wait, telling the
-    test each time. The test is the last of the request's `$callers`.
+    Answers every attempt with a 529 that asks for a short wait, so the request
+    process spends its time asleep between retries. The adapter runs in that
+    process, so it names itself to the test, the last of its `$callers`.
     """
 
     @doc false
     def run(request) do
-      send(List.last(Process.get(:"$callers")), :attempt)
+      send(List.last(Process.get(:"$callers")), {:attempt, self()})
 
       {request, Req.Response.new(status: 529, headers: [{"retry-after-ms", "100"}], body: "")}
     end
   end
 
-  test "a consumer that dies stops the request between retries" do
-    client =
-      Client.new(
-        api_key: "sk-ant-test",
-        max_retries: 5,
-        req_options: [adapter: OverloadedTransport]
-      )
+  defmodule SilentTransport do
+    @moduledoc "Never answers, the way a slow first byte holds a request."
 
-    test = self()
+    @doc false
+    def run(request) do
+      send(List.last(Process.get(:"$callers")), {:attempt, self()})
+      Process.sleep(:infinity)
 
-    consumer =
+      {request, Req.Response.new(status: 200)}
+    end
+  end
+
+  defmodule OneChunkTransport do
+    @moduledoc "Hands over one chunk, then waits for the consumer to ask for more."
+
+    @doc false
+    def run(request) do
+      send(List.last(Process.get(:"$callers")), {:attempt, self()})
+      request.into.({:data, "first\n"}, {request, Req.Response.new(status: 200)})
+    end
+  end
+
+  # Each runs the request process into a different wait: asleep between
+  # retries, blocked on a response, and parked for demand mid-body.
+  for {phase, transport} <- [
+        {"between retries", OverloadedTransport},
+        {"while the response hasn't started", SilentTransport},
+        {"while it waits for demand mid-body", OneChunkTransport}
+      ] do
+    test "a consumer that dies #{phase} takes the request process with it" do
+      client =
+        Client.new(
+          api_key: "sk-ant-test",
+          max_retries: 5,
+          req_options: [adapter: unquote(transport)]
+        )
+
+      test = self()
+
+      consumer =
+        spawn(fn ->
+          Process.put(:"$callers", [test])
+
+          client
+          |> ChunkStream.stream([method: :get, url: "/v1/models"], {Chunks, &[&1]})
+          |> Stream.each(fn _chunk -> Process.sleep(:infinity) end)
+          |> Stream.run()
+        end)
+
+      assert_receive {:attempt, producer}, 1_000
+      gone = Process.monitor(producer)
+      Process.exit(consumer, :kill)
+
+      assert_receive {:DOWN, ^gone, :process, ^producer, _reason}, 500
+      refute_receive {:attempt, _producer}, 300
+    end
+  end
+
+  describe "watch/2" do
+    defp blocked, do: spawn(fn -> Process.sleep(:infinity) end)
+
+    defp ends?(pid) do
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 500
+    end
+
+    # A worker that starts a watcher on `watched`, names it to the test, then
+    # waits to be told how to end.
+    defp worker(watched, on_down) do
+      test = self()
+
       spawn(fn ->
-        Process.put(:"$callers", [test])
+        send(test, {:watcher, ChunkStream.watch(watched, on_down)})
 
-        client
-        |> ChunkStream.stream([method: :get, url: "/v1/models"], {Chunks, &[&1]})
-        |> Enum.to_list()
+        receive do
+          :return -> :ok
+          :crash -> exit(:boom)
+        end
       end)
+    end
 
-    assert_receive :attempt, 1_000
-    Process.exit(consumer, :kill)
+    test "runs on_down when the watched process dies, whatever the worker is doing" do
+      test = self()
+      watched = blocked()
+      worker(watched, fn -> send(test, :on_down) end)
+      assert_receive {:watcher, watcher}
 
-    refute_receive :attempt, 500
+      Process.exit(watched, :kill)
+
+      assert_receive :on_down, 500
+      ends?(watcher)
+    end
+
+    test "ends with the worker, however the worker ends" do
+      for ending <- [:return, :crash, :killed] do
+        watched = blocked()
+        worker = worker(watched, fn -> :ok end)
+        assert_receive {:watcher, watcher}
+
+        case ending do
+          :killed -> Process.exit(worker, :kill)
+          signal -> send(worker, signal)
+        end
+
+        ends?(watcher)
+        assert Process.alive?(watched)
+      end
+    end
+
+    test "takes the worker down if it is killed itself" do
+      worker = worker(blocked(), fn -> :ok end)
+      assert_receive {:watcher, watcher}
+
+      Process.exit(watcher, :kill)
+
+      ends?(worker)
+    end
+
+    test "counts a name with no process registered as down" do
+      test = self()
+
+      worker(:claudex_nobody_registered, fn -> send(test, :on_down) end)
+
+      assert_receive :on_down, 500
+    end
   end
 
   test "a consumer that stalls holds the request back to one chunk ahead of it" do

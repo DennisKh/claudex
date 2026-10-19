@@ -53,20 +53,26 @@ defmodule Claudex.ChunkStream do
   end
 
   @doc """
-  Runs `on_down` as soon as `watched` goes down, unless `worker` has ended
-  first. It runs from a process of its own, so it fires while `worker` is
-  blocked, such as waiting for a response or sleeping between retries. A
-  `watched` name with no process registered under it counts as down at once.
+  Starts a process linked to the caller that runs `on_down` as soon as
+  `watched` goes down. It runs from a process of its own, so it fires while
+  the caller is blocked, such as waiting for a response or sleeping between
+  retries. A `watched` name with no process registered under it counts as
+  down at once.
+
+  The watcher stops when the caller stops, whether the caller returns, crashes
+  or is killed. The two are linked, so killing the watcher kills the caller.
   """
-  @spec watch(Process.dest(), pid(), (-> term())) :: pid()
-  def watch(watched, worker, on_down) do
-    spawn(fn ->
+  @spec watch(Process.dest(), (-> term())) :: pid()
+  def watch(watched, on_down) do
+    caller = self()
+
+    spawn_link(fn ->
       watched_monitor = Process.monitor(watched)
-      worker_monitor = Process.monitor(worker)
+      caller_monitor = Process.monitor(caller)
 
       receive do
         {:DOWN, ^watched_monitor, :process, _watched, _reason} -> on_down.()
-        {:DOWN, ^worker_monitor, :process, _worker, _reason} -> :ok
+        {:DOWN, ^caller_monitor, :process, _caller, _reason} -> :ok
       end
     end)
   end
@@ -82,10 +88,10 @@ defmodule Claudex.ChunkStream do
     {producer, producer_monitor} =
       spawn_monitor(fn ->
         Process.put(:"$callers", callers)
+        producer = self()
+        watch(consumer, fn -> Process.exit(producer, :shutdown) end)
         run(client, request_options, consumer, producer_ref)
       end)
-
-    watch(consumer, producer, fn -> Process.exit(producer, :shutdown) end)
 
     metadata =
       %{
