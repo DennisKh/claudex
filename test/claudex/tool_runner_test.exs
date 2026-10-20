@@ -1629,7 +1629,7 @@ defmodule Claudex.ToolRunnerTest do
       assert_received {:sent, _second}
     end
 
-    test "monitor: true stops the conversation when that process is gone" do
+    test "monitor: true sends at most the first request when that process is gone" do
       respond_with([
         message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
         message([text("3")], "end_turn")
@@ -1642,9 +1642,16 @@ defmodule Claudex.ToolRunnerTest do
 
       assert_exits_normally(pid)
 
-      # The turn already in flight was paid for; the next one never went out.
-      assert_received {:sent, _first}
-      refute_received {:sent, _second}
+      # The cancel can land before or after the first request goes out.
+      assert length(sent_requests()) <= 1
+    end
+
+    defp sent_requests do
+      receive do
+        {:sent, body} -> [body | sent_requests()]
+      after
+        0 -> []
+      end
     end
 
     test "monitor: true delivers as usual while that process is alive" do

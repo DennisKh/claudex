@@ -448,11 +448,11 @@ defmodule Claudex.ToolRunner do
   reader whose disappearance says nothing about the work, a view that
   reconnects or a consumer its supervisor restarts.
 
-  `monitor: true` stops the conversation as soon as that process goes away, so
-  a run nobody is left to read stops costing tokens. It stops at the next turn
-  boundary, since the turn already in flight has been paid for, and it stops
-  silently: the process the messages were for is the one that has gone. A
-  caller that needs to know monitors the handle's `pid`.
+  `monitor: true` stops the conversation as soon as that process goes away,
+  cancelling the request in flight the way `Claudex.Stream.cancel/1` does, so
+  a run nobody is left to read stops costing tokens. It stops silently: the
+  process the messages were for is the one that has gone. A caller that needs
+  to know monitors the handle's `pid`.
 
   `Claudex.Stream.cancel/1` stops the request in flight, so a reply being
   written stops part-way and the tool calls it had got as far as asking for

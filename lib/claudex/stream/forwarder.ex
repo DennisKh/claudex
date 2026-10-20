@@ -14,7 +14,7 @@ defmodule Claudex.Stream.Forwarder do
 
   require Logger
 
-  alias Claudex.{Client, Error, Tracing}
+  alias Claudex.{ChunkStream, Client, Error, Tracing}
   alias Claudex.Stream.{Connection, Handle}
 
   @typedoc """
@@ -35,19 +35,19 @@ defmodule Claudex.Stream.Forwarder do
     to = Keyword.get(opts, :to, self())
     ref = Keyword.get(opts, :ref, make_ref())
     monitor? = Keyword.get(opts, :monitor, false)
-    callers = [self() | Process.get(:"$callers", [])]
+    caller = self()
+    callers = [caller | Process.get(:"$callers", [])]
     context = Tracing.context()
 
     pid =
       spawn_link(fn ->
+        watch(caller, to, ref, monitor?)
         Process.put(:"$callers", callers)
         Tracing.attach(context)
         monitor = if monitor?, do: Process.monitor(to)
 
         forward(consume, %{to: to, ref: ref, monitor: monitor})
       end)
-
-    watch_caller(self(), pid)
 
     {:ok, %Handle{ref: ref, pid: pid}}
   end
@@ -93,19 +93,12 @@ defmodule Claudex.Stream.Forwarder do
     ArgumentError -> warn_unreachable(to)
   end
 
-  defp watch_caller(caller, forwarder) do
-    spawn(fn ->
-      caller_monitor = Process.monitor(caller)
-      forwarder_monitor = Process.monitor(forwarder)
+  defp watch(caller, to, ref, monitor?) do
+    forwarder = self()
+    ChunkStream.watch(caller, fn -> Process.exit(forwarder, :shutdown) end)
 
-      receive do
-        {:DOWN, ^caller_monitor, :process, _caller, _reason} ->
-          Process.exit(forwarder, :shutdown)
-
-        {:DOWN, ^forwarder_monitor, :process, _forwarder, _reason} ->
-          :ok
-      end
-    end)
+    # The forwarder is linked to the caller, so a reader that goes away cancels it
+    if monitor?, do: ChunkStream.watch(to, fn -> send(forwarder, {:claudex_cancel, ref}) end)
   end
 
   defp validate_every(nil), do: nil
