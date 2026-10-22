@@ -264,7 +264,7 @@ defmodule Claudex.Live.ToolRunnerTest do
       refute Process.get(:deleted)
 
       [stored, results] =
-        [halted.messages, halted.tool_results] |> JSON.encode!() |> JSON.decode!()
+        [halted.messages, halted.tool_results] |> Jason.encode!() |> Jason.decode!()
 
       assert {:ok, resumed} =
                ToolRunner.run(client, %{params | messages: stored}, tool_results: results)
@@ -354,7 +354,7 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert truncated.messages == params.messages
       refute Process.get(:deleted)
 
-      stored = truncated.messages |> JSON.encode!() |> JSON.decode!()
+      stored = truncated.messages |> Jason.encode!() |> Jason.decode!()
 
       assert {:ok, resumed} =
                ToolRunner.run(client, %{params | max_tokens: 512, messages: stored},

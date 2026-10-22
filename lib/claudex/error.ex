@@ -156,7 +156,7 @@ defmodule Claudex.Error do
   # A download asks Req not to parse what it fetches, so an error body on one
   # of those arrives as raw bytes.
   defp decode_body(body) when is_binary(body) do
-    case JSON.decode(body) do
+    case Jason.decode(body) do
       {:ok, json} when is_map(json) -> json
       _not_an_object -> body
     end

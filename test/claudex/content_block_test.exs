@@ -345,8 +345,8 @@ defmodule Claudex.ContentBlockTest do
       stored =
         [%Thinking{thinking: "Hm", signature: ""}, %Text{text: ""}, %Text{text: "42"}]
         |> Enum.map(&ContentBlock.to_param/1)
-        |> JSON.encode!()
-        |> JSON.decode!()
+        |> Jason.encode!()
+        |> Jason.decode!()
 
       assert Enum.filter(stored, &ContentBlock.replayable?/1) == [
                %{"type" => "text", "text" => "42"}

@@ -46,7 +46,7 @@ defmodule Claudex.Live.StructuredOutputsTest do
     assert message.stop_reason == "end_turn",
            "the reply stopped for #{inspect(message.stop_reason)}, so it isn't the promised shape"
 
-    assert {:ok, ticket} = message |> Message.text() |> JSON.decode()
+    assert {:ok, ticket} = message |> Message.text() |> Jason.decode()
 
     assert is_binary(ticket["title"])
     assert ticket["priority"] in ["low", "high"]
@@ -71,7 +71,7 @@ defmodule Claudex.Live.StructuredOutputsTest do
     assert message.stop_reason == "end_turn",
            "the reply stopped for #{inspect(message.stop_reason)}, so it isn't the promised shape"
 
-    assert {:ok, incident} = message |> Message.text() |> JSON.decode()
+    assert {:ok, incident} = message |> Message.text() |> Jason.decode()
 
     assert is_binary(incident["summary"])
     assert incident["severity"] in ["minor", "major"]
@@ -92,7 +92,7 @@ defmodule Claudex.Live.StructuredOutputsTest do
     assert message.stop_reason == "end_turn",
            "the reply stopped for #{inspect(message.stop_reason)}, so it isn't the promised shape"
 
-    assert {:ok, edit} = message |> Message.text() |> JSON.decode()
+    assert {:ok, edit} = message |> Message.text() |> Jason.decode()
 
     assert is_binary(edit["old_string"])
     assert is_binary(edit["new_string"])

@@ -216,7 +216,7 @@ defmodule Claudex.Stream.Accumulator do
 
   defp put_tool_input(blocks, index, json) do
     with {:ok, %module{} = block} when module in @streamed_input <- Map.fetch(blocks, index),
-         {:ok, input} when is_map(input) <- JSON.decode(json) do
+         {:ok, input} when is_map(input) <- Jason.decode(json) do
       Map.put(blocks, index, %{block | input: input})
     else
       _incomplete_or_not_a_tool_call -> blocks

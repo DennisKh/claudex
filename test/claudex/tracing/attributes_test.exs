@@ -277,10 +277,10 @@ defmodule Claudex.Tracing.AttributesTest do
       attributes = Attributes.reply(reply)
 
       assert %{"tool_calls" => [%{"name" => "get_temperature"}]} =
-               JSON.decode!(attributes["gen_ai.completion"])
+               Jason.decode!(attributes["gen_ai.completion"])
 
       assert [%{"parts" => [%{"type" => "tool_call", "name" => "get_temperature"}]}] =
-               JSON.decode!(attributes["gen_ai.output.messages"])
+               Jason.decode!(attributes["gen_ai.output.messages"])
     end
 
     test "a message with no usage yet records none" do

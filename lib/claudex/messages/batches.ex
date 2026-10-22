@@ -208,7 +208,7 @@ defmodule Claudex.Messages.Batches do
   end
 
   defp result(line) do
-    case JSON.decode(line) do
+    case Jason.decode(line) do
       {:ok, json} when is_map(json) -> [BatchResult.decode(json)]
       _not_an_object -> raise Error.stream_error("a batch result line wasn't a JSON object", line)
     end

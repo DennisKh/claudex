@@ -150,7 +150,7 @@ defmodule Claudex.Message do
 
   Takes a decoded `%Claudex.Message{}` as readily as a map you built, and turns
   both into plain data on the way in. That's the point of doing it here rather
-  than with `++`: a history you can hand to `JSON.encode!/1` and read back from
+  than with `++`: a history you can hand to `Jason.encode!/1` and read back from
   a database behaves exactly like one you just built, because it's the same
   shape either way.
   """

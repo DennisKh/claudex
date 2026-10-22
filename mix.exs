@@ -13,8 +13,7 @@ defmodule Claudex.MixProject do
     [
       app: :claudex,
       version: @version,
-      # The stdlib JSON module: 1.17 has no JSON, and 1.19 is what CI runs.
-      elixir: "~> 1.19",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
