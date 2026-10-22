@@ -162,7 +162,6 @@ defmodule Claudex.ClientConfigTest do
       Application.put_env(:claudex, :api_key, "sk-ant-test")
     end
 
-    # The struct fields are a copy; these are the values that decide behaviour.
     test "configured settings are on the Req request, not just the struct" do
       Application.put_env(:claudex, :base_url, "https://proxy.internal")
       Application.put_env(:claudex, :max_retries, 5)
