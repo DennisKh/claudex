@@ -1,6 +1,7 @@
 defmodule Claudex.ToolTest do
   use ExUnit.Case, async: true
 
+  alias Claudex.ContentBlock.{Image, SearchResult}
   alias Claudex.TestSupport.Schemas.{EctoTicket, Ticket}
   alias Claudex.Tool.CallError
 
@@ -151,6 +152,19 @@ defmodule Claudex.ToolTest do
     @tool true
     @spec echo_opts(keyword()) :: term()
     def echo_opts(opts), do: opts
+  end
+
+  test "result/3 turns block structs in its content into the maps the API takes" do
+    image = Image.url("https://example.com/a.png")
+
+    assert %{content: [%{type: "image"}, %{type: "text", text: "a map"}]} =
+             Claudex.Tool.result("toolu_1", [image, %{type: "text", text: "a map"}])
+  end
+
+  test "result/3 keeps a search result's citations setting" do
+    block = SearchResult.new("s", "t", "x", citations: true)
+
+    assert %{content: [%{citations: %{enabled: true}}]} = Claudex.Tool.result("toolu_1", [block])
   end
 
   describe "an argument arrives as Claude sent it" do

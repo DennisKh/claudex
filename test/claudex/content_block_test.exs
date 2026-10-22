@@ -55,6 +55,71 @@ defmodule Claudex.ContentBlockTest do
   # The blocks below follow the responses in Anthropic's web search and server
   # tools guides; test/fixtures/server_tools.json records a real one when the
   # live suite runs with recording on.
+  describe "search_result" do
+    alias Claudex.ContentBlock.SearchResult
+
+    test "builds the block a tool result or user message carries" do
+      assert ContentBlock.to_param(SearchResult.new("https://docs.example/a", "A", "Alpha.")) ==
+               %{
+                 type: "search_result",
+                 source: "https://docs.example/a",
+                 title: "A",
+                 content: [%{type: "text", text: "Alpha."}]
+               }
+    end
+
+    test "takes several passages, citations and a cache breakpoint" do
+      block =
+        SearchResult.new("s", "t", ["One.", "Two."],
+          citations: true,
+          cache_control: %{type: "ephemeral"}
+        )
+
+      assert ContentBlock.to_param(block) == %{
+               type: "search_result",
+               source: "s",
+               title: "t",
+               content: [%{type: "text", text: "One."}, %{type: "text", text: "Two."}],
+               citations: %{enabled: true},
+               cache_control: %{type: "ephemeral"}
+             }
+    end
+
+    test "decodes and replays as the API sent it" do
+      json = %{
+        "type" => "search_result",
+        "source" => "s",
+        "title" => "t",
+        "content" => [%{"type" => "text", "text" => "One."}],
+        "citations" => %{"enabled" => false}
+      }
+
+      assert %SearchResult{source: "s", title: "t"} = block = ContentBlock.decode(json)
+      assert ContentBlock.to_param(block) == json
+    end
+  end
+
+  describe "tool_reference" do
+    alias Claudex.ContentBlock.ToolReference
+
+    test "builds the block a custom tool search returns" do
+      assert ContentBlock.to_param(ToolReference.new("get_weather")) ==
+               %{type: "tool_reference", tool_name: "get_weather"}
+    end
+
+    test "takes a cache breakpoint" do
+      assert ContentBlock.to_param(ToolReference.new("t", cache_control: %{type: "ephemeral"})) ==
+               %{type: "tool_reference", tool_name: "t", cache_control: %{type: "ephemeral"}}
+    end
+
+    test "decodes and replays as the API sent it" do
+      json = %{"type" => "tool_reference", "tool_name" => "t"}
+
+      assert %ToolReference{tool_name: "t"} = block = ContentBlock.decode(json)
+      assert ContentBlock.to_param(block) == json
+    end
+  end
+
   describe "server tool blocks" do
     @search_result %{
       "type" => "web_search_result",

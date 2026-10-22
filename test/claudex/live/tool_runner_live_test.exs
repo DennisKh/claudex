@@ -518,4 +518,68 @@ defmodule Claudex.Live.ToolRunnerTest do
       60_000 -> flunk("the loop never finished")
     end
   end
+
+  defmodule Camera do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Takes a photo of the wall in front of the camera."
+    @tool true
+    @spec photo() :: ContentBlock.Image.t()
+    def photo do
+      "test/fixtures/red_square.png"
+      |> File.read!()
+      |> Base.encode64()
+      |> ContentBlock.Image.base64("image/png")
+    end
+  end
+
+  defmodule Library do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Looks a topic up in the archive and returns the passages found."
+    @tool true
+    @spec look_up(String.t()) :: [ContentBlock.SearchResult.t()]
+    def look_up(_topic) do
+      [
+        ContentBlock.SearchResult.new(
+          "https://archive.example/quenby",
+          "Quenby founding records",
+          "The town of Quenby was founded in 1742 by a guild of glassblowers.",
+          citations: true
+        )
+      ]
+    end
+  end
+
+  test "an image a tool returns reaches Claude as an image", %{client: client} do
+    assert {:ok, %Turn{stop: :completed} = turn} =
+             ToolRunner.run(client, %{
+               model: @model,
+               max_tokens: 64,
+               tools: Camera,
+               messages: [
+                 Message.user("Take a photo of the wall, then name its colour in one word.")
+               ]
+             })
+
+    assert Message.text(turn.message) =~ ~r/red/i
+  end
+
+  test "search results a tool returns are cited by their source", %{client: client} do
+    assert {:ok, %Turn{stop: :completed} = turn} =
+             ToolRunner.run(client, %{
+               model: @model,
+               max_tokens: 256,
+               tools: Library,
+               messages: [Message.user("Use the archive: in what year was Quenby founded?")]
+             })
+
+    citations =
+      for %ContentBlock.Text{citations: cited} <- turn.message.content, c <- cited, do: c
+
+    assert Enum.any?(citations, &(&1["source"] == "https://archive.example/quenby"))
+    assert Message.text(turn.message) =~ "1742"
+  end
 end
