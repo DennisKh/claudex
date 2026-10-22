@@ -354,6 +354,126 @@ defmodule Claudex.ToolRunnerTest do
     assert result["content"] =~ "137"
   end
 
+  defmodule Blocks do
+    use Claudex.Tool
+
+    alias Claudex.ContentBlock.{Image, SearchResult, Text, ToolReference}
+
+    @doc "Takes a picture."
+    @tool true
+    @spec picture() :: Image.t()
+    def picture, do: Image.base64("iVBORw0KGgo=", "image/png")
+
+    @doc "Searches the docs."
+    @tool true
+    @spec search() :: [SearchResult.t() | Text.t()]
+    def search do
+      [%Text{text: "One hit."}, SearchResult.new("https://docs.example/a", "A", "Alpha.")]
+    end
+
+    @doc "Finds tools."
+    @tool true
+    @spec find() :: {:content, [map() | ToolReference.t()]}
+    def find,
+      do: {:content, [%{type: "tool_reference", tool_name: "add"}, ToolReference.new("sub")]}
+
+    @doc "Says done."
+    @tool true
+    @spec done() :: {:content, String.t()}
+    def done, do: {:content, "done"}
+
+    @doc "Lists users."
+    @tool true
+    @spec users() :: [map()]
+    def users, do: [%{"type" => "user", "name" => "ann"}]
+
+    @doc "Quotes a cited answer."
+    @tool true
+    @spec quote_answer() :: Text.t()
+    def quote_answer do
+      %Text{text: "Kyiv.", citations: [%{"type" => "char_location", "cited_text" => "Kyiv"}]}
+    end
+
+    @doc "Tags one block."
+    @tool true
+    @spec one_block() :: {:content, map()}
+    def one_block, do: {:content, %{type: "text", text: "one"}}
+
+    @doc "Tags bytes that aren't text."
+    @tool true
+    @spec bytes() :: {:content, binary()}
+    def bytes, do: {:content, <<0xFF, 0xFE>>}
+
+    @doc "Lists nothing."
+    @tool true
+    @spec nothing() :: []
+    def nothing, do: []
+  end
+
+  defp sent_result(tool) do
+    respond_with([
+      message([tool_use(tool, %{})], "tool_use"),
+      message([text("ok")], "end_turn")
+    ])
+
+    assert {:ok, %Turn{stop: :completed}} = ToolRunner.run(client(), %{@params | tools: Blocks})
+
+    assert_received {:sent, _first}
+    assert_received {:sent, second}
+    assert [_user, _assistant, %{"content" => [result]}] = second["messages"]
+
+    result["content"]
+  end
+
+  describe "a tool's return value" do
+    test "is sent as content when it is a block struct" do
+      assert [%{"type" => "image", "source" => %{"type" => "base64"}}] = sent_result("picture")
+    end
+
+    test "is sent as content when it is a list of block structs" do
+      assert [
+               %{"type" => "text", "text" => "One hit."},
+               %{
+                 "type" => "search_result",
+                 "source" => "https://docs.example/a",
+                 "title" => "A",
+                 "content" => [%{"type" => "text", "text" => "Alpha."}]
+               }
+             ] = sent_result("search")
+    end
+
+    test "is sent as content when tagged {:content, blocks}, maps and structs alike" do
+      assert sent_result("find") == [
+               %{"type" => "tool_reference", "tool_name" => "add"},
+               %{"type" => "tool_reference", "tool_name" => "sub"}
+             ]
+    end
+
+    test "is sent as text when tagged {:content, text}" do
+      assert sent_result("done") == "done"
+    end
+
+    test "that is a Text with citations is sent without them, which a tool result can't carry" do
+      assert sent_result("quote_answer") == [%{"type" => "text", "text" => "Kyiv."}]
+    end
+
+    test "is sent as content when tagged {:content, block} with one block" do
+      assert sent_result("one_block") == [%{"type" => "text", "text" => "one"}]
+    end
+
+    test "tagged {:content, bytes} that aren't valid UTF-8 is described instead" do
+      assert sent_result("bytes") == ~s(<<255, 254>>)
+    end
+
+    test "that is a list of plain maps is data, sent as JSON" do
+      assert sent_result("users") == ~s([{"name":"ann","type":"user"}])
+    end
+
+    test "that is an empty list is data, sent as JSON" do
+      assert sent_result("nothing") == "[]"
+    end
+  end
+
   defmodule Accounts do
     use Claudex.Tool
 

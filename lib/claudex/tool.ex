@@ -45,6 +45,47 @@ defmodule Claudex.Tool do
         a / b
       end
 
+  A tool's return value reaches Claude as text: a string as it is, anything
+  else as JSON. To hand Claude something to look at or cite instead, return
+  content blocks. One block, or a list made only of them, is sent as content:
+
+      @doc "Takes a screenshot of the dashboard."
+      @tool true
+      @spec screenshot() :: Claudex.ContentBlock.Image.t()
+      def screenshot do
+        MyApp.Dashboard.png()
+        |> Base.encode64()
+        |> Claudex.ContentBlock.Image.base64("image/png")
+      end
+
+      @doc "Searches the handbook and returns the passages found."
+      @tool true
+      @spec search_handbook(String.t()) :: [Claudex.ContentBlock.SearchResult.t()]
+      def search_handbook(query) do
+        for page <- MyApp.Handbook.search(query) do
+          Claudex.ContentBlock.SearchResult.new(page.url, page.title, page.text, citations: true)
+        end
+      end
+
+  Tag the value with `{:content, ...}` for blocks written as maps, or for maps
+  and structs together. It takes a list, one block, or text:
+
+      @doc "Shows a metric's chart, with what it covers."
+      @tool true
+      @spec chart(String.t()) :: {:content, [map() | Claudex.ContentBlock.Image.t()]}
+      def chart(metric) do
+        {:content,
+         [
+           %{type: "text", text: "Weekly #{metric}, last 12 weeks."},
+           MyApp.Charts.png(metric)
+           |> Base.encode64()
+           |> Claudex.ContentBlock.Image.base64("image/png")
+         ]}
+      end
+
+  `Claudex.ToolRunner` lists which return values are content and which are
+  data.
+
   Pass a map instead of `true` for options:
 
     * `:args` - a description per argument, merged into the inferred schema
@@ -185,6 +226,7 @@ defmodule Claudex.Tool do
   that tool. `Claudex.OutputFormat` lists what each type becomes.
   """
 
+  alias Claudex.ContentBlock
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
   alias Claudex.Tool.Schema.Strict
@@ -311,8 +353,10 @@ defmodule Claudex.Tool do
   Takes the `Claudex.ContentBlock.ToolUse` it answers, or that call's id.
 
   `content` must be a string or a list of content blocks, per the Messages
-  API — if your tool returns something else, encode it first
-  (`Jason.encode!/1` for structured data).
+  API, and a `Claudex.ContentBlock` struct in the list is turned into the map
+  the API takes. A `Claudex.ContentBlock.Text` goes without its citations,
+  which the API takes only on top-level text. If your tool returns something
+  else, encode it first (`Jason.encode!/1` for structured data).
 
   `:is_error` in `opts` marks the result as a failure Claude should react to
   rather than an answer, and defaults to `false`.
@@ -353,7 +397,7 @@ defmodule Claudex.Tool do
     %{
       type: "tool_result",
       tool_use_id: tool_use_id,
-      content: content,
+      content: content_param(content),
       is_error: Keyword.get(opts, :is_error, false)
     }
   end
@@ -685,4 +729,13 @@ defmodule Claudex.Tool do
               "pass a module that does, or a list of tool maps"
     end
   end
+
+  defp content_param(blocks) when is_list(blocks), do: Enum.map(blocks, &block_param/1)
+  defp content_param(text), do: text
+
+  defp block_param(%ContentBlock.Text{} = block),
+    do: ContentBlock.to_param(%{block | citations: []})
+
+  defp block_param(%{} = block), do: ContentBlock.to_param(block)
+  defp block_param(other), do: other
 end

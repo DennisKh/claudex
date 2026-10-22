@@ -20,8 +20,14 @@ defmodule Claudex.ContentBlock do
       API connected to, and its answer
     * `Claudex.ContentBlock.Document` and
       `Claudex.ContentBlock.Image`: a PDF or a picture you send, which Claude
-      never sends back. A type Claudex doesn't model yet becomes a `Claudex.ContentBlock.Unknown`,
-      which keeps the raw map so the block still replays into the next request.
+      never sends back
+    * `Claudex.ContentBlock.SearchResult`: a passage from your own sources,
+      which a tool result or a message carries to Claude
+    * `Claudex.ContentBlock.ToolReference`: a pointer to one of your tools,
+      which only a tool result carries
+
+  A type Claudex doesn't model yet becomes a `Claudex.ContentBlock.Unknown`,
+  which keeps the raw map so the block still replays into the next request.
 
   `Claudex.Message` holds them, and `Claudex.Stream.Accumulator` assembles them
   from a stream.
@@ -33,10 +39,12 @@ defmodule Claudex.ContentBlock do
     MCPToolResult,
     MCPToolUse,
     RedactedThinking,
+    SearchResult,
     ServerToolResult,
     ServerToolUse,
     Text,
     Thinking,
+    ToolReference,
     ToolUse,
     Unknown
   }
@@ -52,6 +60,8 @@ defmodule Claudex.ContentBlock do
           | MCPToolResult.t()
           | Document.t()
           | Image.t()
+          | SearchResult.t()
+          | ToolReference.t()
           | Unknown.t()
 
   @doc "Reads one block of the API's JSON into this module's struct."
@@ -73,7 +83,9 @@ defmodule Claudex.ContentBlock do
               "mcp_tool_use" => MCPToolUse,
               "mcp_tool_result" => MCPToolResult,
               "document" => Document,
-              "image" => Image
+              "image" => Image,
+              "search_result" => SearchResult,
+              "tool_reference" => ToolReference
             },
             Map.new(ServerToolResult.types(), &{&1, ServerToolResult})
           )

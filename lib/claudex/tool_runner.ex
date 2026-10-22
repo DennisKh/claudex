@@ -1,6 +1,14 @@
 defmodule Claudex.ToolRunner do
   @default_max_turns 20
   @failure_text_max 4096
+
+  @result_blocks [
+    Claudex.ContentBlock.Text,
+    Claudex.ContentBlock.Image,
+    Claudex.ContentBlock.Document,
+    Claudex.ContentBlock.SearchResult,
+    Claudex.ContentBlock.ToolReference
+  ]
   @reserved_stops [
     nil,
     true,
@@ -88,10 +96,15 @@ defmodule Claudex.ToolRunner do
   a warning in your logs — a bug in a tool shouldn't read to
   Claude like a policy decision, and shouldn't end the conversation either.
 
-  Whatever a tool returns is the result: text is sent as-is, anything else is
-  encoded with `Jason`, and anything Jason can't encode is described instead.
-  A struct sends the fields its `Jason.Encoder` exposes. Returning
-  is success; raising is failure. A tool's return value is your own data, so
+  Whatever a tool returns is the result. Text is sent as-is. A content block
+  struct, or a list made only of them, is sent as content, so a tool can hand
+  Claude a picture, a PDF, or passages to cite: `Claudex.ContentBlock.Text`,
+  `Image`, `Document`, `SearchResult` and `ToolReference`. A list that mixes
+  them with anything else is data. `{:content, blocks}` sends `blocks` as
+  content, one block or a list, structs or maps alike, and `{:content, text}`
+  sends the text. Anything else is encoded with `Jason`, and anything Jason
+  can't encode is described instead. A struct sends the fields its
+  `Jason.Encoder` exposes. Returning is success; raising is failure. A tool's return value is your own data, so
   it can't double as an error channel.
 
   `:tools` takes several modules as a list, and their tool names must be
@@ -827,7 +840,7 @@ defmodule Claudex.ToolRunner do
 
   defp call(module, tool_use, session) do
     case Tool.call(module, tool_use.name, tool_use.input, session: session) do
-      {:ok, value} -> Tool.result(tool_use, encode(value))
+      {:ok, value} -> Tool.result(tool_use, content(value))
       {:error, reason} -> Tool.result(tool_use, describe(tool_use, reason), is_error: true)
     end
   end
@@ -837,6 +850,19 @@ defmodule Claudex.ToolRunner do
       {build_result.(), %{tool: tool_use.name, outcome: outcome}}
     end)
   end
+
+  defp content({:content, text}) when is_binary(text), do: encode(text)
+  defp content({:content, blocks}) when is_list(blocks), do: blocks
+  defp content({:content, %{} = block}), do: [block]
+  defp content(%module{} = block) when module in @result_blocks, do: [block]
+
+  defp content([_ | _] = values) do
+    if Enum.all?(values, &match?(%module{} when module in @result_blocks, &1)),
+      do: values,
+      else: encode(values)
+  end
+
+  defp content(value), do: encode(value)
 
   defp encode(value) when is_binary(value) do
     if String.valid?(value), do: value, else: inspect(value)

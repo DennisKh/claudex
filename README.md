@@ -214,6 +214,8 @@ The function receives each argument as Claude sent it, decoded from JSON: an ato
 
 `@tool` also takes the API's own tool-definition fields, `:cache_control`, `:defer_loading`, `:allowed_callers`, `:eager_input_streaming` and `:input_examples`, and copies them onto the definition as given.
 
+A tool can hand Claude content instead of data: an image, a PDF, or `Claudex.ContentBlock.SearchResult` passages it cites, returned as content block structs, or as `{:content, blocks}` for blocks written as maps. `Claudex.ToolRunner` says which return values are content.
+
 `mix claudex.gen.tool MyApp.Tools read_file path` writes that module for you, with every attribute in place and a description slot per argument.
 
 A tool refuses a call by raising `Claudex.Tool.Error` with the reason:
