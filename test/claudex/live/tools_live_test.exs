@@ -158,6 +158,32 @@ defmodule Claudex.Live.ToolsTest do
     assert tokens > 0
   end
 
+  test "a call whose streamed input didn't parse replays with its error answer",
+       %{client: client} do
+    call = %Claudex.ContentBlock.ToolUse{
+      id: "toolu_01",
+      name: "get_temperature",
+      input: %{},
+      invalid_input: ~s({"city": "Par)
+    }
+
+    answer =
+      Tool.result(call, Jason.encode!(%{"INVALID_JSON" => call.invalid_input}), is_error: true)
+
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: WeatherTool,
+               messages: [
+                 Message.user("What is the temperature in Paris?"),
+                 %{role: "assistant", content: [call]},
+                 Message.tool_results([answer])
+               ]
+             })
+
+    assert tokens > 0
+  end
+
   test "two modules with a tool of the same name are refused", %{client: client} do
     assert {:error, %Claudex.Error{status: 400, message: message}} =
              Messages.count_tokens(client, %{

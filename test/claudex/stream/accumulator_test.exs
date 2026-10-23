@@ -150,6 +150,54 @@ defmodule Claudex.Stream.AccumulatorTest do
     assert %Message{content: [%ContentBlock.ToolUse{input: %{}}]} = message
   end
 
+  describe "a tool call whose input doesn't decode" do
+    defp tool_call(fragments, stop?) do
+      ([
+         message_start(),
+         block_start(0, %{
+           "type" => "tool_use",
+           "id" => "toolu_1",
+           "name" => "add",
+           "input" => %{}
+         })
+       ] ++
+         for(f <- fragments, do: delta(0, %{"type" => "input_json_delta", "partial_json" => f})) ++
+         if(stop?, do: [block_stop(0)], else: []))
+      |> fold()
+      |> Accumulator.message()
+      |> Message.tool_uses()
+    end
+
+    test "keeps the raw input and leaves input empty" do
+      assert [%ContentBlock.ToolUse{input: %{}, invalid_input: ~s({"a": 1,)} = call] =
+               tool_call([~s({"a": ), "1,"], true)
+
+      assert ContentBlock.to_param(call) == %{
+               type: "tool_use",
+               id: "toolu_1",
+               name: "add",
+               input: %{}
+             }
+    end
+
+    test "counts JSON that isn't an object as invalid" do
+      assert [%ContentBlock.ToolUse{invalid_input: "[1]"}] = tool_call(["[1]"], true)
+    end
+
+    test "is not marked while the block is still open" do
+      assert [%ContentBlock.ToolUse{invalid_input: nil}] = tool_call([~s({"a": )], false)
+    end
+
+    test "is not marked when no input arrived, as for a tool that takes no arguments" do
+      assert [%ContentBlock.ToolUse{input: %{}, invalid_input: nil}] = tool_call(["", ""], true)
+    end
+
+    test "is not marked when it decodes" do
+      assert [%ContentBlock.ToolUse{input: %{"a" => 1}, invalid_input: nil}] =
+               tool_call(["", ~s({"a": 1})], true)
+    end
+  end
+
   test "add/2 assembles thinking text and its signature" do
     message =
       [

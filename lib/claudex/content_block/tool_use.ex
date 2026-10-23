@@ -12,18 +12,32 @@ defmodule Claudex.ContentBlock.ToolUse do
   set when the tool belongs to a toolset, such as `"computer"`. Both go back
   with the block, and `Claudex.Tool.result/3` copies `toolset_name` onto the
   answer.
+
+  A tool with `eager_input_streaming`, or any tool in a request sending the
+  `fine-grained-tool-streaming-2025-05-14` beta, gets its input streamed
+  without the API checking it, so the input can arrive as JSON that doesn't parse. The
+  call then has `input` empty and `invalid_input` holding what arrived, which
+  is never sent back. Such a call can't run, and the API's guidance is to
+  answer it as an error, which `Claudex.ToolRunner` does:
+
+      Claudex.Tool.result(call, Jason.encode!(%{"INVALID_JSON" => call.invalid_input}),
+        is_error: true
+      )
+
+  See [Handling invalid JSON](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming#handling-invalid-json-in-tool-responses).
   """
 
   @behaviour Claudex.ContentBlock
 
-  defstruct [:id, :name, :input, :caller, :toolset_name]
+  defstruct [:id, :name, :input, :caller, :toolset_name, :invalid_input]
 
   @type t :: %__MODULE__{
           id: String.t(),
           name: String.t(),
           input: map(),
           caller: map() | nil,
-          toolset_name: String.t() | nil
+          toolset_name: String.t() | nil,
+          invalid_input: String.t() | nil
         }
 
   @doc "Turns the block back into the map the API expects in a request."
