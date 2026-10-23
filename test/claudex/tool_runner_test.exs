@@ -812,7 +812,7 @@ defmodule Claudex.ToolRunnerTest do
                ToolRunner.run(client(), @params, before_call: halt_after(1))
 
       [stored_messages, stored_results] =
-        [halted.messages, halted.tool_results] |> JSON.encode!() |> JSON.decode!()
+        [halted.messages, halted.tool_results] |> Jason.encode!() |> Jason.decode!()
 
       params = %{@params | tools: Ledger, messages: stored_messages}
 
@@ -1297,7 +1297,7 @@ defmodule Claudex.ToolRunnerTest do
       assert {:ok, %Turn{stop: :truncated} = truncated} = ToolRunner.run(client(), @params)
       assert_received {:sent, _first}
 
-      stored = truncated.messages |> JSON.encode!() |> JSON.decode!()
+      stored = truncated.messages |> Jason.encode!() |> Jason.decode!()
 
       assert {:ok, %Turn{stop: :completed}} =
                ToolRunner.run(client(), Map.put(@params, :messages, stored))

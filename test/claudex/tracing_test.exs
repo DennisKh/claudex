@@ -780,12 +780,12 @@ defmodule Claudex.TracingTest do
 
     # A trace's input and output are the run's, not the last request's. Without
     # them a session page has nothing to show for the whole conversation.
-    assert [%{"role" => "system"}, %{"role" => "user"}] = JSON.decode!(recorded["gen_ai.prompt"])
+    assert [%{"role" => "system"}, %{"role" => "user"}] = Jason.decode!(recorded["gen_ai.prompt"])
     assert recorded["gen_ai.completion"] =~ "42"
     assert recorded["claudex.stop"] == "completed"
 
     assert [%{"type" => "function", "name" => "add"}] =
-             JSON.decode!(recorded["gen_ai.tool.definitions"])
+             Jason.decode!(recorded["gen_ai.tool.definitions"])
   end
 
   test "a turn is a grouping span, not a generation" do
@@ -900,7 +900,7 @@ defmodule Claudex.TracingTest do
     # The conventions' message shape: a role with typed parts, which is what
     # lets a backend render a reply rather than print a blob.
     assert [%{"role" => "assistant", "parts" => [%{"type" => "text", "content" => "42"}]}] =
-             JSON.decode!(recorded["gen_ai.output.messages"])
+             Jason.decode!(recorded["gen_ai.output.messages"])
   end
 
   test "a reply asking for a tool says so in the shape a reader parses" do
@@ -945,7 +945,7 @@ defmodule Claudex.TracingTest do
     # gen_ai.completion has no reason to know that shape, so a reply asking
     # for a tool would read as one asking for nothing.
     assert %{"role" => "assistant", "tool_calls" => [call]} =
-             JSON.decode!(recorded["gen_ai.completion"])
+             Jason.decode!(recorded["gen_ai.completion"])
 
     assert call["name"] == "add"
     assert call["id"] == "toolu_1"
@@ -953,7 +953,7 @@ defmodule Claudex.TracingTest do
 
     # The conventions' own attribute keeps its own shape.
     assert [%{"parts" => [%{"type" => "tool_call", "name" => "add"}]}] =
-             JSON.decode!(recorded["gen_ai.output.messages"])
+             Jason.decode!(recorded["gen_ai.output.messages"])
   end
 
   test "the request records the system prompt and the tools separately" do
@@ -973,18 +973,18 @@ defmodule Claudex.TracingTest do
     # The conventions keep the system prompt out of the chat history, and the
     # tools the model was offered are their own attribute.
     assert [%{"type" => "text", "content" => "You are a calculator."}] =
-             JSON.decode!(recorded["gen_ai.system_instructions"])
+             Jason.decode!(recorded["gen_ai.system_instructions"])
 
     assert [%{"type" => "function", "name" => "add"}] =
-             JSON.decode!(recorded["gen_ai.tool.definitions"])
+             Jason.decode!(recorded["gen_ai.tool.definitions"])
 
     assert [%{"role" => "user", "parts" => [%{"type" => "text"}]}] =
-             JSON.decode!(recorded["gen_ai.input.messages"])
+             Jason.decode!(recorded["gen_ai.input.messages"])
 
     # The conventions keep it apart; the legacy attribute's readers expect it
     # at the front of the conversation, so it goes in both places.
     assert [%{"role" => "system", "content" => "You are a calculator."} | _rest] =
-             JSON.decode!(recorded["gen_ai.prompt"])
+             Jason.decode!(recorded["gen_ai.prompt"])
   end
 
   test "nothing outside Claudex.Tracing calls OpenTelemetry directly" do

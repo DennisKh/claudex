@@ -53,7 +53,7 @@ defmodule Claudex.TestSupport.MessageStream do
   end
 
   defp block({%{"input" => input} = tool_use, index}) do
-    json = JSON.encode!(input)
+    json = Jason.encode!(input)
     {head, tail} = String.split_at(json, div(String.length(json), 2))
 
     [block_start(index, %{tool_use | "input" => %{}})] ++
@@ -83,5 +83,5 @@ defmodule Claudex.TestSupport.MessageStream do
     event("content_block_stop", %{"type" => "content_block_stop", "index" => index})
   end
 
-  defp event(name, payload), do: "event: #{name}\ndata: #{JSON.encode!(payload)}\n\n"
+  defp event(name, payload), do: "event: #{name}\ndata: #{Jason.encode!(payload)}\n\n"
 end

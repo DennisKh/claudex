@@ -121,10 +121,10 @@ defmodule Claudex.Live.TracingTest do
       recorded = attributes(with_content)
 
       assert recorded["gen_ai.prompt"] =~ "pong"
-      assert %{"role" => "assistant"} = JSON.decode!(recorded["gen_ai.completion"])
+      assert %{"role" => "assistant"} = Jason.decode!(recorded["gen_ai.completion"])
 
       assert [%{"role" => "user", "parts" => _parts}] =
-               JSON.decode!(recorded["gen_ai.input.messages"])
+               Jason.decode!(recorded["gen_ai.input.messages"])
     end
   end
 

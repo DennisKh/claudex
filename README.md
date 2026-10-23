@@ -479,7 +479,7 @@ end
     messages: [Claudex.Message.user("File a ticket for this thread: ...")]
   })
 
-{:ok, ticket} = message |> Claudex.Message.text() |> JSON.decode()
+{:ok, ticket} = message |> Claudex.Message.text() |> Jason.decode()
 ```
 
 `stop_reason` decides whether there is anything to decode: a reply cut short by `max_tokens`, or a refusal, is not the promised shape.

@@ -46,6 +46,40 @@ jobs:
 
       - run: mix test
 
+  oldest:
+    name: Oldest supported Elixir
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The floor in mix.exs. Elixir 1.17 runs on OTP 25 to 27 only.
+      - uses: erlef/setup-beam@v1
+        id: beam
+        with:
+          otp-version: "27.3"
+          elixir-version: "1.17.3"
+
+      - name: Cache deps and build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+
+      - run: mix deps.get
+
+      - run: mix compile --warnings-as-errors
+
+      # Test files compile when the suite runs, live ones included, so a newer
+      # API in any of them is only a warning without this flag.
+      - run: mix test --warnings-as-errors
+
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
