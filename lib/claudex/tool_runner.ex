@@ -117,7 +117,8 @@ defmodule Claudex.ToolRunner do
       both count. The last turn then carries `stop: :max_turns`.
     * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
       before the tool does, returning `:ok`, `{:deny, reason}` or
-      `{:halt, stop}`
+      `{:halt, stop}`. A call whose input didn't parse is answered as an
+      error without it, as `Claudex.ContentBlock.ToolUse` describes
     * `:tool_results` - the `tool_results` of a halted turn, to carry on from
       the history it left. See "Approving a tool call".
     * `:on_event` - a function run on each `Claudex.Stream.Event` as it
@@ -151,7 +152,8 @@ defmodule Claudex.ToolRunner do
 
   `{:halt, stop}` ends the run instead, with `stop` as the turn's `stop`, an
   atom of your own. The tool is not called, nor is any call after it, and the
-  results of the ones before it are in `tool_results`. They stay off
+  results of the ones before it are in `tool_results`, along with the answer
+  to any call whose input didn't parse. They stay off
   `messages`, which ends with Claude's reply, because the API answers every
   call of a reply in one message and a partial one cannot be sent. That is how
   an approval outlives the process holding the run:
@@ -730,17 +732,39 @@ defmodule Claudex.ToolRunner do
   end
 
   defp run_tools(tool_uses, answered, config) do
+    invalid = invalid_answers(tool_uses, answered)
+    answered = Map.merge(invalid, answered)
+
     tool_uses
     |> Enum.reduce_while({:ok, []}, fn tool_use, {:ok, results} ->
       case answer_call(tool_use, answered, config) do
-        {:ok, result} -> {:cont, {:ok, [result | results]}}
-        {:halt, stop} -> {:halt, {:halted, stop, Enum.reverse(results)}}
+        {:ok, result} ->
+          {:cont, {:ok, [result | results]}}
+
+        {:halt, stop} ->
+          results = Enum.reverse(results)
+          {:halt, {:halted, stop, results ++ unreached(tool_uses, invalid, results)}}
       end
     end)
     |> case do
       {:ok, results} -> {:ok, Enum.reverse(results)}
       halted -> halted
     end
+  end
+
+  defp invalid_answers(tool_uses, answered) do
+    for %ToolUse{id: id, invalid_input: json} = tool_use <- tool_uses,
+        is_binary(json) and not is_map_key(answered, id),
+        into: %{},
+        do: {id, invalid(tool_use, json)}
+  end
+
+  defp unreached(tool_uses, invalid, results) do
+    reached = MapSet.new(results, & &1.tool_use_id)
+
+    for %ToolUse{id: id} <- tool_uses,
+        is_map_key(invalid, id) and not MapSet.member?(reached, id),
+        do: Map.fetch!(invalid, id)
   end
 
   defp answer_call(%ToolUse{id: id} = tool_use, answered, config) do
@@ -820,6 +844,12 @@ defmodule Claudex.ToolRunner do
                 "an atom of your own rather than nil or one the runner reports, " <>
                 "got: #{inspect(other)}"
     end
+  end
+
+  defp invalid(tool_use, json) do
+    report(tool_use, :invalid_input, fn ->
+      Tool.result(tool_use, Jason.encode!(%{"INVALID_JSON" => json}), is_error: true)
+    end)
   end
 
   defp denied(tool_use, reason) do

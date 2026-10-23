@@ -450,6 +450,9 @@ defmodule Claudex.Tool do
       module = registry[tool_use.name]
       Claudex.Tool.call(module, tool_use.name, tool_use.input)
 
+  A call with `invalid_input` set has no input to run with;
+  `Claudex.ContentBlock.ToolUse` shows how to answer it instead.
+
   Takes the same shapes as `list/1`. Plain tool maps have no implementation
   behind them, so they don't appear — a `tool_use` naming one is an unknown
   tool as far as dispatch is concerned.

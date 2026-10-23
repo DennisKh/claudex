@@ -65,9 +65,10 @@ defmodule Claudex.Telemetry do
 
   A span around one tool call, from `Claudex.Tool.call/4`, so a loop you drive
   yourself reports the same as `Claudex.ToolRunner` does. `:stop` metadata has
-  `:tool` and an `:outcome` of `:ok`, `:refused`, `:denied`, `:failed`, or
-  `:unknown_tool`. `:denied` and `:unknown_tool` come from the runner instead,
-  since a call it refused and a name it has no tool for never reach one.
+  `:tool` and an `:outcome` of `:ok`, `:refused`, `:denied`, `:failed`,
+  `:unknown_tool` or `:invalid_input`. The last three come from the runner
+  instead, since a call it refused, a name it has no tool for, and input that
+  didn't parse never reach one.
 
   A `:before_call` that waits on a human sits outside the span, so the duration
   is the tool's, not the approval's.

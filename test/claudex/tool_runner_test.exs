@@ -474,6 +474,155 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
+  defmodule Thermometer do
+    use Claudex.Tool
+
+    @doc "Reads the temperature in a city."
+    @tool true
+    @spec get_temperature(String.t()) :: String.t()
+    def get_temperature(city) do
+      send(self(), {:called, city})
+      "18"
+    end
+  end
+
+  # The recorded call, cut before its last input fragment, so the JSON never closes.
+  defp unclosed_tool_call do
+    "tool_use_stream"
+    |> Fixtures.sse!()
+    |> String.split("\n\n")
+    |> Enum.reject(&String.contains?(&1, ~s("partial_json":"\\"}")))
+    |> Enum.join("\n\n")
+  end
+
+  test "a call whose input doesn't decode is answered as invalid, without running the tool" do
+    {:ok, replies} = Agent.start_link(fn -> [:unclosed, :done] end)
+    test_pid = self()
+    handler = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      handler,
+      [:claudex, :tool, :stop],
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:outcome, metadata.outcome})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:sent, Jason.decode!(raw_body)})
+
+      case Agent.get_and_update(replies, fn [head | tail] -> {head, tail} end) do
+        :unclosed -> Plug.Conn.send_resp(conn, 200, unclosed_tool_call())
+        :done -> MessageStream.respond(conn, message([text("Sorry.")], "end_turn"))
+      end
+    end)
+
+    assert {:ok, %Turn{stop: :completed}} =
+             ToolRunner.run(client(), %{@params | tools: Thermometer})
+
+    refute_received {:called, _city}
+    assert_received {:outcome, :invalid_input}
+
+    assert_received {:sent, _first}
+    assert_received {:sent, second}
+    assert [_user, _assistant, %{"content" => [result]}] = second["messages"]
+    assert result["is_error"] == true
+    assert Jason.decode!(result["content"]) == %{"INVALID_JSON" => ~s({"arg": "Paris)}
+  end
+
+  defp rome_and_unclosed_paris do
+    events =
+      [
+        {"message_start",
+         %{
+           "type" => "message_start",
+           "message" => %{
+             "id" => "msg_1",
+             "type" => "message",
+             "role" => "assistant",
+             "model" => "claude-haiku-4-5",
+             "content" => [],
+             "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
+           }
+         }}
+      ] ++
+        Enum.flat_map(
+          [{0, "toolu_rome", ~s({"city": "Rome"})}, {1, "toolu_paris", ~s({"city": "Par)}],
+          fn {index, id, json} ->
+            [
+              {"content_block_start",
+               %{
+                 "type" => "content_block_start",
+                 "index" => index,
+                 "content_block" => %{
+                   "type" => "tool_use",
+                   "id" => id,
+                   "name" => "get_temperature",
+                   "input" => %{}
+                 }
+               }},
+              {"content_block_delta",
+               %{
+                 "type" => "content_block_delta",
+                 "index" => index,
+                 "delta" => %{"type" => "input_json_delta", "partial_json" => json}
+               }},
+              {"content_block_stop", %{"type" => "content_block_stop", "index" => index}}
+            ]
+          end
+        ) ++
+        [
+          {"message_delta",
+           %{
+             "type" => "message_delta",
+             "delta" => %{"stop_reason" => "tool_use"},
+             "usage" => %{"output_tokens" => 5}
+           }},
+          {"message_stop", %{"type" => "message_stop"}}
+        ]
+
+    Enum.map_join(events, fn {name, data} ->
+      "event: #{name}\ndata: #{Jason.encode!(data)}\n\n"
+    end)
+  end
+
+  test "a halt before an invalid call still leaves it answered, so a resume never runs it" do
+    {:ok, replies} = Agent.start_link(fn -> [:parallel, :done] end)
+    test_pid = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:sent, Jason.decode!(raw_body)})
+
+      case Agent.get_and_update(replies, fn [head | tail] -> {head, tail} end) do
+        :parallel -> Plug.Conn.send_resp(conn, 200, rome_and_unclosed_paris())
+        :done -> MessageStream.respond(conn, message([text("18 in Rome.")], "end_turn"))
+      end
+    end)
+
+    params = %{@params | tools: Thermometer}
+
+    assert {:ok, halted} =
+             ToolRunner.run(client(), params,
+               before_call: fn _call -> {:halt, :awaiting_approval} end
+             )
+
+    assert halted.stop == :awaiting_approval
+    assert [%{tool_use_id: "toolu_paris", is_error: true}] = halted.tool_results
+
+    assert {:ok, %Turn{stop: :completed}} =
+             ToolRunner.run(client(), %{params | messages: halted.messages},
+               tool_results: halted.tool_results
+             )
+
+    assert_received {:called, "Rome"}
+    refute_received {:called, _city}
+  end
+
   defmodule Accounts do
     use Claudex.Tool
 
