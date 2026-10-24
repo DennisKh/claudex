@@ -300,6 +300,38 @@ defmodule Claudex.TracingTest do
     assert attributes(conversation)["claudex.stop"] == "cancelled"
   end
 
+  test "a tool conversation cancelled before its first reply records the stop, not a failure" do
+    stream_reply(message())
+
+    cancel_ref = make_ref()
+    test = self()
+    id = {__MODULE__, cancel_ref}
+
+    :telemetry.attach(
+      id,
+      [:claudex, :request, :start],
+      fn _event, _measurements, _metadata, _config ->
+        if self() == test, do: send(self(), {:claudex_cancel, cancel_ref})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    assert {:error, %Claudex.Error{type: :stream}} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator),
+               cancel_ref: cancel_ref
+             )
+
+    spans = collect_spans([])
+    [conversation] = named(spans, "invoke_agent claude-haiku-4-5")
+    [turn] = named(spans, "turn")
+
+    assert attributes(conversation)["claudex.stop"] == "cancelled"
+    assert span(conversation, :status) == :undefined
+    assert span(turn, :status) == :undefined
+  end
+
   defp named(spans, name), do: Enum.filter(spans, &(span(&1, :name) == name))
 
   defp collect_spans(collected) do

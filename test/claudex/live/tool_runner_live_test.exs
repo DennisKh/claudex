@@ -168,6 +168,26 @@ defmodule Claudex.Live.ToolRunnerTest do
     assert Message.text(resumed.message) =~ "42"
   end
 
+  test "a cancel mid-reply ends the run on that turn, cancelled", %{client: client} do
+    cancel_ref = make_ref()
+    runner = self()
+
+    cancel_on_first_delta = fn
+      %Event.ContentBlockDelta{} -> send(runner, {:claudex_cancel, cancel_ref})
+      _event -> :ok
+    end
+
+    params = params([Message.user("Write a 300-word story about a lighthouse.")])
+
+    assert {:ok, %Turn{stop: :cancelled, index: 1} = turn} =
+             ToolRunner.run(client, params,
+               cancel_ref: cancel_ref,
+               on_event: cancel_on_first_delta
+             )
+
+    assert turn.message.stop_reason == nil
+  end
+
   test "a tool that refuses sends its reason back and the conversation goes on", %{client: client} do
     # The refusal is a rule Claude can't see coming — it has no reason not to
     # call add/2 here, so the tool is what turns the request down.
