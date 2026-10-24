@@ -52,8 +52,8 @@ defmodule Claudex.Messages.Batches do
   @doc """
   Submits a batch.
 
-  Each request is a map with a `:custom_id` — 1 to 64 characters of letters,
-  digits, hyphens, and underscores, unique within the batch — and `:params`,
+  Each request is a map with a `:custom_id` (1 to 64 characters of letters,
+  digits, hyphens, and underscores, unique within the batch) and `:params`,
   which takes exactly what `Claudex.Messages.create/2` takes. `:tools` in
   those params accepts a module the same way, and `max_tokens` must be at
   least 1.

@@ -6,10 +6,10 @@ defmodule Claudex.Page do
   `data` holds the items. The API has two cursor styles and this struct
   carries both, so the fields the endpoint doesn't use are nil:
 
-    * Models and Message Batches use id cursors — go forward with
+    * Models and Message Batches use id cursors: go forward with
       `after_id: page.last_id`, back with `before_id: page.first_id`, and
       check `has_more` to know whether there is a next page.
-    * Files uses an opaque cursor — pass `page: page.next_page` to get the
+    * Files uses an opaque cursor: pass `page: page.next_page` to get the
       next page, and stop when `next_page` is nil.
 
   Threading a cursor by hand means owning the loop, the accumulator, and the

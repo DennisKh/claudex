@@ -160,9 +160,9 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     config/runtime.exs runs in every environment. Widen it by hand to trace a
     development run.
 
-    Then run. See Claudex.Tracing for what each span carries, and turn on
-    `config :claudex, trace_content: true` when you want prompts, completions
-    and tool arguments on the spans as well.
+    Then run `mix deps.get`. See Claudex.Tracing for what each span carries,
+    and turn on `config :claudex, trace_content: true` when you want prompts,
+    completions and tool arguments on the spans as well.
     """
   end
 end
