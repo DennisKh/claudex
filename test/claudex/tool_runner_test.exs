@@ -175,11 +175,32 @@ defmodule Claudex.ToolRunnerTest do
     @stall :timer.seconds(5)
 
     @doc false
+    def blocks, do: @blocks
+
+    @doc false
     def run(request) do
       {_action, acc} =
         request.into.({:data, @blocks}, {request, Req.Response.new(status: 200)})
 
       Process.sleep(@stall)
+
+      acc
+    end
+  end
+
+  defmodule ToolThenCloseTransport do
+    @moduledoc """
+    Emits a complete `tool_use` block, then ends the response without
+    `message_delta` or `message_stop`, the way a dropped connection does.
+    """
+
+    @doc false
+    def run(request) do
+      {_action, acc} =
+        request.into.(
+          {:data, ToolThenStallTransport.blocks()},
+          {request, Req.Response.new(status: 200)}
+        )
 
       acc
     end
@@ -1437,6 +1458,21 @@ defmodule Claudex.ToolRunnerTest do
       refute_received {:sent, _second}
     end
 
+    test "a stream that ends part-way, with no cancel, counts too" do
+      client =
+        Client.new(
+          api_key: "sk-ant-test",
+          max_retries: 0,
+          req_options: [adapter: ToolThenCloseTransport]
+        )
+
+      assert [turn] = client |> ToolRunner.stream(%{@params | tools: Tattler}) |> Enum.to_list()
+
+      assert turn.stop == :truncated
+      assert turn.message.stop_reason == nil
+      refute_received {:tool_ran, _a, _b}
+    end
+
     test "leaves its calls unrun when its stored history is passed back" do
       respond_with([
         message([tool_use("add", %{"a" => 12, "b" => 30})], "max_tokens"),
@@ -1456,7 +1492,7 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
-  test "a cancel ref stops stream/3, and the turn it interrupts is truncated" do
+  test "a cancel ref stops stream/3, and the turn it interrupts is cancelled" do
     client =
       Client.new(
         api_key: "sk-ant-test",
@@ -1489,7 +1525,7 @@ defmodule Claudex.ToolRunnerTest do
     assert_receive :block_stopped, 2_000
     send(pid, {:claudex_cancel, cancel_ref})
 
-    assert_receive {:turns, [%Turn{stop: :truncated} = turn]}, 2_000
+    assert_receive {:turns, [%Turn{stop: :cancelled} = turn]}, 2_000
 
     assert [%ContentBlock.ToolUse{name: "add"}] = turn.tool_uses
     assert turn.tool_results == []
@@ -1817,7 +1853,7 @@ defmodule Claudex.ToolRunnerTest do
     assert_receive :block_stopped, 2_000
     send(pid, {:claudex_cancel, cancel_ref})
 
-    assert_receive {:finished, {:ok, %Turn{stop: :truncated}}, []}, 2_000
+    assert_receive {:finished, {:ok, %Turn{stop: :cancelled}}, []}, 2_000
   end
 
   test "a cancel before the reply starts is an error that says so, and leaves nothing behind" do
@@ -1838,6 +1874,39 @@ defmodule Claudex.ToolRunnerTest do
 
     assert_receive {:finished, {:error, %Error{type: :stream, message: message}}, []}, 2_000
     assert message =~ "cancelled"
+  end
+
+  test "a cancel before the reply starts reports the conversation's stop as :cancelled" do
+    id = {__MODULE__, make_ref()}
+    parent = self()
+
+    :telemetry.attach(
+      id,
+      [:claudex, :tool_runner, :stop],
+      fn _event, measurements, metadata, _config ->
+        if parent in Process.get(:"$callers", []),
+          do: send(parent, {:stopped, measurements.turns, metadata.stop})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    client =
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: SilentTransport])
+
+    cancel_ref = make_ref()
+
+    pid =
+      spawn_link(fn ->
+        Process.put(:"$callers", [parent])
+        send(parent, {:finished, ToolRunner.run(client, @params, cancel_ref: cancel_ref)})
+      end)
+
+    send(pid, {:claudex_cancel, cancel_ref})
+
+    assert_receive {:finished, {:error, %Error{type: :stream}}}, 2_000
+    assert_received {:stopped, 0, :cancelled}
   end
 
   defp signal_block_stop(parent, %Event.ContentBlockStop{}), do: send(parent, :block_stopped)

@@ -193,8 +193,9 @@ defmodule Claudex.ToolRunner do
 
   Without `:tool_results`, a history is only ever sent to the API, and a
   history ending in calls nobody answered is refused there. A `:refusal`,
-  `:truncated` or `:unknown` reply that asked for tools is left off
-  `messages`, so passing that history back asks Claude again.
+  `:truncated` or `:unknown` reply that asked for tools, or one that asked for
+  tools before a cancel cut it off, is left off `messages`, so passing that
+  history back asks Claude again.
 
   A resumed turn makes no request, so its `message` carries no id or model,
   its usage is all zeros, `:on_event` sees nothing for it, and `:max_turns`
@@ -368,7 +369,7 @@ defmodule Claudex.ToolRunner do
   add up belongs here instead.
 
   A cancel sent with `:cancel_ref` stops the request in flight. The turn it
-  interrupts arrives with `stop: :truncated` and its tool calls unrun, and the
+  interrupts arrives with `stop: :cancelled` and its tool calls unrun, and the
   stream ends there. A cancel that arrives while tools run lets them finish,
   and their turn arrives with `stop: :cancelled` and its results. One that
   arrives after a turn was handed over ends the stream on that turn as it was.
@@ -506,12 +507,22 @@ defmodule Claudex.ToolRunner do
       turns,
       start,
       fn
+        {:cancelled, _turns}, {span, nil} -> {[], {span, :cancelled}}
         {:cancelled, _turns}, {span, last} -> {[], {span, %{last | stop: :cancelled}}}
         turn, {span, _previous} -> {[turn], {span, turn}}
       end,
+      &started!/1,
       fn {span, last} -> finish_conversation(span, last) end
     )
   end
+
+  defp started!({_span, :cancelled}) do
+    raise Error.stream_error("the request was cancelled before the reply started")
+  end
+
+  defp started!(state), do: {[], state}
+
+  defp finish_conversation(span, :cancelled), do: Tracing.end_conversation(span, nil, :cancelled)
 
   defp finish_conversation(span, %Turn{message: message, stop: stop}) when is_atom(stop) do
     Tracing.end_conversation(span, message, stop)
@@ -608,18 +619,15 @@ defmodule Claudex.ToolRunner do
           history
         )
 
-      :cancelled when index > 1 ->
-        :cancelled
-
       :cancelled ->
-        raise Error.stream_error("the request was cancelled before the reply started")
+        :cancelled
     end
   end
 
-  # canceled stream may carry stop_reason `nil`
+  # A stream cut off before message_delta, cancelled or not, carries no stop_reason
   defp resolve_turn(config, %Turn{message: %Message{stop_reason: nil}} = turn, history) do
-    take_cancel(config)
-    stop_without_running(turn, history, :truncated)
+    stop = if take_cancel(config), do: :cancelled, else: :truncated
+    stop_without_running(turn, history, stop)
   end
 
   defp resolve_turn(config, %Turn{} = turn, history) do
