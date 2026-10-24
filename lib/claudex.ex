@@ -63,6 +63,6 @@ defmodule Claudex do
 
   @doc "Shortcut for `Claudex.Client.new/1`."
   @spec new() :: Client.t()
-  @spec new(keyword()) :: Client.t()
+  @spec new([Client.option()]) :: Client.t()
   def new(opts \\ []), do: Client.new(opts)
 end

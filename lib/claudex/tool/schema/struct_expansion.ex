@@ -6,21 +6,21 @@ defmodule Claudex.Tool.Schema.StructExpansion do
 
   Three sources of field info, tried in this order:
 
-    * a struct declaring `use Claudex.Schema` — its `__json_schema__/0`,
+    * a struct declaring `use Claudex.Schema`: its `__json_schema__/0`,
       built while it compiled, so it needs no readable `.beam`
-    * an Ecto schema — read via the module's own `__schema__/1`
+    * an Ecto schema, read via the module's own `__schema__/1`
       reflection. Claudex has no compile-time dependency on Ecto; this
       only runs when the referenced module itself implements `__schema__/1`,
       so it works whether or not your project has Ecto installed at all.
-      Verified against Ecto 3.14 — a field whose type Claudex doesn't
+      Verified against Ecto 3.14. A field whose type Claudex doesn't
       recognize (an older Ecto's internal representation for a
       parameterized type, or a custom `Ecto.Type` that doesn't implement
       `type/0`) raises `Claudex.Tool.SchemaError`. Association fields
-      (`belongs_to`, `has_many`, `has_one`, `many_to_many`) are skipped —
+      (`belongs_to`, `has_many`, `has_one`, `many_to_many`) are skipped:
       Ecto doesn't even include them in `__schema__(:fields)`. Embeds
       (`embeds_one`, `embeds_many`) are genuine data, not a relationship,
       and are expanded.
-    * a plain struct with `@type t :: %__MODULE__{...}` — read from the
+    * a plain struct with `@type t :: %__MODULE__{...}`, read from the
       module's own compiled typespec.
 
   A referenced module that isn't compiled yet is waited for, so a struct
@@ -53,10 +53,9 @@ defmodule Claudex.Tool.Schema.StructExpansion do
 
   Returns `:cycle` when `module` was already seen earlier on this
   expansion path (`ctx.visited`), or when two structs compiling at once
-  wait on each other — a self- or mutually-referential struct, not an
-  error — and `:unsupported` when `module` doesn't exist, or is neither a
-  struct nor an Ecto schema. Callers decide
-  what to do with each: `Claudex.Tool.Schema` falls back to an
+  wait on each other (a self- or mutually-referential struct, not an
+  error), and `:unsupported` when `module` doesn't exist, or is neither a
+  struct nor an Ecto schema. `Claudex.Tool.Schema` falls back to an
   unconstrained schema for `:cycle` and raises `Claudex.Tool.SchemaError`
   for `:unsupported`.
   """

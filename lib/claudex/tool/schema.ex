@@ -23,16 +23,16 @@ defmodule Claudex.Tool.Schema do
   @typedoc """
   Threaded through every recursive call:
 
-    * `env` — the compile-time environment, needed to resolve an aliased
+    * `env` - the compile-time environment, needed to resolve an aliased
       module reference (e.g. `Ticket.t()` after `alias My.App.Ticket`) into
       its real module name
-    * `visited` — struct modules already being expanded on the current
+    * `visited` - struct modules already being expanded on the current
       path, so a self- or mutually-referential struct stops instead of
       recursing forever
-    * `current_module` — which module a *bare* `t()` (no module prefix)
+    * `current_module` - which module a *bare* `t()` (no module prefix)
       refers to right now. A struct's own `@type t` can reference itself
-      as plain `t()`, not `Mod.t()` — this is how that resolves
-    * `escape_hatch` — the sentence a `Claudex.Tool.SchemaError` ends with,
+      as plain `t()`, not `Mod.t()`, and this is how that resolves
+    * `escape_hatch` - the sentence a `Claudex.Tool.SchemaError` ends with,
       naming the way out of an unmappable type. It differs per caller, so it
       travels with the context; `escape_hatch/1` has the two in use here
   """
@@ -111,9 +111,9 @@ defmodule Claudex.Tool.Schema do
   needs the order later to dispatch tool calls correctly.
 
   A parameter with no matching `@spec` at all gets an unconstrained
-  (`%{}`) property. A parameter whose `@spec` type Claudex can't map — an
+  (`%{}`) property. A parameter whose `@spec` type Claudex can't map (an
   unsupported typespec construct, or a `Mod.t()` that isn't a loaded struct
-  or Ecto schema — raises `Claudex.Tool.SchemaError`. Fix the spec, or pass
+  or Ecto schema) raises `Claudex.Tool.SchemaError`. Fix the spec, or pass
   `args_schema:` for that tool.
   """
 
@@ -277,18 +277,14 @@ defmodule Claudex.Tool.Schema do
   end
 
   @doc """
-  The sentence a `Claudex.Tool.SchemaError` ends with, taken from the context.
-
-  A type Claudex can't map is a dead end, and what to do about it depends on
-  who asked. `Claudex.Tool` tells you to describe the tool's arguments
-  yourself:
+  Returns the sentence a `Claudex.Tool.SchemaError` ends with, taken from the
+  context. It names the way out of a type Claudex can't map. A context
+  without one gets the `@tool` wording:
 
       iex> Claudex.Tool.Schema.escape_hatch(%{})
       "Pass args_schema: in the @tool options to describe it explicitly"
 
-  `Claudex.OutputFormat` says something else, because `args_schema:` is a
-  `@tool` option and means nothing to a struct being turned into an output
-  format:
+  `Claudex.OutputFormat` sets its own:
 
       iex> hatch = "Give the field a type the API can be told about, or pass output_config.format yourself"
       iex> Claudex.Tool.Schema.escape_hatch(%{escape_hatch: hatch})
@@ -308,9 +304,6 @@ defmodule Claudex.Tool.Schema do
       ** (Claudex.Tool.SchemaError) can't build a JSON schema for type
          `{String.t(), integer()}`. Describe the field with a struct, or hand
          me the schema
-
-  Leaving it out is the `@tool` wording, since that is where most of these
-  are raised.
   """
   @spec escape_hatch(context()) :: String.t()
   def escape_hatch(ctx), do: Map.get(ctx, :escape_hatch, @tool_escape_hatch)

@@ -483,7 +483,7 @@ defmodule Claudex.Tool do
   end
 
   defp check_tool_name!(module, name, arity) do
-    unless Regex.match?(~r/\A[a-zA-Z0-9_-]{1,128}\z/, Atom.to_string(name)) do
+    if not Regex.match?(~r/\A[a-zA-Z0-9_-]{1,128}\z/, Atom.to_string(name)) do
       raise SchemaError,
         message:
           "`@tool` is on #{name}/#{arity} in #{inspect(module)}, but a tool name may hold only " <>

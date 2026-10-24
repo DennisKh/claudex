@@ -204,7 +204,7 @@ defmodule Claudex.Stream.Forwarder do
   defp now, do: System.monotonic_time(:millisecond)
 
   defp warn_unreachable(to) do
-    unless Process.get(:claudex_unreachable_logged) do
+    if !Process.get(:claudex_unreachable_logged) do
       # once per stream
       Process.put(:claudex_unreachable_logged, true)
 

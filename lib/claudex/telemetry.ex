@@ -31,7 +31,7 @@ defmodule Claudex.Telemetry do
 
   A span around one HTTP request. Metadata has `:method` and `:path`
   throughout, `:model` when the request names one, and on `:stop` also
-  `:status`, `:request_id`, and — when the response carries usage —
+  `:status`, `:request_id`, and, when the response carries usage,
   `:input_tokens`, `:output_tokens`, and the cache counters
   `:cache_creation_input_tokens` and `:cache_read_input_tokens` when the
   response reports them. `:request_id` is the id Anthropic support asks for.

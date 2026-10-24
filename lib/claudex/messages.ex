@@ -153,8 +153,8 @@ defmodule Claudex.Messages do
 
   Nothing happens until you enumerate it, and enumerating owns the request:
   the process that starts consuming spawns the connection and only reads more
-  of the response when you ask for the next event. Stop enumerating — with
-  `Enum.take/2`, a `break`, or an exception — and the request is cancelled.
+  of the response when you ask for the next event. Stop enumerating (with
+  `Enum.take/2`, a `break`, or an exception) and the request is cancelled.
 
   `params` takes exactly what `create/2` takes; `stream: true` is set for
   you. Use `Claudex.Stream.final_message/1` if you want the assembled

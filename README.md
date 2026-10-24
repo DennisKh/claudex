@@ -129,7 +129,7 @@ client
 |> Claudex.Messages.create(params)
 ```
 
-Anything passed to `Claudex.new/1` wins over config. `:api_key` has one more fallback below config — the `ANTHROPIC_API_KEY` environment variable — so scripts and `iex` work with nothing configured at all.
+Anything passed to `Claudex.new/1` wins over config. `:api_key` has one more fallback below config, the `ANTHROPIC_API_KEY` environment variable, so scripts and `iex` work with nothing configured at all.
 
 ## Streaming
 
@@ -253,9 +253,9 @@ turn.messages                       # the whole conversation
 turn.stop                           # :completed | :truncated | :refusal | :max_turns | :cancelled
 ```
 
-The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options — `:max_turns`, `:before_call`, `:on_event` — go in a keyword list after it.
+The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options (`:max_turns`, `:before_call`, `:on_event`) go in a keyword list after it.
 
-It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. Match on `turn.stop` rather than assuming Claude finished: hitting the turn limit looks identical without it.
+It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. `turn.stop` says why it ended, and a run that hit the turn limit reads as a finished one everywhere else.
 
 For one turn at a time, `stream/3` yields a `Claudex.ToolRunner.Turn` per reply and you decide when to stop:
 
@@ -293,7 +293,7 @@ defmodule MyApp.Tools do
   @tool true
   @spec read_file(String.t()) :: String.t()
   def read_file(path) do
-    unless allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
+    if not allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
 
     File.read!(path)
   end
@@ -302,7 +302,7 @@ end
 
 Any other exception becomes an error result too, labelled as a failure and logged, so a bug in a tool doesn't read to Claude like a policy decision and doesn't end the conversation.
 
-When the decision belongs to the caller rather than the tool — a confirmation prompt, an allowlist, a human clicking approve — `:before_call` runs on each `tool_use` before dispatch:
+When the decision belongs to the caller rather than the tool (a confirmation prompt, an allowlist, a human clicking approve), `:before_call` runs on each `tool_use` before dispatch:
 
 ```elixir
 Claudex.ToolRunner.run(client, params,
@@ -666,7 +666,7 @@ The events cover the things you can't otherwise see: the model and `request_id` 
 
 Claudex emits OpenTelemetry spans as well: one per request, one per turn of a tool conversation, and one per tool call, nested so a trace reads as the conversation it was. Attributes follow the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so a backend shows the model, token counts and stop reason with no Claudex-specific integration.
 
-![Langfuse trace view](assets/langfuse-trace-1.png)
+![Langfuse trace view](https://raw.githubusercontent.com/DennisKh/claudex/main/assets/langfuse-trace-1.png)
 
 *One tool conversation in Langfuse: a single `invoke_agent` trace, a `turn` span per round, with the request and each tool call nested under it.*
 
@@ -730,7 +730,7 @@ The span stays open and unexported until `end_conversation/3` runs, so every way
 
 ### Running Langfuse locally
 
-`docker-compose.langfuse.yml` brings up the whole stack — web, worker, Postgres, ClickHouse, Redis and MinIO — so you can see your traces without sending them anywhere:
+`docker-compose.langfuse.yml` brings up the whole stack (web, worker, Postgres, ClickHouse, Redis and MinIO), so you can see your traces without sending them anywhere:
 
 ```bash
 cp .env.langfuse.example .env.langfuse
@@ -747,7 +747,7 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 
 Only port 3000 and the MinIO console on 9090 are exposed; everything else stays on the compose network. `docker compose -f docker-compose.langfuse.yml down -v` removes the volumes and starts over. `.env.langfuse` is gitignored, because that is where real keys end up.
 
-![Langfuse session view](assets/langfuse-trace-2.png)
+![Langfuse session view](https://raw.githubusercontent.com/DennisKh/claudex/main/assets/langfuse-trace-2.png)
 
 *The same session id across several runs: each run is its own trace, grouped under one session.*
 
@@ -886,7 +886,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 mix test.live
 ```
 
-In CI they are a separate, manually triggered workflow — **Actions → Live evals → Run workflow** — never part of the normal pipeline, because every run costs money. It runs every eval in `test/claudex/live/` and nothing else — CI has already run the offline suite — and an optional `file` input narrows it to one file. It needs an `ANTHROPIC_API_KEY` repository secret, and fails immediately if that secret is missing rather than skipping every test and reporting success.
+In CI they are a separate, manually triggered workflow (**Actions → Live evals → Run workflow**), never part of the normal pipeline, because every run costs money. It runs every eval in `test/claudex/live/` and nothing else, since CI has already run the offline suite, and an optional `file` input narrows it to one file. It needs an `ANTHROPIC_API_KEY` repository secret, and fails immediately if that secret is missing rather than skipping every test and reporting success.
 
 ### Releases
 

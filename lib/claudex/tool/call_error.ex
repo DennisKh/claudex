@@ -5,7 +5,7 @@ defmodule Claudex.Tool.CallError do
 
   `message` is always a complete sentence you can show or send back to Claude,
   whatever went wrong. `details` carries the same information in a form you can
-  branch on — the missing argument names, say — so reading the message never
+  branch on, such as the missing argument names, so reading the message never
   means parsing it.
 
       %Claudex.Tool.CallError{
@@ -20,10 +20,10 @@ defmodule Claudex.Tool.CallError do
   @typedoc """
   What went wrong:
 
-    * `:unknown_tool` — no tool of that name is registered on the module
-    * `:missing_args` — a required argument wasn't in the input
-    * `:tool_refused` — the tool raised `Claudex.Tool.Error`, declining on purpose
-    * `:tool_raised` — anything else: another exception, a `throw`, or an `exit`.
+    * `:unknown_tool` - no tool of that name is registered on the module
+    * `:missing_args` - a required argument wasn't in the input
+    * `:tool_refused` - the tool raised `Claudex.Tool.Error`, declining on purpose
+    * `:tool_raised` - anything else: another exception, a `throw`, or an `exit`.
       `details` has `:kind` (`:error`, `:throw` or `:exit`), and `:exception`,
       the exception's module, when the kind is `:error`.
   """
