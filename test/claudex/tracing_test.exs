@@ -364,8 +364,8 @@ defmodule Claudex.TracingTest do
   test "two runs interleaved in one process keep their own session and leave none behind" do
     stream_reply(message())
 
-    a = ToolRunner.stream(client(), @params, session: "chat-a")
-    b = ToolRunner.stream(client(), @params, session: "chat-b")
+    a = ToolRunner.stream!(client(), @params, session: "chat-a")
+    b = ToolRunner.stream!(client(), @params, session: "chat-b")
 
     a |> Stream.zip(b) |> Enum.to_list()
 
