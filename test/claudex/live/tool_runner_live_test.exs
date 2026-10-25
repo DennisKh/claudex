@@ -193,7 +193,7 @@ defmodule Claudex.Live.ToolRunnerTest do
     # call add/2 here, so the tool is what turns the request down.
     turns =
       client
-      |> ToolRunner.stream(params([Message.user("What is 150 plus 30?")]))
+      |> ToolRunner.stream!(params([Message.user("What is 150 plus 30?")]))
       |> Enum.to_list()
 
     refusal =
@@ -227,7 +227,7 @@ defmodule Claudex.Live.ToolRunnerTest do
     test "an approved call runs the tool", %{client: client} do
       assert [first | _rest] =
                client
-               |> ToolRunner.stream(approval_params("Delete report.csv please."),
+               |> ToolRunner.stream!(approval_params("Delete report.csv please."),
                  before_call: fn %ContentBlock.ToolUse{name: "delete_file"} -> :ok end
                )
                |> Enum.to_list()
@@ -244,7 +244,7 @@ defmodule Claudex.Live.ToolRunnerTest do
 
       turns =
         client
-        |> ToolRunner.stream(approval_params("Delete report.csv please."),
+        |> ToolRunner.stream!(approval_params("Delete report.csv please."),
           before_call: fn %ContentBlock.ToolUse{} = call ->
             send(test_pid, {:asked, call.name, call.input})
 
@@ -408,7 +408,7 @@ defmodule Claudex.Live.ToolRunnerTest do
           container
         )
 
-      turns = client |> ToolRunner.stream(params) |> Enum.to_list()
+      turns = client |> ToolRunner.stream!(params) |> Enum.to_list()
 
       assert [%Turn{tool_uses: [%{name: "checkpoint"}]} | _rest] = turns
       assert %Turn{stop: :completed} = last = List.last(turns)
@@ -444,7 +444,7 @@ defmodule Claudex.Live.ToolRunnerTest do
 
     resumed =
       client
-      |> ToolRunner.stream(
+      |> ToolRunner.stream!(
         %{params | messages: halted.messages} |> Map.put(:container, container),
         tool_results: halted.tool_results
       )
@@ -486,7 +486,7 @@ defmodule Claudex.Live.ToolRunnerTest do
 
     turns =
       client
-      |> ToolRunner.stream(
+      |> ToolRunner.stream!(
         params(messages, %{model: "claude-haiku-5-5", context_management: context_management})
       )
       |> Enum.to_list()

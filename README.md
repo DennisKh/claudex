@@ -257,11 +257,11 @@ The params map is the one `Claudex.Messages.create/2` takes, so `system:` and ev
 
 It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. `turn.stop` says why it ended, and a run that hit the turn limit reads as a finished one everywhere else.
 
-For one turn at a time, `stream/3` yields a `Claudex.ToolRunner.Turn` per reply and you decide when to stop:
+For one turn at a time, `stream!/3` yields a `Claudex.ToolRunner.Turn` per reply and you decide when to stop:
 
 ```elixir
 client
-|> Claudex.ToolRunner.stream(params)
+|> Claudex.ToolRunner.stream!(params)
 |> Enum.reduce_while(nil, fn turn, _last ->
   if interesting?(turn), do: {:cont, turn}, else: {:halt, turn}
 end)
@@ -877,7 +877,7 @@ The workflow pins Elixir and OTP explicitly, so a CI run doesn't drift from the 
 | `models_live_test.exs` | list, paging, alias resolution, `count_tokens` |
 | `files_live_test.exs` | upload, metadata, list, download refusal, delete |
 | `batches_live_test.exs` | create, retrieve, cancel, list, results-not-ready |
-| `tool_runner_live_test.exs` | `run/3` and `stream/3` against real tool calls |
+| `tool_runner_live_test.exs` | `run/3` and `stream!/3` against real tool calls |
 
 They're tagged `:live` and excluded from `mix test` (network + cost). To run them locally, export a real key first:
 

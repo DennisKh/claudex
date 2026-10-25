@@ -66,11 +66,11 @@ defmodule Claudex.ToolRunner do
   gets its answer in the run that called it. A `:container` in `params` that
   has no id gets that one.
 
-  `stream/3` hands you one turn at a time instead, so you can watch the
+  `stream!/3` hands you one turn at a time instead, so you can watch the
   conversation, log it, or stop it:
 
       client
-      |> Claudex.ToolRunner.stream(params)
+      |> Claudex.ToolRunner.stream!(params)
       |> Enum.reduce_while(nil, fn turn, _last ->
         if interesting?(turn), do: {:cont, turn}, else: {:halt, turn}
       end)
@@ -261,7 +261,7 @@ defmodule Claudex.ToolRunner do
   alias Claudex.Tracing.Attributes
 
   @typedoc """
-  An option for `run/3`, `stream/3` and `stream_to/3`, each described under
+  An option for `run/3`, `stream!/3` and `stream_to/3`, each described under
   "Options" in `Claudex.ToolRunner`.
   """
   @type option ::
@@ -272,7 +272,7 @@ defmodule Claudex.ToolRunner do
           | Tracing.session_option()
 
   @typedoc """
-  An option for `run/3` and `stream/3`: any `t:option/0`, plus the reference
+  An option for `run/3` and `stream!/3`: any `t:option/0`, plus the reference
   that cancels the request in flight.
   """
   @type loop_option :: option() | {:cancel_ref, reference()}
@@ -294,7 +294,7 @@ defmodule Claudex.ToolRunner do
   `params` takes exactly what `Claudex.Messages.create/2` takes; `opts` are
   the runner's own, listed in `Claudex.ToolRunner`.
 
-  It returns a `Claudex.ToolRunner.Turn`, the same thing `stream/3` yields.
+  It returns a `Claudex.ToolRunner.Turn`, the same thing `stream!/3` yields.
   `message` is the last reply, `messages` the whole conversation, and `stop`
   says why it ended, as `Claudex.ToolRunner.Turn` lists.
   A conversation that ran out of turns is `{:ok, turn}` like any other, and
@@ -311,7 +311,7 @@ defmodule Claudex.ToolRunner do
           {:ok, Turn.t()} | {:error, Error.t()}
   def run(%Client{} = client, params, opts \\ []) do
     client
-    |> stream(params, opts)
+    |> stream!(params, opts)
     |> Enum.reduce(nil, fn turn, _last -> turn end)
     |> case do
       %Turn{stop: nil} = turn -> {:ok, %{turn | stop: :cancelled}}
@@ -338,7 +338,7 @@ defmodule Claudex.ToolRunner do
   the sum over the stream:
 
       client
-      |> Claudex.ToolRunner.stream(params)
+      |> Claudex.ToolRunner.stream!(params)
       |> Enum.reduce(%{input: 0, output: 0}, fn turn, total ->
         %{
           input: total.input + turn.message.usage.input_tokens,
@@ -357,7 +357,7 @@ defmodule Claudex.ToolRunner do
   the conversation:
 
       client
-      |> Claudex.ToolRunner.stream(params, before_call: &MyApp.Session.approve/1)
+      |> Claudex.ToolRunner.stream!(params, before_call: &MyApp.Session.approve/1)
       |> Enum.reduce_while(MyApp.Session.new(), fn turn, session ->
         case MyApp.Session.apply_turn(session, turn) do
           {:continue, session} -> {:cont, session}
@@ -378,9 +378,9 @@ defmodule Claudex.ToolRunner do
 
   Enumerating raises `Claudex.Error` if a request fails.
   """
-  @spec stream(Client.t(), map() | keyword()) :: Enumerable.t()
-  @spec stream(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
-  def stream(%Client{} = client, params, opts \\ []) do
+  @spec stream!(Client.t(), map() | keyword()) :: Enumerable.t()
+  @spec stream!(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
+  def stream!(%Client{} = client, params, opts \\ []) do
     params = Map.new(params)
     reject_compaction!(params)
 
@@ -405,6 +405,12 @@ defmodule Claudex.ToolRunner do
     |> Stream.map(&emit_turn/1)
     |> traced(config)
   end
+
+  @doc false
+  @deprecated "Use stream!/3 instead"
+  @spec stream(Client.t(), map() | keyword()) :: Enumerable.t()
+  @spec stream(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
+  def stream(%Client{} = client, params, opts \\ []), do: stream!(client, params, opts)
 
   @doc """
   Runs the conversation in its own process and returns straight away,
@@ -485,7 +491,7 @@ defmodule Claudex.ToolRunner do
 
     Forwarder.start(forwarder_opts, fn sink ->
       client
-      |> stream(params, forwarding(runner_opts, sink))
+      |> stream!(params, forwarding(runner_opts, sink))
       |> Forwarder.forward_each(sink, :turn)
     end)
   end

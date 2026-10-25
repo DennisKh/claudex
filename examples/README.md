@@ -20,7 +20,7 @@ It demonstrates:
 
 * deriving a tool's schema from its `@doc` and `@spec` with `Claudex.Tool`
 * refusing a call by raising `Claudex.Tool.Error`, and what Claude does next
-* driving the loop with `Claudex.ToolRunner.stream/3` and `Enum.reduce_while/3`
+* driving the loop with `Claudex.ToolRunner.stream!/3` and `Enum.reduce_while/3`
 * forcing a tool call every turn with `tool_choice: %{type: "any"}`
 * the request and tool log from `Claudex.Telemetry.attach_default_logger/0`
 

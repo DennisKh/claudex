@@ -15,7 +15,7 @@ defmodule Arithmetix do
     task = "Compute (5+3)*2 - 6/0"
 
     Claudex.new()
-    |> Claudex.ToolRunner.stream(%{
+    |> Claudex.ToolRunner.stream!(%{
       model: "claude-haiku-4-5",
       max_tokens: 612,
       tools: Tools,

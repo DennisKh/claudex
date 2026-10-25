@@ -31,11 +31,11 @@ defmodule Claudex.Live.ServerToolsTest do
     allowed_callers: ["direct"]
   }
 
-  test "a search run through ToolRunner.stream/3 keeps its query and completes",
+  test "a search run through ToolRunner.stream!/3 keeps its query and completes",
        %{client: client} do
     turns =
       client
-      |> ToolRunner.stream(
+      |> ToolRunner.stream!(
         %{
           model: @model,
           max_tokens: 1024,

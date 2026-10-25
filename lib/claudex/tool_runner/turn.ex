@@ -1,7 +1,7 @@
 defmodule Claudex.ToolRunner.Turn do
   @moduledoc """
   One exchange in a tool conversation: what Claude said, what it asked to run,
-  and what running it produced. `Claudex.ToolRunner.stream/3` yields one of
+  and what running it produced. `Claudex.ToolRunner.stream!/3` yields one of
   these per reply and `run/3` returns the last.
 
   `tool_uses` and `tool_results` belong to this turn alone: what Claude asked

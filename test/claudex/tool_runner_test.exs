@@ -311,13 +311,26 @@ defmodule Claudex.ToolRunnerTest do
     assert {:ok, _json} = Jason.encode(history)
   end
 
-  test "stream/3 yields a turn per reply, carrying the history so far" do
+  test "the deprecated stream/3 still yields the turns stream!/3 does" do
+    respond_with([
+      message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+      message([text("42")], "end_turn")
+    ])
+
+    # apply/3, so the call compiles without the deprecation warning
+    # credo:disable-for-next-line Credo.Check.Refactor.Apply
+    turns = ToolRunner |> apply(:stream, [client(), @params]) |> Enum.to_list()
+
+    assert [%Turn{stop: nil}, %Turn{stop: :completed}] = turns
+  end
+
+  test "stream!/3 yields a turn per reply, carrying the history so far" do
     respond_with([
       message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
       message([text("3")], "end_turn")
     ])
 
-    assert [first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert %Turn{index: 1, stop: nil} = first
     assert Turn.tool_use?(first)
@@ -329,7 +342,7 @@ defmodule Claudex.ToolRunnerTest do
     assert length(second.messages) == 4
   end
 
-  test "stream/3 stops the conversation when the caller halts" do
+  test "stream!/3 stops the conversation when the caller halts" do
     respond_with([
       message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
       message([text("3")], "end_turn")
@@ -337,7 +350,7 @@ defmodule Claudex.ToolRunnerTest do
 
     turn =
       client()
-      |> ToolRunner.stream(@params)
+      |> ToolRunner.stream!(@params)
       |> Enum.reduce_while(nil, fn turn, _last -> {:halt, turn} end)
 
     assert %Turn{index: 1} = turn
@@ -660,7 +673,7 @@ defmodule Claudex.ToolRunnerTest do
     ])
 
     assert [first, _second] =
-             client() |> ToolRunner.stream(%{@params | tools: Accounts}) |> Enum.to_list()
+             client() |> ToolRunner.stream!(%{@params | tools: Accounts}) |> Enum.to_list()
 
     assert [%{content: ~s({"name":"ann"}), is_error: false}] = first.tool_results
   end
@@ -671,7 +684,7 @@ defmodule Claudex.ToolRunnerTest do
       message([text("I can't halve a negative number.")], "end_turn")
     ])
 
-    assert [first, _second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, _second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert [%{content: "negative numbers are not allowed", is_error: true}] = first.tool_results
   end
@@ -682,7 +695,7 @@ defmodule Claudex.ToolRunnerTest do
       message([text("That tool is broken.")], "end_turn")
     ])
 
-    assert [first, _second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, _second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert [%{content: content, is_error: true}] = first.tool_results
     assert content =~ "the tool failed:"
@@ -713,7 +726,7 @@ defmodule Claudex.ToolRunnerTest do
     log =
       capture_log(fn ->
         assert [first, _second] =
-                 client() |> ToolRunner.stream(%{@params | tools: Verbose}) |> Enum.to_list()
+                 client() |> ToolRunner.stream!(%{@params | tools: Verbose}) |> Enum.to_list()
 
         assert [%{content: content, is_error: true}] = first.tool_results
         assert content =~ "the tool failed: RuntimeError"
@@ -730,7 +743,7 @@ defmodule Claudex.ToolRunnerTest do
     ])
 
     assert [first, _second] =
-             client() |> ToolRunner.stream(%{@params | tools: Verbose}) |> Enum.to_list()
+             client() |> ToolRunner.stream!(%{@params | tools: Verbose}) |> Enum.to_list()
 
     assert [%{content: content, is_error: true}] = first.tool_results
     assert String.length(content) == 10_000
@@ -742,7 +755,7 @@ defmodule Claudex.ToolRunnerTest do
       message([text("No such tool.")], "end_turn")
     ])
 
-    assert [first, _second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, _second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert [%{content: "no tool named nope", is_error: true}] = first.tool_results
   end
@@ -753,7 +766,7 @@ defmodule Claudex.ToolRunnerTest do
       message([text("done")], "end_turn")
     ])
 
-    assert [first, _second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, _second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert [%{content: ~s({"a":"value"})}] = first.tool_results
   end
@@ -781,7 +794,7 @@ defmodule Claudex.ToolRunnerTest do
   test "a refusal ends the conversation without running its tool calls" do
     respond_with([message([tool_use("add", %{"a" => 1, "b" => 2})], "refusal")])
 
-    assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [turn] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert turn.stop == :refusal
     assert turn.message.stop_reason == "refusal"
@@ -792,7 +805,7 @@ defmodule Claudex.ToolRunnerTest do
   test "a stop reason this version doesn't know is reported as such, calls or not" do
     respond_with([message([text("Something new.")], "a_future_reason")])
 
-    assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [turn] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert turn.stop == :unknown
     assert length(turn.messages) == 2
@@ -804,7 +817,7 @@ defmodule Claudex.ToolRunnerTest do
       message([text("3")], "end_turn")
     ])
 
-    assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [turn] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert turn.stop == :unknown
     assert turn.message.stop_reason == "a_future_reason"
@@ -818,7 +831,7 @@ defmodule Claudex.ToolRunnerTest do
   test "max_turns stops a conversation that keeps asking for tools" do
     respond_with(List.duplicate(message([tool_use("add", %{"a" => 1, "b" => 1})], "tool_use"), 3))
 
-    turns = client() |> ToolRunner.stream(@params, max_turns: 3) |> Enum.to_list()
+    turns = client() |> ToolRunner.stream!(@params, max_turns: 3) |> Enum.to_list()
 
     assert length(turns) == 3
     assert Enum.all?(turns, &Turn.tool_use?/1)
@@ -872,7 +885,7 @@ defmodule Claudex.ToolRunnerTest do
     ])
 
     # PLAN.md's own example of data a tool may legitimately return.
-    assert [first, _second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, _second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert [%{content: content, is_error: false}] = first.tool_results
     assert content =~ ":not_found"
@@ -893,7 +906,7 @@ defmodule Claudex.ToolRunnerTest do
       end
 
       assert [first, last] =
-               client() |> ToolRunner.stream(@params, before_call: deny) |> Enum.to_list()
+               client() |> ToolRunner.stream!(@params, before_call: deny) |> Enum.to_list()
 
       assert_received {:asked, "add", %{"a" => 12, "b" => 30}}
 
@@ -1089,7 +1102,7 @@ defmodule Claudex.ToolRunnerTest do
 
       turns =
         client()
-        |> ToolRunner.stream(%{@params | messages: halted.messages},
+        |> ToolRunner.stream!(%{@params | messages: halted.messages},
           tool_results: halted.tool_results
         )
         |> Enum.to_list()
@@ -1168,7 +1181,7 @@ defmodule Claudex.ToolRunnerTest do
       allow = fn %ContentBlock.ToolUse{} -> :ok end
 
       assert [first, _last] =
-               client() |> ToolRunner.stream(@params, before_call: allow) |> Enum.to_list()
+               client() |> ToolRunner.stream!(@params, before_call: allow) |> Enum.to_list()
 
       assert [%{content: "42", is_error: false}] = first.tool_results
     end
@@ -1193,7 +1206,7 @@ defmodule Claudex.ToolRunnerTest do
       end
 
       assert [first, _last] =
-               client() |> ToolRunner.stream(@params, before_call: gate) |> Enum.to_list()
+               client() |> ToolRunner.stream!(@params, before_call: gate) |> Enum.to_list()
 
       assert_received {:asked, "toolu_1"}
       assert_received {:asked, "toolu_2"}
@@ -1209,7 +1222,7 @@ defmodule Claudex.ToolRunnerTest do
                    ~r/:before_call must return :ok, \{:deny, reason\} or \{:halt, stop\}/,
                    fn ->
                      client()
-                     |> ToolRunner.stream(@params, before_call: fn _call -> :maybe end)
+                     |> ToolRunner.stream!(@params, before_call: fn _call -> :maybe end)
                      |> Enum.to_list()
                    end
     end
@@ -1261,7 +1274,7 @@ defmodule Claudex.ToolRunnerTest do
         message([text("It is 18°C in Kyiv.")], "end_turn")
       ])
 
-      assert [first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+      assert [first, second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
       assert first.stop == nil
       assert first.message.stop_reason == "pause_turn"
@@ -1281,7 +1294,7 @@ defmodule Claudex.ToolRunnerTest do
 
       respond_with(List.duplicate(paused, 2))
 
-      turns = client() |> ToolRunner.stream(@params, max_turns: 2) |> Enum.to_list()
+      turns = client() |> ToolRunner.stream!(@params, max_turns: 2) |> Enum.to_list()
 
       assert [%Turn{stop: nil}, %Turn{stop: :max_turns}] = turns
     end
@@ -1304,7 +1317,7 @@ defmodule Claudex.ToolRunnerTest do
       Agent.get_and_update(replies, fn [reply | rest] -> {reply, rest} end).(conn)
     end)
 
-    assert [first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [first, second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert first.stop == nil
     assert first.message.stop_reason == "compaction"
@@ -1326,7 +1339,7 @@ defmodule Claudex.ToolRunnerTest do
     respond_with([])
 
     assert_raise ArgumentError, ~r/`:compaction` can't be set on a tool runner/, fn ->
-      ToolRunner.stream(client(), Map.put(@params, :compaction, %{type: "summarize"}))
+      ToolRunner.stream!(client(), Map.put(@params, :compaction, %{type: "summarize"}))
     end
 
     refute_received {:sent, _request}
@@ -1347,7 +1360,7 @@ defmodule Claudex.ToolRunnerTest do
       message([text("Around 3 million.")], "end_turn")
     ])
 
-    assert [_first, second] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+    assert [_first, second] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
     assert second.stop == :completed
 
@@ -1372,7 +1385,7 @@ defmodule Claudex.ToolRunnerTest do
 
     params = %{@params | tools: Revenue}
 
-    assert [first, second] = client() |> ToolRunner.stream(params) |> Enum.to_list()
+    assert [first, second] = client() |> ToolRunner.stream!(params) |> Enum.to_list()
 
     assert [%ContentBlock.ToolUse{name: "revenue"}] = first.tool_uses
     assert [%{content: "250", is_error: false}] = first.tool_results
@@ -1433,7 +1446,7 @@ defmodule Claudex.ToolRunnerTest do
     test "stops the loop rather than reading as finished" do
       respond_with([message([text("The answer is")], "max_tokens")])
 
-      assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+      assert [turn] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
       assert turn.stop == :truncated
       assert turn.message.stop_reason == "max_tokens"
@@ -1442,13 +1455,13 @@ defmodule Claudex.ToolRunnerTest do
     test "the model's own context window counts too" do
       respond_with([message([text("...")], "model_context_window_exceeded")])
 
-      assert [%Turn{stop: :truncated}] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+      assert [%Turn{stop: :truncated}] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
     end
 
     test "leaves the tool calls it was part-way through asking for unrun" do
       respond_with([message([tool_use("add", %{"a" => 12, "b" => 30})], "max_tokens")])
 
-      assert [turn] = client() |> ToolRunner.stream(@params) |> Enum.to_list()
+      assert [turn] = client() |> ToolRunner.stream!(@params) |> Enum.to_list()
 
       assert turn.stop == :truncated
       assert turn.tool_results == []
@@ -1466,7 +1479,7 @@ defmodule Claudex.ToolRunnerTest do
           req_options: [adapter: ToolThenCloseTransport]
         )
 
-      assert [turn] = client |> ToolRunner.stream(%{@params | tools: Tattler}) |> Enum.to_list()
+      assert [turn] = client |> ToolRunner.stream!(%{@params | tools: Tattler}) |> Enum.to_list()
 
       assert turn.stop == :truncated
       assert turn.message.stop_reason == nil
@@ -1492,7 +1505,7 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
-  test "a cancel ref stops stream/3, and the turn it interrupts is cancelled" do
+  test "a cancel ref stops stream!/3, and the turn it interrupts is cancelled" do
     client =
       Client.new(
         api_key: "sk-ant-test",
@@ -1505,13 +1518,13 @@ defmodule Claudex.ToolRunnerTest do
 
     pid =
       spawn_link(fn ->
-        # The forwarder does this for stream_to/3; a bare stream/3 in a task
+        # The forwarder does this for stream_to/3; a bare stream!/3 in a task
         # of your own carries whatever its caller set up.
         Process.put(:"$callers", [parent])
 
         turns =
           client
-          |> ToolRunner.stream(%{@params | tools: Tattler},
+          |> ToolRunner.stream!(%{@params | tools: Tattler},
             cancel_ref: cancel_ref,
             on_event: &signal_block_stop(parent, &1)
           )
@@ -1575,11 +1588,11 @@ defmodule Claudex.ToolRunnerTest do
       refute_received {:sent, _second}
     end
 
-    test "stream/3 ends on the turn whose tools ran, cancelled", %{cancel_ref: cancel_ref} do
+    test "stream!/3 ends on the turn whose tools ran, cancelled", %{cancel_ref: cancel_ref} do
       {turns, left} =
         cancel_during_tool(cancel_ref, fn ->
           client()
-          |> ToolRunner.stream(%{@params | tools: Gate}, cancel_ref: cancel_ref)
+          |> ToolRunner.stream!(%{@params | tools: Gate}, cancel_ref: cancel_ref)
           |> Enum.to_list()
         end)
 
@@ -1693,14 +1706,14 @@ defmodule Claudex.ToolRunnerTest do
       assert left == []
     end
 
-    test "stream/3: a cancel while the caller handles a turn ends the stream there",
+    test "stream!/3: a cancel while the caller handles a turn ends the stream there",
          %{cancel_ref: cancel_ref} do
       count_requests()
 
       {turns, left} =
         in_own_process(fn ->
           client()
-          |> ToolRunner.stream(@params, cancel_ref: cancel_ref)
+          |> ToolRunner.stream!(@params, cancel_ref: cancel_ref)
           |> Enum.map(fn turn ->
             send(self(), {:claudex_cancel, cancel_ref})
             {turn.index, turn.stop}
@@ -1728,7 +1741,7 @@ defmodule Claudex.ToolRunnerTest do
       {turns, left} =
         cancel_during_tool_in_turn(cancel_ref, 2, fn ->
           client()
-          |> ToolRunner.stream(%{@params | tools: Gate}, cancel_ref: cancel_ref)
+          |> ToolRunner.stream!(%{@params | tools: Gate}, cancel_ref: cancel_ref)
           |> Enum.map(&{&1.index, &1.stop, Enum.map(&1.tool_results, fn r -> r.content end)})
         end)
 
