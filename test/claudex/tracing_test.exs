@@ -95,6 +95,19 @@ defmodule Claudex.TracingTest do
            } = attributes(recorded)
   end
 
+  test "a cached request's input tokens include what it read from and wrote to the cache" do
+    reply(Fixtures.json!("cached"))
+
+    assert {:ok, _message} = Messages.create(client(), @params)
+    assert_receive {:span, recorded}, 2_000
+
+    assert %{
+             "gen_ai.usage.input_tokens" => 11_714,
+             "gen_ai.usage.cache_write.input_tokens" => 11_702,
+             "gen_ai.usage.cache_read.input_tokens" => 0
+           } = attributes(recorded)
+  end
+
   test "the request and response models are both recorded, because they differ" do
     reply(message())
 
@@ -235,6 +248,90 @@ defmodule Claudex.TracingTest do
     assert attributes(first_turn)["claudex.turn.index"] == 1
   end
 
+  test "a tool conversation cancelled before its next request records the stop" do
+    replies = [
+      %{
+        message()
+        | "content" => [
+            %{
+              "type" => "tool_use",
+              "id" => "t1",
+              "name" => "add",
+              "input" => %{"a" => 1, "b" => 2}
+            }
+          ],
+          "stop_reason" => "tool_use"
+      },
+      message()
+    ]
+
+    {:ok, counter} = Agent.start_link(fn -> replies end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      reply = Agent.get_and_update(counter, fn [head | tail] -> {head, tail} end)
+      MessageStream.respond(conn, reply)
+    end)
+
+    cancel_ref = make_ref()
+    test = self()
+    id = {__MODULE__, cancel_ref}
+
+    :telemetry.attach(
+      id,
+      [:claudex, :request, :start],
+      fn _event, _measurements, _metadata, _config ->
+        if self() == test do
+          started = Process.get(:requests_started, 0) + 1
+          Process.put(:requests_started, started)
+          if started == 2, do: send(self(), {:claudex_cancel, cancel_ref})
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    assert {:ok, %{stop: :cancelled}} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator),
+               cancel_ref: cancel_ref
+             )
+
+    [conversation] = named(collect_spans([]), "invoke_agent claude-haiku-4-5")
+    assert attributes(conversation)["claudex.stop"] == "cancelled"
+  end
+
+  test "a tool conversation cancelled before its first reply records the stop, not a failure" do
+    stream_reply(message())
+
+    cancel_ref = make_ref()
+    test = self()
+    id = {__MODULE__, cancel_ref}
+
+    :telemetry.attach(
+      id,
+      [:claudex, :request, :start],
+      fn _event, _measurements, _metadata, _config ->
+        if self() == test, do: send(self(), {:claudex_cancel, cancel_ref})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    assert {:error, %Claudex.Error{type: :stream}} =
+             ToolRunner.run(client(), Map.put(@params, :tools, Calculator),
+               cancel_ref: cancel_ref
+             )
+
+    spans = collect_spans([])
+    [conversation] = named(spans, "invoke_agent claude-haiku-4-5")
+    [turn] = named(spans, "turn")
+
+    assert attributes(conversation)["claudex.stop"] == "cancelled"
+    assert span(conversation, :status) == :undefined
+    assert span(turn, :status) == :undefined
+  end
+
   defp named(spans, name), do: Enum.filter(spans, &(span(&1, :name) == name))
 
   defp collect_spans(collected) do
@@ -267,8 +364,8 @@ defmodule Claudex.TracingTest do
   test "two runs interleaved in one process keep their own session and leave none behind" do
     stream_reply(message())
 
-    a = ToolRunner.stream(client(), @params, session: "chat-a")
-    b = ToolRunner.stream(client(), @params, session: "chat-b")
+    a = ToolRunner.stream!(client(), @params, session: "chat-a")
+    b = ToolRunner.stream!(client(), @params, session: "chat-b")
 
     a |> Stream.zip(b) |> Enum.to_list()
 
@@ -715,12 +812,12 @@ defmodule Claudex.TracingTest do
 
     # A trace's input and output are the run's, not the last request's. Without
     # them a session page has nothing to show for the whole conversation.
-    assert [%{"role" => "system"}, %{"role" => "user"}] = JSON.decode!(recorded["gen_ai.prompt"])
+    assert [%{"role" => "system"}, %{"role" => "user"}] = Jason.decode!(recorded["gen_ai.prompt"])
     assert recorded["gen_ai.completion"] =~ "42"
     assert recorded["claudex.stop"] == "completed"
 
     assert [%{"type" => "function", "name" => "add"}] =
-             JSON.decode!(recorded["gen_ai.tool.definitions"])
+             Jason.decode!(recorded["gen_ai.tool.definitions"])
   end
 
   test "a turn is a grouping span, not a generation" do
@@ -789,6 +886,20 @@ defmodule Claudex.TracingTest do
     end
   end
 
+  test "a streamed cached reply counts its input tokens the same way" do
+    stream_reply(Fixtures.json!("cached"))
+
+    assert {:ok, _turn} = ToolRunner.run(client(), Map.put(@params, :tools, Calculator))
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+
+    assert %{
+             "gen_ai.usage.input_tokens" => 11_714,
+             "gen_ai.usage.cache_write.input_tokens" => 11_702,
+             "gen_ai.usage.cache_read.input_tokens" => 0
+           } = attributes(request)
+  end
+
   test "a streamed reply records the model, the tokens and the stop reason" do
     stream_reply(message())
 
@@ -821,7 +932,7 @@ defmodule Claudex.TracingTest do
     # The conventions' message shape: a role with typed parts, which is what
     # lets a backend render a reply rather than print a blob.
     assert [%{"role" => "assistant", "parts" => [%{"type" => "text", "content" => "42"}]}] =
-             JSON.decode!(recorded["gen_ai.output.messages"])
+             Jason.decode!(recorded["gen_ai.output.messages"])
   end
 
   test "a reply asking for a tool says so in the shape a reader parses" do
@@ -866,7 +977,7 @@ defmodule Claudex.TracingTest do
     # gen_ai.completion has no reason to know that shape, so a reply asking
     # for a tool would read as one asking for nothing.
     assert %{"role" => "assistant", "tool_calls" => [call]} =
-             JSON.decode!(recorded["gen_ai.completion"])
+             Jason.decode!(recorded["gen_ai.completion"])
 
     assert call["name"] == "add"
     assert call["id"] == "toolu_1"
@@ -874,7 +985,7 @@ defmodule Claudex.TracingTest do
 
     # The conventions' own attribute keeps its own shape.
     assert [%{"parts" => [%{"type" => "tool_call", "name" => "add"}]}] =
-             JSON.decode!(recorded["gen_ai.output.messages"])
+             Jason.decode!(recorded["gen_ai.output.messages"])
   end
 
   test "the request records the system prompt and the tools separately" do
@@ -894,18 +1005,18 @@ defmodule Claudex.TracingTest do
     # The conventions keep the system prompt out of the chat history, and the
     # tools the model was offered are their own attribute.
     assert [%{"type" => "text", "content" => "You are a calculator."}] =
-             JSON.decode!(recorded["gen_ai.system_instructions"])
+             Jason.decode!(recorded["gen_ai.system_instructions"])
 
     assert [%{"type" => "function", "name" => "add"}] =
-             JSON.decode!(recorded["gen_ai.tool.definitions"])
+             Jason.decode!(recorded["gen_ai.tool.definitions"])
 
     assert [%{"role" => "user", "parts" => [%{"type" => "text"}]}] =
-             JSON.decode!(recorded["gen_ai.input.messages"])
+             Jason.decode!(recorded["gen_ai.input.messages"])
 
     # The conventions keep it apart; the legacy attribute's readers expect it
     # at the front of the conversation, so it goes in both places.
     assert [%{"role" => "system", "content" => "You are a calculator."} | _rest] =
-             JSON.decode!(recorded["gen_ai.prompt"])
+             Jason.decode!(recorded["gen_ai.prompt"])
   end
 
   test "nothing outside Claudex.Tracing calls OpenTelemetry directly" do
@@ -930,6 +1041,36 @@ defmodule Claudex.TracingTest do
     assert Tracing.set_attributes(:untraced, %{"a" => 1}) == :ok
     assert Tracing.end_span(:untraced) == :ok
     assert Tracing.attach(:undefined) == :ok
+  end
+
+  test "a stream the caller stops early is not an error" do
+    stream_reply(message())
+
+    assert [_event] = client() |> Messages.stream!(@params) |> Enum.take(1)
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert span(request, :status) == :undefined
+  end
+
+  test "an error event part-way through a stream marks the span with its message" do
+    sse = """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":{"input_tokens":3,"output_tokens":1}}}
+
+    event: error
+    data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+
+    """
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, conn} = conn |> Plug.Conn.send_chunked(200) |> Plug.Conn.chunk(sse)
+      conn
+    end)
+
+    assert_raise Claudex.Error, fn -> client() |> Messages.stream!(@params) |> Enum.to_list() end
+
+    [request] = named(collect_spans([]), "chat claude-haiku-4-5")
+    assert span(request, :status) == {:status, :error, "Overloaded"}
   end
 
   test "a caller's own spans stay free of Claudex's attributes" do

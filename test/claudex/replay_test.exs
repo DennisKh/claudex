@@ -165,6 +165,29 @@ defmodule Claudex.ReplayTest do
     end
   end
 
+  test "a recorded stream's raw holds what message_start and message_delta both sent" do
+    stub_sse("message_stream", 4096)
+
+    {:ok, message} = client() |> Messages.stream!(@params) |> Stream.final_message()
+
+    assert message.raw["stop_reason"] == "end_turn"
+    assert %{"service_tier" => "standard", "inference_geo" => _geo} = message.usage.raw
+    assert message.raw["usage"] == message.usage.raw
+  end
+
+  test "a recorded compaction reports its iterations and context management" do
+    stub_sse("compaction_stream", 4096)
+
+    {:ok, message} = client() |> Messages.stream!(@params) |> Stream.final_message()
+
+    assert message.context_management == %{"applied_edits" => []}
+    assert message.raw["context_management"] == %{"applied_edits" => []}
+    assert message.usage.input_tokens == 0
+
+    assert [%{"type" => "compaction", "input_tokens" => 64_131, "output_tokens" => 155}] =
+             message.usage.iterations
+  end
+
   test "a recorded stream carries the ping the API really sends" do
     raw = Fixtures.sse!("message_stream")
 
@@ -305,6 +328,7 @@ defmodule Claudex.ReplayTest do
     assert model.type == "model"
     assert %DateTime{} = model.created_at
     assert model.max_input_tokens > 0
+    assert model.lifecycle in ["active", "deprecated", "retired"]
   end
 
   test "a recorded model decodes with its capabilities" do
@@ -315,6 +339,8 @@ defmodule Claudex.ReplayTest do
     assert model.id =~ "claude-haiku-4-5"
     assert model.display_name != ""
     assert model.capabilities["thinking"]["supported"] == true
+    assert model.lifecycle == "active"
+    assert model.line == "haiku"
   end
 
   test "a recorded file decodes with the GA shape" do

@@ -93,6 +93,26 @@ defmodule Mix.Tasks.Claudex.Gen.TracingTest do
       assert config[:opentelemetry][:resource] == %{service: %{name: "claudex"}}
     end
 
+    test "at an umbrella root, which names no app, leaves the service name to the SDK",
+         %{tmp_dir: tmp_dir} do
+      # Mix caches a project by app name, so each run needs a name of its own
+      id = System.unique_integer([:positive])
+
+      File.write!(Path.join(tmp_dir, "mix.exs"), """
+      defmodule GenTracingUmbrella#{id}.MixProject do
+        use Mix.Project
+        def project, do: [apps_path: "apps"]
+      end
+      """)
+
+      Mix.Project.in_project(:"gen_tracing_umbrella_#{id}", tmp_dir, fn _module ->
+        capture_io(fn -> Tracing.run([]) end)
+      end)
+
+      refute read(tmp_dir) =~ "config :opentelemetry, resource"
+      assert load(tmp_dir)[:opentelemetry] == nil
+    end
+
     test "appends to a runtime config that already exists", %{tmp_dir: tmp_dir} do
       write(tmp_dir, "import Config\n\nconfig :my_app, foo: :bar\n")
 

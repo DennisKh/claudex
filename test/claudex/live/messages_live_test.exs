@@ -42,4 +42,15 @@ defmodule Claudex.Live.MessagesTest do
 
     assert second |> Message.text() |> String.downcase() =~ "chartreuse"
   end
+
+  test "takes system blocks given as structs", %{client: client} do
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               system: [%Claudex.ContentBlock.Text{text: "Answer in one word."}],
+               messages: [Message.user("Hello")]
+             })
+
+    assert tokens > 0
+  end
 end

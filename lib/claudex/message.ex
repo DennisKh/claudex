@@ -5,8 +5,13 @@ defmodule Claudex.Message do
   here turn either into the maps `Claudex.Messages.create/2` takes back.
 
   `raw` holds the response exactly as it arrived, so a field the API adds
-  before Claudex models it is still readable. It's hidden from `inspect/1` to
-  keep output readable.
+  before Claudex models it is still readable. A streamed reply arrives in
+  pieces, so its `raw` is the message `message_start` carried with the fields
+  of `message_delta` merged in, and its `content` stays as `message_start`
+  sent it. It's hidden from `inspect/1` to keep output readable.
+
+  `context_management` reports the context edits the request applied, when it
+  asked for any.
   """
 
   alias Claudex.{ContentBlock, Usage}
@@ -16,6 +21,7 @@ defmodule Claudex.Message do
     "stop_sequence" => :completed,
     "tool_use" => :tool_use,
     "pause_turn" => :paused,
+    "compaction" => :compacted,
     "max_tokens" => :truncated,
     "model_context_window_exceeded" => :truncated,
     "refusal" => :refusal
@@ -36,11 +42,13 @@ defmodule Claudex.Message do
     :stop_sequence,
     :stop_details,
     :container,
+    :context_management,
     :usage
   ]
 
   @typedoc "How a reply ended, from `stop/1`."
-  @type stop :: :completed | :tool_use | :paused | :truncated | :refusal | :unknown
+  @type stop ::
+          :completed | :tool_use | :paused | :compacted | :truncated | :refusal | :unknown
 
   @type t :: %__MODULE__{
           raw: map() | nil,
@@ -53,6 +61,7 @@ defmodule Claudex.Message do
           stop_sequence: String.t() | nil,
           stop_details: map() | nil,
           container: map() | nil,
+          context_management: map() | nil,
           usage: Usage.t() | nil
         }
 
@@ -70,6 +79,7 @@ defmodule Claudex.Message do
       stop_sequence: json["stop_sequence"],
       stop_details: json["stop_details"],
       container: json["container"],
+      context_management: json["context_management"],
       usage: Usage.decode(json["usage"] || %{})
     }
   end
@@ -140,7 +150,7 @@ defmodule Claudex.Message do
 
   Takes a decoded `%Claudex.Message{}` as readily as a map you built, and turns
   both into plain data on the way in. That's the point of doing it here rather
-  than with `++`: a history you can hand to `JSON.encode!/1` and read back from
+  than with `++`: a history you can hand to `Jason.encode!/1` and read back from
   a database behaves exactly like one you just built, because it's the same
   shape either way.
   """
@@ -280,8 +290,8 @@ defmodule Claudex.Message do
   end
 
   @doc """
-  How a reply ended, as one of six answers rather than the seven strings the
-  API sends.
+  Returns how a reply ended. Takes a message, or its `stop_reason` string on
+  its own.
 
       iex> Claudex.Message.stop(%Claudex.Message{stop_reason: "max_tokens"})
       :truncated
@@ -293,6 +303,12 @@ defmodule Claudex.Message do
     * `:tool_use` - it called one of your tools and is waiting for the results.
     * `:paused` - it is part-way through a server-side tool loop. Send the
       reply back unchanged to let it carry on.
+    * `:compacted` - it summarised the conversation instead of answering,
+      because the request set `:compaction` or because `pause_after_compaction`
+      paused it there. The reply holds the summary alone. After a pause, send
+      it back to let Claude carry on. A summary you asked for with
+      `:compaction` goes first in `messages`, in place of the messages it
+      summarises.
     * `:truncated` - it ran out of room, hitting this request's `max_tokens`
       or the model's context window.
     * `:refusal` - it declined.
@@ -304,9 +320,6 @@ defmodule Claudex.Message do
   unfinished as the sentence before it, and results for a call it never
   confirmed cannot be replayed. `Claudex.ToolRunner` stops on all three for
   that reason, and `to_param/1` leaves those calls out of the history.
-
-  Takes the reason on its own as readily as a message, since an app that
-  persists its turns asks this of a database column rather than a struct.
   """
   @spec stop(t() | String.t() | nil) :: stop()
   def stop(%__MODULE__{stop_reason: reason}), do: stop(reason)

@@ -54,7 +54,7 @@ defmodule Claudex.Stream.Event do
   def from_sse(%SSE.Event{name: "ping"}), do: :ignore
 
   def from_sse(%SSE.Event{name: "error", data: data}) do
-    case JSON.decode(data) do
+    case Jason.decode(data) do
       {:ok, body} when is_map(body) ->
         {:error, Error.from_stream_event(body)}
 
@@ -64,7 +64,7 @@ defmodule Claudex.Stream.Event do
   end
 
   def from_sse(%SSE.Event{data: data}) do
-    case JSON.decode(data) do
+    case Jason.decode(data) do
       {:ok, json} when is_map(json) ->
         {:ok, decode(json)}
 

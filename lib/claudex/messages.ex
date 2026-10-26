@@ -13,10 +13,12 @@ defmodule Claudex.Messages do
   request at a time.
   """
 
-  alias Claudex.{API, Client, Error, MCP, Message, OutputFormat, Tool, Tracing}
+  alias Claudex.{API, Client, ContentBlock, Error, MCP, Message, OutputFormat, Tool, Tracing}
   alias Claudex.Stream.{Connection, Forwarder, Handle}
 
   @required_params [:model, :messages, :max_tokens]
+
+  @max_nonstreaming_tokens div(128_000 * 10, 60)
   @count_tokens_required_params [:model, :messages]
 
   @typedoc """
@@ -51,11 +53,14 @@ defmodule Claudex.Messages do
       message.stop_reason  #=> "end_turn"
       message.usage.output_tokens
 
-  `params` must include `:model`, `:messages`, and `:max_tokens`. Everything
-  else the Messages API accepts (`:system`, `:temperature`, `:thinking`,
-  ...) is optional and passed straight through, so any parameter the API
-  supports works here — see the
+  `params` must include `:model`, `:messages`, and `:max_tokens`, with atom
+  keys throughout. Everything else the Messages API accepts (`:system`,
+  `:temperature`, `:thinking`, ...) is optional and passed straight through, so
+  any parameter the API supports works here — see the
   [Messages API reference](https://platform.claude.com/docs/en/api/messages).
+
+  `:system` takes a string or a list of text blocks, and a block can be a
+  `Claudex.ContentBlock.Text` struct.
 
   `:tools` takes a module that `use`s `Claudex.Tool`, a list of them, plain
   tool maps, or any mix of the two — see `Claudex.Tool.list/1`.
@@ -70,6 +75,12 @@ defmodule Claudex.Messages do
   returns `{:error, %Claudex.Error{type: :bad_request}}`,
   use `stream!/2` or `stream_to/3` instead.
 
+  A reply can take up to an hour per 128,000 tokens, so with the client's
+  default 10-minute `:receive_timeout`, a `:max_tokens` above 21,333 returns
+  `{:error, %Claudex.Error{type: :bad_request}}` without sending the request.
+  `stream!/2` and `stream_to/3` take any `:max_tokens`, and so does a client
+  given its own `:receive_timeout`.
+
   `opts` takes `:session`, which names the conversation this request belongs
   to for tracing and never reaches the API. See
   `t:Claudex.Tracing.session_option/0`.
@@ -83,6 +94,7 @@ defmodule Claudex.Messages do
   def create(%Client{} = client, params, opts \\ []) do
     with {:ok, body} <- build_body(params),
          :ok <- validate_not_streaming(body),
+         :ok <- validate_duration(client, body),
          {:ok, response} <-
            API.post(client, "/v1/messages", Map.put(body, :stream, false), opts) do
       {:ok, Message.decode(response)}
@@ -105,11 +117,6 @@ defmodule Claudex.Messages do
   that affects the input counts (`:system`, `:tools`, `:thinking`,
   `:tool_choice`) is optional and passed through, and `:tools` takes a module
   the same way `create/2` does.
-
-  Server tools are rejected here with a 400. Passing `web_search` or
-  `code_execution` in `:tools` fails with "Server tools are not supported in
-  the count_tokens endpoint", so this cannot be used to check whether a model
-  accepts a given server tool.
 
   The number is an estimate; a real request can come out a little different.
 
@@ -146,8 +153,8 @@ defmodule Claudex.Messages do
 
   Nothing happens until you enumerate it, and enumerating owns the request:
   the process that starts consuming spawns the connection and only reads more
-  of the response when you ask for the next event. Stop enumerating — with
-  `Enum.take/2`, a `break`, or an exception — and the request is cancelled.
+  of the response when you ask for the next event. Stop enumerating (with
+  `Enum.take/2`, a `break`, or an exception) and the request is cancelled.
 
   `params` takes exactly what `create/2` takes; `stream: true` is set for
   you. Use `Claudex.Stream.final_message/1` if you want the assembled
@@ -222,9 +229,9 @@ defmodule Claudex.Messages do
     * `{:claudex, ref, :done}` when the reply is complete
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
 
-  The forwarding process is linked to the caller, so it dies with it. The
-  process it delivers to is not, so by default the stream carries on when that
-  one goes away, and the caller decides what a missing reader means.
+  The forwarding process stops when the caller exits, normally or not. The
+  process it delivers to is not watched by default, so the stream carries on
+  when that one goes away, and the caller decides what a missing reader means.
 
   ## Options
 
@@ -261,16 +268,23 @@ defmodule Claudex.Messages do
     end
   end
 
-  defp build_body(params, required \\ @required_params) do
-    body =
-      params
-      |> Map.new()
-      |> normalize_tools()
-      |> normalize_mcp_servers()
-      |> normalize_messages()
-      |> normalize_format()
+  @doc false
+  @spec to_body(map() | keyword()) :: map()
+  def to_body(params) do
+    params
+    |> Map.new()
+    |> normalize_tools()
+    |> normalize_mcp_servers()
+    |> normalize_messages()
+    |> normalize_system()
+    |> normalize_format()
+  end
 
-    with :ok <- validate_required(body, required), do: {:ok, body}
+  defp build_body(params, required \\ @required_params) do
+    with :ok <- validate_atom_keys(params),
+         body = to_body(params),
+         :ok <- validate_required(body, required),
+         do: {:ok, body}
   end
 
   defp normalize_tools(%{tools: tools} = body), do: %{body | tools: Tool.list(tools)}
@@ -287,6 +301,15 @@ defmodule Claudex.Messages do
   end
 
   defp normalize_messages(body), do: body
+
+  defp normalize_system(%{system: blocks} = body) when is_list(blocks) do
+    %{body | system: Enum.map(blocks, &system_block/1)}
+  end
+
+  defp normalize_system(body), do: body
+
+  defp system_block(%{} = block), do: ContentBlock.to_param(block)
+  defp system_block(block), do: block
 
   defp normalize_format(%{output_config: %{format: module} = config} = body)
        when is_atom(module) and not is_nil(module) do
@@ -305,8 +328,41 @@ defmodule Claudex.Messages do
 
   defp validate_not_streaming(_body), do: :ok
 
+  defp validate_duration(client, %{max_tokens: max_tokens})
+       when is_integer(max_tokens) and max_tokens > @max_nonstreaming_tokens do
+    if Client.default_receive_timeout?(client) do
+      {:error,
+       %Error{
+         type: :bad_request,
+         message:
+           "a reply of up to #{max_tokens} tokens can take longer than the 10-minute " <>
+             "timeout, so create/2 doesn't send it: use stream!/2 or stream_to/3, or give " <>
+             "the client a longer :receive_timeout"
+       }}
+    else
+      :ok
+    end
+  end
+
+  defp validate_duration(_client, _body), do: :ok
+
+  defp validate_atom_keys(params) do
+    case for({key, _value} <- params, is_binary(key), do: key) do
+      [] ->
+        :ok
+
+      strings ->
+        {:error,
+         %Error{
+           type: :bad_request,
+           message:
+             "params need atom keys, but these are strings: #{Enum.map_join(strings, ", ", &inspect/1)}"
+         }}
+    end
+  end
+
   defp validate_required(body, required) do
-    case Enum.filter(required, &(not Map.has_key?(body, &1))) do
+    case Enum.reject(required, &Map.has_key?(body, &1)) do
       [] ->
         :ok
 

@@ -13,8 +13,7 @@ defmodule Claudex.MixProject do
     [
       app: :claudex,
       version: @version,
-      # The stdlib JSON module: 1.17 has no JSON, and 1.19 is what CI runs.
-      elixir: "~> 1.19",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
@@ -31,19 +30,17 @@ defmodule Claudex.MixProject do
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp package do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url, "Changelog" => @source_url <> "/blob/main/CHANGELOG.md"},
-      files: ~w(lib assets mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
+      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
     ]
   end
 

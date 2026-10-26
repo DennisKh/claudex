@@ -1,7 +1,7 @@
 defmodule Claudex.ToolRunner.Turn do
   @moduledoc """
   One exchange in a tool conversation: what Claude said, what it asked to run,
-  and what running it produced. `Claudex.ToolRunner.stream/3` yields one of
+  and what running it produced. `Claudex.ToolRunner.stream!/3` yields one of
   these per reply and `run/3` returns the last.
 
   `tool_uses` and `tool_results` belong to this turn alone: what Claude asked
@@ -14,8 +14,9 @@ defmodule Claudex.ToolRunner.Turn do
   `messages` carries the whole conversation up to and including this turn, so
   you can stop consuming at any point and still have the complete history from
   the last turn you saw. A `:refusal`, `:truncated` or `:unknown` reply that
-  asked for tools is the exception: it is in `message` only, so the history never ends
-  in calls that must not run.
+  asked for tools, or one that asked for tools before a cancel cut it off, is the
+  exception: it is in `message` only, so the history never ends in calls that
+  must not run.
 
   `stop` is nil while the conversation is still going, and says why it ended on
   the final turn:
@@ -24,15 +25,20 @@ defmodule Claudex.ToolRunner.Turn do
     * `:refusal` - Claude declined. Its tool calls, if any, were not run.
     * `:truncated` - the reply is unfinished. It ran out of room, hitting the
       `max_tokens` this request asked for or the model's own context window,
-      or the stream carrying it ended part-way, which is what cancelling one
-      does. What it was saying, or asking for, is cut off, so its tool calls
-      were not run either.
+      or the stream carrying it ended part-way. What it was saying, or asking
+      for, is cut off, so its tool calls were not run either.
     * `:unknown` - the reply ended with a `stop_reason` this version doesn't
       know. Any tool calls it asked for were not run. `message.stop_reason`
       has the reason as the API sent it.
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can
       be picked up again by passing that history back.
+    * `:cancelled` - a cancel arrived. One that cut this turn's reply off
+      leaves `message.stop_reason` nil and its tool calls unrun, as with
+      `:truncated`. One that arrived
+      after the reply, while its tools ran or before the next request, lets the
+      tools finish. Their results are in `messages` as with `:max_turns`, and
+      no request followed.
     * any other atom - the one a `:before_call` halt named. `tool_results` holds
       what ran before it and `messages` ends with Claude's reply, so passing
       `messages` back to `Claudex.ToolRunner.run/3` with `tool_results: tool_results`
@@ -45,7 +51,8 @@ defmodule Claudex.ToolRunner.Turn do
   defstruct [:message, :index, :stop, tool_uses: [], tool_results: [], messages: []]
 
   @typedoc "Why a conversation ended. Any other atom is one a `:before_call` halt named."
-  @type stop :: :completed | :refusal | :truncated | :unknown | :max_turns | atom()
+  @type stop ::
+          :completed | :refusal | :truncated | :unknown | :max_turns | :cancelled | atom()
 
   @type t :: %__MODULE__{
           message: Message.t(),

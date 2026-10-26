@@ -85,7 +85,7 @@ defmodule Mix.Tasks.Claudex.Gen.Tool do
   end
 
   defp validate!(pattern, value, message) do
-    unless Regex.match?(pattern, value), do: Mix.raise(message)
+    if not Regex.match?(pattern, value), do: Mix.raise(message)
   end
 
   defp create(path, module, function, arguments) do
@@ -103,7 +103,7 @@ defmodule Mix.Tasks.Claudex.Gen.Tool do
   defp append(path, source, module, function, arguments) do
     {end_line, body} = module!(source, path, module)
 
-    unless uses_tool?(body) do
+    if not uses_tool?(body) do
       Mix.raise("#{inspect(module)} in #{path} has no `use Claudex.Tool`, add it first")
     end
 

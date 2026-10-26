@@ -115,6 +115,67 @@ defmodule Claudex.Messages.BatchesTest do
     assert [%{"params" => %{"tools" => [%{"name" => "add"}]}}] = body["requests"]
   end
 
+  test "create/2 builds the output format a struct module in a request's params names" do
+    parent = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+      send(parent, {:body, Jason.decode!(raw_body)})
+
+      Req.Test.json(conn, @batch)
+    end)
+
+    params = %{
+      model: "claude-haiku-4-5",
+      max_tokens: 16,
+      messages: [Message.user("File a ticket")],
+      output_config: %{format: Claudex.TestSupport.Ticket}
+    }
+
+    assert {:ok, %Batch{}} = Batches.create(client(), [%{custom_id: "first", params: params}])
+
+    assert_received {:body, body}
+    assert [%{"params" => %{"output_config" => %{"format" => format}}}] = body["requests"]
+    assert %{"type" => "json_schema", "schema" => %{"type" => "object"}} = format
+  end
+
+  test "create/2 sends an MCP server struct in a request's params as the map the API takes" do
+    parent = self()
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+      send(parent, {:body, Jason.decode!(raw_body)})
+
+      Req.Test.json(conn, @batch)
+    end)
+
+    server = %Claudex.MCP.Server{
+      name: "docs",
+      url: "https://example.com/mcp",
+      authorization_token: "t"
+    }
+
+    params = %{
+      model: "claude-haiku-4-5",
+      max_tokens: 16,
+      messages: [Message.user("Search the docs")],
+      mcp_servers: [server]
+    }
+
+    assert {:ok, %Batch{}} = Batches.create(client(), [%{custom_id: "first", params: params}])
+
+    assert_received {:body, body}
+
+    assert [%{"params" => %{"mcp_servers" => [sent]}}] = body["requests"]
+
+    assert sent == %{
+             "type" => "url",
+             "name" => "docs",
+             "url" => "https://example.com/mcp",
+             "authorization_token" => "t"
+           }
+  end
+
   test "retrieve/2 decodes an ended batch" do
     Req.Test.stub(__MODULE__, fn conn ->
       assert conn.request_path == "/v1/messages/batches/msgbatch_1"

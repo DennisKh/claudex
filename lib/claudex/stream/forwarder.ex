@@ -4,7 +4,7 @@ defmodule Claudex.Stream.Forwarder do
   `Claudex.ToolRunner.stream_to/3`: it consumes a stream and forwards each
   item to another process as a message.
 
-  It's linked to whoever started it, so it goes away with them. There's no
+  It stops when whoever started it exits, for any reason. There's no
   `child_spec/1`, so it can't go in a supervision tree.
 
   The process being delivered to is not linked, so a stream carries on when
@@ -14,7 +14,7 @@ defmodule Claudex.Stream.Forwarder do
 
   require Logger
 
-  alias Claudex.{Client, Error, Tracing}
+  alias Claudex.{ChunkStream, Client, Error, Tracing}
   alias Claudex.Stream.{Connection, Handle}
 
   @typedoc """
@@ -35,11 +35,13 @@ defmodule Claudex.Stream.Forwarder do
     to = Keyword.get(opts, :to, self())
     ref = Keyword.get(opts, :ref, make_ref())
     monitor? = Keyword.get(opts, :monitor, false)
-    callers = [self() | Process.get(:"$callers", [])]
+    caller = self()
+    callers = [caller | Process.get(:"$callers", [])]
     context = Tracing.context()
 
     pid =
       spawn_link(fn ->
+        watch(caller, to, ref, monitor?)
         Process.put(:"$callers", callers)
         Tracing.attach(context)
         monitor = if monitor?, do: Process.monitor(to)
@@ -89,6 +91,14 @@ defmodule Claudex.Stream.Forwarder do
     :ok
   rescue
     ArgumentError -> warn_unreachable(to)
+  end
+
+  defp watch(caller, to, ref, monitor?) do
+    forwarder = self()
+    ChunkStream.watch(caller, fn -> Process.exit(forwarder, :shutdown) end)
+
+    # The forwarder is linked to the caller, so a reader that goes away cancels it
+    if monitor?, do: ChunkStream.watch(to, fn -> send(forwarder, {:claudex_cancel, ref}) end)
   end
 
   defp validate_every(nil), do: nil
@@ -194,7 +204,7 @@ defmodule Claudex.Stream.Forwarder do
   defp now, do: System.monotonic_time(:millisecond)
 
   defp warn_unreachable(to) do
-    unless Process.get(:claudex_unreachable_logged) do
+    if !Process.get(:claudex_unreachable_logged) do
       # once per stream
       Process.put(:claudex_unreachable_logged, true)
 

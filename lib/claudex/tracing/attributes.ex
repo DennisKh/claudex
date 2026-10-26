@@ -16,11 +16,11 @@ defmodule Claudex.Tracing.Attributes do
   says so, which is why the shapers are passed in unapplied.
   """
 
-  alias Claudex.{ContentBlock, Message, Tracing}
+  alias Claudex.{ContentBlock, Message, Tracing, Usage}
   alias Claudex.Tool.CallError
   alias Claudex.Tracing.Messages
 
-  @system "anthropic"
+  @provider %{"gen_ai.provider.name" => "anthropic", "gen_ai.system" => "anthropic"}
   @chat "chat"
   @execute_tool "execute_tool"
   @invoke_agent "invoke_agent"
@@ -80,7 +80,8 @@ defmodule Claudex.Tracing.Attributes do
     model = params[:model]
 
     attributes =
-      %{"gen_ai.system" => @system, "gen_ai.operation.name" => @invoke_agent}
+      @provider
+      |> Map.put("gen_ai.operation.name", @invoke_agent)
       |> put_present("claudex.turn.max", max_turns)
       |> put_model(model)
       |> put_session(session || Tracing.session_id())
@@ -131,12 +132,12 @@ defmodule Claudex.Tracing.Attributes do
   @spec tool(String.t(), map(), [Tracing.session_option()]) :: {String.t(), map()}
   def tool(name, input, opts \\ []) do
     attributes =
-      %{
-        "gen_ai.system" => @system,
+      @provider
+      |> Map.merge(%{
         "gen_ai.operation.name" => @execute_tool,
         "gen_ai.tool.name" => name,
         "gen_ai.tool.type" => "function"
-      }
+      })
       |> put_session(session(opts))
       |> put_content("gen_ai.tool.call.arguments", fn -> input end)
       |> put_content("gen_ai.prompt", fn -> input end)
@@ -204,11 +205,8 @@ defmodule Claudex.Tracing.Attributes do
 
   defp put_request(attributes, %{model: model, path: "/v1/messages"}, %{} = body) do
     attributes
-    |> Map.merge(%{
-      "gen_ai.system" => @system,
-      "gen_ai.operation.name" => @chat,
-      "gen_ai.request.model" => model
-    })
+    |> Map.merge(@provider)
+    |> Map.merge(%{"gen_ai.operation.name" => @chat, "gen_ai.request.model" => model})
     |> put_present("gen_ai.request.max_tokens", body[:max_tokens])
     |> put_present("gen_ai.request.temperature", body[:temperature])
     |> put_content("gen_ai.input.messages", fn -> Messages.input(body[:messages]) end)
@@ -223,8 +221,7 @@ defmodule Claudex.Tracing.Attributes do
     %{}
     |> put_present("gen_ai.response.id", body["id"])
     |> put_present("gen_ai.response.model", body["model"])
-    |> put_present("gen_ai.usage.input_tokens", get_in(body, ["usage", "input_tokens"]))
-    |> put_present("gen_ai.usage.output_tokens", get_in(body, ["usage", "output_tokens"]))
+    |> put_usage(decode_usage(body["usage"]))
     |> put_finish_reason(body["stop_reason"])
     |> put_content("gen_ai.output.messages", fn -> Messages.output(body["content"]) end)
     |> put_content("gen_ai.completion", fn -> Messages.chat_output(body["content"]) end)
@@ -232,13 +229,32 @@ defmodule Claudex.Tracing.Attributes do
 
   defp body_attributes(_body), do: %{}
 
-  defp put_usage(attributes, %{input_tokens: input, output_tokens: output}) do
+  defp put_usage(attributes, %Usage{} = usage) do
+    cache_read = usage.cache_read_input_tokens
+    cache_write = usage.cache_creation_input_tokens
+
     attributes
-    |> put_present("gen_ai.usage.input_tokens", input)
-    |> put_present("gen_ai.usage.output_tokens", output)
+    |> put_present(
+      "gen_ai.usage.input_tokens",
+      total_input(usage.input_tokens, cache_read, cache_write)
+    )
+    |> put_present("gen_ai.usage.output_tokens", usage.output_tokens)
+    |> put_present("gen_ai.usage.cache_read.input_tokens", cache_read)
+    |> put_present("gen_ai.usage.cache_write.input_tokens", cache_write)
   end
 
   defp put_usage(attributes, _usage), do: attributes
+
+  defp decode_usage(%{} = usage), do: Usage.decode(usage)
+  defp decode_usage(_usage), do: nil
+
+  defp total_input(nil, _cache_read, _cache_write), do: nil
+
+  defp total_input(input, cache_read, cache_write),
+    do: input + counted(cache_read) + counted(cache_write)
+
+  defp counted(nil), do: 0
+  defp counted(tokens), do: tokens
 
   defp put_reply_content(attributes, nil), do: attributes
 

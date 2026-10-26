@@ -2,10 +2,15 @@ defmodule Claudex.Telemetry do
   @moduledoc """
   Events Claudex emits, and a ready-made logger for them.
 
-  Claudex writes nothing to your logs on its own. It emits `:telemetry` events,
-  and you decide what happens to them. Retries and timeouts, which two of these
-  events report on, are configured on `Claudex.Client`. To see what the SDK is doing while
-  you're debugging, attach the logger that ships with it:
+  Claudex logs a warning in three cases: Req logs each retry it makes,
+  `Claudex.ToolRunner` logs a tool that raised, threw or exited, with its
+  message, and a stream sending to a process name nobody registered logs once
+  that its messages are dropped. `req_options: [retry_log_level: false]` on
+  `Claudex.Client.new/1` turns the retry warning off. Everything else goes out
+  as `:telemetry` events, and you decide what happens to them. Retries and
+  timeouts, which two of these events report on, are configured on
+  `Claudex.Client`. To see what the SDK is doing while you're debugging,
+  attach the logger that ships with it:
 
       Claudex.Telemetry.attach_default_logger()
 
@@ -26,16 +31,30 @@ defmodule Claudex.Telemetry do
 
   A span around one HTTP request. Metadata has `:method` and `:path`
   throughout, `:model` when the request names one, and on `:stop` also
-  `:status`, `:request_id`, and — when the response carries usage —
+  `:status`, `:request_id`, and, when the response carries usage,
   `:input_tokens`, `:output_tokens`, and the cache counters
-  `:cache_creation_input_tokens` and `:cache_read_input_tokens` when caching
-  was in play. `:request_id` is the id Anthropic support asks for. On
-  `:exception` it has `:kind` and the `:error` module instead, and a request
-  reports one or the other, never both.
+  `:cache_creation_input_tokens` and `:cache_read_input_tokens` when the
+  response reports them. `:request_id` is the id Anthropic support asks for.
+
+  A request that got a response reports `:stop` with its `:status`, and a
+  4xx or 5xx one also carries `:error_type`, the `Claudex.Error` type such as
+  `:rate_limit` or `:overloaded`. A stream the caller stops early reports
+  `:stop` as well, with a nil `:status` if it stopped before reading the
+  response.
+
+  A request that got no response, one whose body couldn't be decoded, or a
+  stream that failed part-way, reports `:exception` instead, with `:kind` and
+  the `:error` module. It carries
+  `:error_type` when the failure is one `Claudex.Error` describes, such as
+  `:timeout` or a mid-stream `:overloaded`, and a stream's also has the
+  `:status` and `:request_id` of the response it failed in. A request reports
+  one or the other, never both.
 
   A streamed request reports the same events from the process reading it, and
   its `:stop` and `:exception` measurements carry `:chunks` and `:bytes`
-  alongside `:duration`.
+  alongside `:duration`. Its token counts come from the stream's events, so a
+  stream the caller stops early carries the counts from every event that had
+  arrived by then, including ones the caller never took.
 
   ### `[:claudex, :retry, :declined]`
 
@@ -46,9 +65,10 @@ defmodule Claudex.Telemetry do
 
   A span around one tool call, from `Claudex.Tool.call/4`, so a loop you drive
   yourself reports the same as `Claudex.ToolRunner` does. `:stop` metadata has
-  `:tool` and an `:outcome` of `:ok`, `:refused`, `:denied`, `:failed`, or
-  `:unknown_tool`. `:denied` and `:unknown_tool` come from the runner instead,
-  since a call it refused and a name it has no tool for never reach one.
+  `:tool` and an `:outcome` of `:ok`, `:refused`, `:denied`, `:failed`,
+  `:unknown_tool` or `:invalid_input`. The last three come from the runner
+  instead, since a call it refused, a name it has no tool for, and input that
+  didn't parse never reach one.
 
   A `:before_call` that waits on a human sits outside the span, so the duration
   is the tool's, not the approval's.
@@ -131,7 +151,7 @@ defmodule Claudex.Telemetry do
 
   def handle_event([:claudex, :request, :exception], measurements, metadata, config) do
     log(config, fn ->
-      "#{method(metadata)} #{metadata.path} raised #{inspect(metadata[:kind])} " <>
+      "#{method(metadata)} #{metadata.path}#{model(metadata)} failed: #{failure(metadata)} " <>
         "after #{ms(measurements)}ms"
     end)
   end
@@ -160,6 +180,9 @@ defmodule Claudex.Telemetry do
     # credo:disable-for-next-line Credo.Check.Warning.MissedMetadataKeyInLoggerConfig
     Logger.log(level, fn -> "claudex " <> message.() end, domain: [:claudex])
   end
+
+  defp failure(%{error_type: type}), do: to_string(type)
+  defp failure(metadata), do: "#{inspect(metadata[:kind])} #{inspect(metadata[:error])}"
 
   defp streamed(%{chunks: chunks, bytes: bytes}),
     do: ", streamed #{bytes} B in #{chunks} chunk(s)"

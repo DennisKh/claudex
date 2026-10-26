@@ -80,12 +80,17 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     Mix.shell().info([:green, "* injecting ", :reset, @config_path])
   end
 
-  defp service_name do
+  defp service_name, do: service_name(Mix.Project.config()[:app])
+
+  # An umbrella root names no app of its own
+  defp service_name(nil), do: ""
+
+  defp service_name(app) do
     """
 
     # Names this app in every trace it sends. Unset, the SDK calls it
     # `unknown_service:erl`.
-    config :opentelemetry, resource: %{service: %{name: "#{Mix.Project.config()[:app]}"}}
+    config :opentelemetry, resource: %{service: %{name: "#{app}"}}
     """
   end
 
@@ -160,9 +165,9 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     config/runtime.exs runs in every environment. Widen it by hand to trace a
     development run.
 
-    Then run. See Claudex.Tracing for what each span carries, and turn on
-    `config :claudex, trace_content: true` when you want prompts, completions
-    and tool arguments on the spans as well.
+    Then run `mix deps.get`. See Claudex.Tracing for what each span carries,
+    and turn on `config :claudex, trace_content: true` when you want prompts,
+    completions and tool arguments on the spans as well.
     """
   end
 end

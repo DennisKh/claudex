@@ -96,7 +96,7 @@ defmodule Claudex.Live.MCPConnectorTest do
     {:ok, message} = Stream.final_message(events)
     call = find(message, MCPToolUse)
 
-    assert call.input == JSON.decode!(Enum.join(fragments))
+    assert call.input == Jason.decode!(Enum.join(fragments))
     assert ContentBlock.to_param(call)["input"] == call.input
   end
 end

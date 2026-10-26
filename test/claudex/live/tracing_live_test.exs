@@ -36,7 +36,7 @@ defmodule Claudex.Live.TracingTest do
     @doc "Divides the first integer by the second."
     @tool true
     @spec divide(integer(), integer()) :: integer()
-    def divide(_a, 0), do: raise(Claudex.Tool.Error, "cannot divide by zero")
+    def divide(_a, 0 = _b), do: raise(Claudex.Tool.Error, "cannot divide by zero")
     def divide(a, b), do: div(a, b)
   end
 
@@ -121,10 +121,10 @@ defmodule Claudex.Live.TracingTest do
       recorded = attributes(with_content)
 
       assert recorded["gen_ai.prompt"] =~ "pong"
-      assert %{"role" => "assistant"} = JSON.decode!(recorded["gen_ai.completion"])
+      assert %{"role" => "assistant"} = Jason.decode!(recorded["gen_ai.completion"])
 
       assert [%{"role" => "user", "parts" => _parts}] =
-               JSON.decode!(recorded["gen_ai.input.messages"])
+               Jason.decode!(recorded["gen_ai.input.messages"])
     end
   end
 
@@ -172,13 +172,40 @@ defmodule Claudex.Live.TracingTest do
       spans = collect([])
 
       assert [call | _rest] = named(spans, "execute_tool divide")
-      assert {:status, :error, message} = span(call, :status)
-      assert message =~ "cannot divide by zero"
+      assert span(call, :status) == {:status, :error, "tool_refused"}
 
       assert [root] = Enum.filter(spans, &(span(&1, :parent_span_id) == :undefined))
       assert attributes(root)["claudex.stop"] == "completed"
       assert turn.stop == :completed
     end
+  end
+
+  # Claude Haiku 4.5 caches nothing under 4096 tokens, hence a prompt this long.
+  test "a cached request's span counts the input the way the conventions do", %{client: client} do
+    system = String.duplicate("The archivist catalogued every ledger before the winter. ", 900)
+
+    {:ok, message} =
+      Messages.create(client, %{
+        model: @model,
+        max_tokens: 16,
+        system: [%{type: "text", text: system, cache_control: %{type: "ephemeral"}}],
+        messages: [Message.user("Reply with one word: ok")]
+      })
+
+    usage = message.usage
+    assert usage.cache_creation_input_tokens + usage.cache_read_input_tokens > 0
+
+    [request] = named(collect([]), "chat " <> @model)
+    recorded = attributes(request)
+
+    assert recorded["gen_ai.provider.name"] == "anthropic"
+
+    assert recorded["gen_ai.usage.input_tokens"] ==
+             usage.input_tokens + usage.cache_creation_input_tokens +
+               usage.cache_read_input_tokens
+
+    assert recorded["gen_ai.usage.cache_write.input_tokens"] == usage.cache_creation_input_tokens
+    assert recorded["gen_ai.usage.cache_read.input_tokens"] == usage.cache_read_input_tokens
   end
 
   describe "requests that are not generations" do

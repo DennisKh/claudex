@@ -23,20 +23,20 @@ defmodule Claudex.Tool.Schema do
   @typedoc """
   Threaded through every recursive call:
 
-    * `env` — the compile-time environment, needed to resolve an aliased
+    * `env` - the compile-time environment, needed to resolve an aliased
       module reference (e.g. `Ticket.t()` after `alias My.App.Ticket`) into
       its real module name
-    * `visited` — struct modules already being expanded on the current
+    * `visited` - struct modules already being expanded on the current
       path, so a self- or mutually-referential struct stops instead of
       recursing forever
-    * `current_module` — which module a *bare* `t()` (no module prefix)
+    * `current_module` - which module a *bare* `t()` (no module prefix)
       refers to right now. A struct's own `@type t` can reference itself
-      as plain `t()`, not `Mod.t()` — this is how that resolves
-    * `dependent` — the module being compiled, when the schema is built at
+      as plain `t()`, not `Mod.t()`, and this is how that resolves
+    * `dependent` - the module being compiled, when the schema is built at
       compile time. Every struct expanded for it is recorded on it, so
       `Claudex.Tool.Schema.StructExpansion.requires/1` can make it depend on
       them
-    * `escape_hatch` — the sentence a `Claudex.Tool.SchemaError` ends with,
+    * `escape_hatch` - the sentence a `Claudex.Tool.SchemaError` ends with,
       naming the way out of an unmappable type. It differs per caller, so it
       travels with the context; `escape_hatch/1` has the two in use here
   """
@@ -88,12 +88,22 @@ defmodule Claudex.Tool.Schema do
 
   @doc """
   Extracts each parameter's name and whether it has a default value, from
-  the argument AST alone — no `@spec` involved, so this never raises.
+  the argument AST alone, with no `@spec` involved, so this never raises.
   `Claudex.Tool` uses this on its own when a tool is registered with an
   explicit `args_schema:`, since that skips `@spec` inspection entirely.
+
+  A parameter is named for the variable bound to it as a whole, on either
+  side of `=`, without its leading underscores. One with no such variable,
+  or whose variable is only underscores, is `"arg"`.
   """
   @spec params([Macro.t()]) :: [param()]
   def params(args), do: Enum.map(args, &param_info/1)
+
+  @doc false
+  @spec unnamed([Macro.t()]) :: [Macro.t()]
+  def unnamed(args) do
+    args |> Enum.map(&without_default/1) |> Enum.filter(&(bound_name(&1) == nil))
+  end
 
   @doc """
   Builds the `input_schema` properties for a function, given its argument
@@ -106,9 +116,9 @@ defmodule Claudex.Tool.Schema do
   needs the order later to dispatch tool calls correctly.
 
   A parameter with no matching `@spec` at all gets an unconstrained
-  (`%{}`) property. A parameter whose `@spec` type Claudex can't map — an
+  (`%{}`) property. A parameter whose `@spec` type Claudex can't map (an
   unsupported typespec construct, or a `Mod.t()` that isn't a loaded struct
-  or Ecto schema — raises `Claudex.Tool.SchemaError`. Fix the spec, or pass
+  or Ecto schema) raises `Claudex.Tool.SchemaError`. Fix the spec, or pass
   `args_schema:` for that tool.
   """
 
@@ -208,13 +218,23 @@ defmodule Claudex.Tool.Schema do
 
   defp param_info(pattern), do: {param_name(pattern), false}
 
+  defp param_name(pattern), do: bound_name(pattern) || "arg"
+
+  defp bound_name({:=, _meta, [left, right]}), do: bound_name(left) || bound_name(right)
+
   # `def read(_path)` would otherwise publish a property literally named
   # "_path", which Claude never sends.
-  defp param_name({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
-    name |> Atom.to_string() |> String.trim_leading("_")
+  defp bound_name({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
+    case name |> Atom.to_string() |> String.trim_leading("_") do
+      "" -> nil
+      trimmed -> trimmed
+    end
   end
 
-  defp param_name(_pattern), do: "arg"
+  defp bound_name(_pattern), do: nil
+
+  defp without_default({:\\, _meta, [pattern, _default]}), do: pattern
+  defp without_default(pattern), do: pattern
 
   defp spec_arg_types(name, arity, module_specs) do
     Enum.find_value(module_specs, [], fn
@@ -268,18 +288,14 @@ defmodule Claudex.Tool.Schema do
   end
 
   @doc """
-  The sentence a `Claudex.Tool.SchemaError` ends with, taken from the context.
-
-  A type Claudex can't map is a dead end, and what to do about it depends on
-  who asked. `Claudex.Tool` tells you to describe the tool's arguments
-  yourself:
+  Returns the sentence a `Claudex.Tool.SchemaError` ends with, taken from the
+  context. It names the way out of a type Claudex can't map. A context
+  without one gets the `@tool` wording:
 
       iex> Claudex.Tool.Schema.escape_hatch(%{})
       "Pass args_schema: in the @tool options to describe it explicitly"
 
-  `Claudex.OutputFormat` says something else, because `args_schema:` is a
-  `@tool` option and means nothing to a struct being turned into an output
-  format:
+  `Claudex.OutputFormat` sets its own:
 
       iex> hatch = "Give the field a type the API can be told about, or pass output_config.format yourself"
       iex> Claudex.Tool.Schema.escape_hatch(%{escape_hatch: hatch})
@@ -299,9 +315,6 @@ defmodule Claudex.Tool.Schema do
       ** (Claudex.Tool.SchemaError) can't build a JSON schema for type
          `{String.t(), integer()}`. Describe the field with a struct, or hand
          me the schema
-
-  Leaving it out is the `@tool` wording, since that is where most of these
-  are raised.
   """
   @spec escape_hatch(context()) :: String.t()
   def escape_hatch(ctx), do: Map.get(ctx, :escape_hatch, @tool_escape_hatch)

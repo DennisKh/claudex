@@ -1,6 +1,7 @@
 defmodule Claudex.ToolTest do
   use ExUnit.Case, async: true
 
+  alias Claudex.ContentBlock.{Image, SearchResult}
   alias Claudex.TestSupport.Schemas.{EctoTicket, Ticket}
   alias Claudex.Tool.CallError
 
@@ -129,6 +130,63 @@ defmodule Claudex.ToolTest do
     assert Enum.sort(ticket_schema.required) == ["id", "status", "subject"]
   end
 
+  defmodule DecodedTools do
+    use Claudex.Tool
+
+    @doc "Echoes a level."
+    @tool true
+    @spec echo_level(:low | :high) :: term()
+    def echo_level(level), do: level
+
+    @doc "Echoes a count, or all."
+    @tool true
+    @spec echo_count(:all | pos_integer()) :: term()
+    def echo_count(count), do: count
+
+    @doc "Echoes a date."
+    @tool true
+    @spec echo_date(Date.t()) :: term()
+    def echo_date(date), do: date
+
+    @doc "Echoes options."
+    @tool true
+    @spec echo_opts(keyword()) :: term()
+    def echo_opts(opts), do: opts
+  end
+
+  test "result/3 turns block structs in its content into the maps the API takes" do
+    image = Image.url("https://example.com/a.png")
+
+    assert %{content: [%{type: "image"}, %{type: "text", text: "a map"}]} =
+             Claudex.Tool.result("toolu_1", [image, %{type: "text", text: "a map"}])
+  end
+
+  test "result/3 keeps a search result's citations setting" do
+    block = SearchResult.new("s", "t", "x", citations: true)
+
+    assert %{content: [%{citations: %{enabled: true}}]} = Claudex.Tool.result("toolu_1", [block])
+  end
+
+  describe "an argument arrives as Claude sent it" do
+    test "for atom literals, as a string" do
+      assert DecodedTools.__call_tool__("echo_level", %{"level" => "low"}) == {:ok, "low"}
+    end
+
+    test "for a union mixing an atom with another type, as a string" do
+      assert DecodedTools.__call_tool__("echo_count", %{"count" => "all"}) == {:ok, "all"}
+    end
+
+    test "for a date, as a string" do
+      assert DecodedTools.__call_tool__("echo_date", %{"date" => "2026-10-17"}) ==
+               {:ok, "2026-10-17"}
+    end
+
+    test "for a keyword list, as a map with string keys" do
+      assert DecodedTools.__call_tool__("echo_opts", %{"opts" => %{"limit" => 3}}) ==
+               {:ok, %{"limit" => 3}}
+    end
+  end
+
   test "__tools__/0 expands an Ecto-schema-typed argument into a nested object schema" do
     [tool] = StructTools.__tools__() |> Enum.filter(&(&1.name == "summarize_ecto_ticket"))
 
@@ -187,6 +245,34 @@ defmodule Claudex.ToolTest do
       end
     end
 
+    test "the API's own tool-definition fields go onto the definition as given" do
+      fields = %{
+        allowed_callers: ["code_execution_20260521"],
+        cache_control: %{type: "ephemeral", ttl: "1h"},
+        defer_loading: true,
+        eager_input_streaming: true,
+        input_examples: [%{}]
+      }
+
+      [{module, _bytecode}] = define(inspect(fields))
+      [tool] = module.__tools__()
+
+      assert Map.take(tool, Map.keys(fields)) == fields
+    end
+
+    test "a definition field left out isn't sent" do
+      [{module, _bytecode}] = define("true")
+      [tool] = module.__tools__()
+
+      assert Map.keys(tool) |> Enum.sort() == [:description, :input_schema, :name]
+    end
+
+    test "an unknown key lists every option @tool takes" do
+      assert_raise Claudex.Tool.SchemaError, ~r/:defer_loading.*:input_examples/, fn ->
+        define(~s(%{defer_load: true}))
+      end
+    end
+
     test ":strict must be a boolean, not merely truthy" do
       assert_raise Claudex.Tool.SchemaError, ~r/:strict must be true or false, got: 0/, fn ->
         define("%{strict: 0}")
@@ -201,6 +287,285 @@ defmodule Claudex.ToolTest do
       assert_raise Claudex.Tool.SchemaError, ~r/takes true or a map of options, got: :yes/, fn ->
         define(":yes")
       end
+    end
+
+    test "two arities of one function can't both be tools, since they share its name" do
+      assert_raise Claudex.Tool.SchemaError, ~r/add\/2 and add\/3 .* both the tool "add"/s, fn ->
+        Code.compile_string("""
+        defmodule TwoArities#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Adds two."
+          @tool true
+          @spec add(integer(), integer()) :: integer()
+          def add(a, b), do: a + b
+
+          @doc "Adds three."
+          @tool true
+          @spec add(integer(), integer(), integer()) :: integer()
+          def add(a, b, c), do: a + b + c
+        end
+        """)
+      end
+    end
+
+    test "@tool on a second clause of the same function says it belongs once" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/on two clauses of add\/2 .* once, above the first/s,
+                   fn ->
+                     Code.compile_string("""
+                     defmodule TwoClauses#{System.unique_integer([:positive])} do
+                       use Claudex.Tool
+
+                       @doc "Adds."
+                       @tool true
+                       @spec add(integer(), integer()) :: integer()
+                       def add(0 = _a, b), do: b
+
+                       @tool true
+                       def add(a, b), do: a + b
+                     end
+                     """)
+                   end
+    end
+
+    test "a defaulted argument is still one tool" do
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule Defaulted#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Adds."
+          @tool true
+          @spec add(integer(), integer()) :: integer()
+          def add(a, b \\\\ 0), do: a + b
+        end
+        """)
+
+      assert [%{name: "add"}] = Claudex.Tool.list(module)
+    end
+
+    for name <- ["valid?", "run!", "café", String.duplicate("a", 129)] do
+      test "a function named #{String.slice(name, 0, 12)} (#{String.length(name)} chars) can't be a tool" do
+        assert_raise Claudex.Tool.SchemaError,
+                     ~r/ASCII letters, digits, _ and -, up to 128/,
+                     fn ->
+                       Code.compile_string("""
+                       defmodule BadName#{System.unique_integer([:positive])} do
+                         use Claudex.Tool
+
+                         @doc "Checks."
+                         @tool true
+                         @spec #{unquote(name)}() :: boolean()
+                         def #{unquote(name)}, do: true
+                       end
+                       """)
+                     end
+      end
+    end
+
+    test "a name ending in a newline can't be a tool" do
+      assert_raise Claudex.Tool.SchemaError, ~r/ASCII letters, digits, _ and -, up to 128/, fn ->
+        Code.compile_string("""
+        defmodule NewlineName#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Checks."
+          @tool true
+          def unquote(:"ping\\n")(), do: true
+        end
+        """)
+      end
+    end
+
+    test "a 128-character name is a tool" do
+      name = String.duplicate("a", 128)
+
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule LongName#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Checks."
+          @tool true
+          @spec #{name}() :: boolean()
+          def #{name}, do: true
+        end
+        """)
+
+      assert [%{name: ^name}] = Claudex.Tool.list(module)
+    end
+
+    test "a pattern bound to a variable is named for the variable, on either side of =" do
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule BoundPatterns#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Merges two maps."
+          @tool true
+          @spec merge(map(), map()) :: map()
+          def merge(%{} = left, right = %{}), do: Map.merge(left, right)
+        end
+        """)
+
+      assert [%{input_schema: %{properties: properties, required: ["left", "right"]}}] =
+               Claudex.Tool.list(module)
+
+      assert Map.keys(properties) == ["left", "right"]
+
+      assert Claudex.Tool.call(module, "merge", %{"left" => %{"a" => 1}, "right" => %{"b" => 2}}) ==
+               {:ok, %{"a" => 1, "b" => 2}}
+    end
+
+    test "an ignored variable bound to a pattern yields the other side's name" do
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule IgnoredSide#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Echoes."
+          @tool true
+          @spec echo(map()) :: map()
+          def echo(_ = %{} = value), do: value
+        end
+        """)
+
+      assert [%{input_schema: %{required: ["value"]}}] = Claudex.Tool.list(module)
+    end
+
+    for param <- [~S("Tokyo"), ":low", "_", "nil", "false", "<<_x::binary>>", "[_h | _t]"] do
+      test "a lone parameter written as #{param} is published as arg, with a warning" do
+        warning =
+          ExUnit.CaptureIO.capture_io(:stderr, fn ->
+            [{module, _bytecode}] =
+              Code.compile_string("""
+              defmodule Unnamed#{System.unique_integer([:positive])} do
+                use Claudex.Tool
+
+                @doc "Gets it."
+                @tool true
+                def get(#{unquote(param)}), do: :ok
+              end
+              """)
+
+            send(self(), {:module, module})
+          end)
+
+        assert_received {:module, module}
+        assert [%{input_schema: %{required: ["arg"]}}] = Claudex.Tool.list(module)
+
+        assert warning =~
+                 "with no name to publish, so Claude sees it as \"arg\". " <>
+                   "Name it, as in `#{unquote(param)} = _name`"
+      end
+    end
+
+    test "a bound pattern with a default is named for its variable and optional" do
+      [{module, _bytecode}] =
+        Code.compile_string("""
+        defmodule DefaultedPattern#{System.unique_integer([:positive])} do
+          use Claudex.Tool
+
+          @doc "Echoes the options."
+          @tool true
+          def echo(%{} = opts \\\\ %{"k" => 1}), do: opts
+        end
+        """)
+
+      assert [%{input_schema: %{properties: properties, required: []}}] =
+               Claudex.Tool.list(module)
+
+      assert Map.keys(properties) == ["opts"]
+      assert Claudex.Tool.call(module, "echo", %{}) == {:ok, %{"k" => 1}}
+    end
+
+    test "the unnamed-parameter warning points at the tool's definition" do
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          Code.compile_string(
+            """
+            defmodule Located#{System.unique_integer([:positive])} do
+              use Claudex.Tool
+
+              @doc "Gets it."
+              @tool true
+              def get("Tokyo"), do: :ok
+            end
+            """,
+            "located.ex"
+          )
+        end)
+
+      assert warning =~ "located.ex:6"
+    end
+
+    test "two parameters that share a name raise before any unnamed warning" do
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          assert_raise Claudex.Tool.SchemaError, fn ->
+            Code.compile_string("""
+            defmodule RaisesFirst#{System.unique_integer([:positive])} do
+              use Claudex.Tool
+
+              @doc "Merges."
+              @tool true
+              def merge(%{}, %{}), do: :ok
+            end
+            """)
+          end
+        end)
+
+      refute warning =~ "no name to publish"
+    end
+
+    test "two unnamed parameters can't be a tool, since both would be arg" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/merge\/2 in TwoUnnamed\d+, but `%\{\}` and `%\{\}` would both be the property "arg"/,
+                   fn ->
+                     Code.compile_string("""
+                     defmodule TwoUnnamed#{System.unique_integer([:positive])} do
+                       use Claudex.Tool
+
+                       @doc "Merges."
+                       @tool true
+                       def merge(%{}, %{}), do: :ok
+                     end
+                     """)
+                   end
+    end
+
+    test "two parameters that publish the same name can't be a tool" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/pick\/2 in SharedParam\d+, but `x` and `_x` would both be the property "x"/,
+                   fn ->
+                     Code.compile_string("""
+                     defmodule SharedParam#{System.unique_integer([:positive])} do
+                       use Claudex.Tool
+
+                       @doc "Picks."
+                       @tool true
+                       def pick(x, _x), do: x
+                     end
+                     """)
+                   end
+    end
+
+    test "an unnamed parameter under args_schema is not warned about" do
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          Code.compile_string("""
+          defmodule OwnSchema#{System.unique_integer([:positive])} do
+            use Claudex.Tool
+
+            @doc "Gets it."
+            @tool %{args_schema: %{"arg" => %{type: "string"}}}
+            def get("Tokyo"), do: :ok
+          end
+          """)
+        end)
+
+      refute warning =~ "no name to publish"
     end
 
     test "a tool with no @doc warns and falls back to a placeholder" do
@@ -298,6 +663,22 @@ defmodule Claudex.ToolTest do
       [tool] = module.__tools__()
 
       assert tool.input_schema.properties["count"] == %{type: "integer", minimum: 0}
+    end
+
+    test "an args_schema with no property for a required parameter can't be a tool" do
+      assert_raise Claudex.Tool.SchemaError,
+                   ~r/get\/1 in ToolOpts\d+, but its :args_schema has no property "opts"/,
+                   fn ->
+                     define(
+                       ~s(%{args_schema: %{"arg" => %{type: "object"}}}),
+                       "def get(%{} = opts), do: opts"
+                     )
+                   end
+    end
+
+    test "an args_schema keyed by atoms covers the parameters it names" do
+      assert [{_module, _bin}] =
+               define(~s(%{args_schema: %{opts: %{type: "object"}}}), "def get(opts), do: opts")
     end
 
     test "a strict tool's args_schema is sent as written" do

@@ -8,16 +8,16 @@ defmodule Claudex.Stream.Connection do
   @doc """
   Returns a lazy stream of events for a streaming Messages request.
 
-  The transport is `Claudex.ChunkStream`; this only turns the bytes it yields
-  into typed events. `opts` go through untouched, described under "Options" in
-  `Claudex.ChunkStream.stream/3`.
+  The transport is `Claudex.ChunkStream`, decoding the body with
+  `Claudex.Stream.SSE`; this turns each SSE event into a typed
+  `Claudex.Stream.Event`. `opts` go through untouched, described under
+  "Options" in `Claudex.ChunkStream.stream/4`.
   """
   @spec stream(Client.t(), map()) :: Enumerable.t()
   @spec stream(Client.t(), map(), [ChunkStream.option()]) :: Enumerable.t()
   def stream(%Client{} = client, body, opts \\ []) do
     client
-    |> ChunkStream.stream([method: :post, url: "/v1/messages", json: body], opts)
-    |> Stream.transform(&SSE.new/0, &decode_chunk/2, &flush/1, fn _decoder -> :ok end)
+    |> ChunkStream.stream([method: :post, url: "/v1/messages", json: body], {SSE, &event/1}, opts)
     |> Stream.transform(&recorder/0, &record/2, fn _recorder -> :ok end)
   end
 
@@ -48,25 +48,11 @@ defmodule Claudex.Stream.Connection do
     end
   end
 
-  defp decode_chunk(chunk, decoder) do
-    {sse_events, decoder} = SSE.decode(decoder, chunk)
-
-    {events(sse_events), decoder}
-  end
-
-  defp flush(decoder) do
-    {sse_events, decoder} = SSE.flush(decoder)
-
-    {events(sse_events), decoder}
-  end
-
-  defp events(sse_events) do
-    Enum.flat_map(sse_events, fn sse_event ->
-      case Event.from_sse(sse_event) do
-        {:ok, event} -> [event]
-        :ignore -> []
-        {:error, error} -> raise error
-      end
-    end)
+  defp event(sse_event) do
+    case Event.from_sse(sse_event) do
+      {:ok, event} -> [event]
+      :ignore -> []
+      {:error, error} -> raise error
+    end
   end
 end

@@ -5,6 +5,25 @@ defmodule Claudex.StreamTest do
   alias Claudex.ContentBlock
   alias Claudex.Stream.{Event, Handle}
 
+  defmodule ChunkedTransport do
+    @moduledoc """
+    Serves the recorded `message_stream.sse` one event per chunk, the way the
+    API sends it, stopping when the consumer halts.
+    """
+
+    alias Claudex.TestSupport.Fixtures
+
+    @doc false
+    def run(request) do
+      "message_stream"
+      |> Fixtures.sse!()
+      |> String.split(~r/(?<=\n\n)/, trim: true)
+      |> Enum.reduce_while({request, Req.Response.new(status: 200)}, fn chunk, acc ->
+        request.into.({:data, chunk}, acc)
+      end)
+    end
+  end
+
   @params %{
     model: "claude-opus-5",
     max_tokens: 1024,
@@ -15,6 +34,55 @@ defmodule Claudex.StreamTest do
     [api_key: "sk-ant-test", max_retries: 0, req_options: [plug: {Req.Test, __MODULE__}]]
     |> Keyword.merge(opts)
     |> Client.new()
+  end
+
+  describe "a stream stopped early" do
+    defp chunked_client do
+      Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: ChunkedTransport])
+    end
+
+    defp mailbox do
+      {:messages, messages} = Process.info(self(), :messages)
+      messages
+    end
+
+    # A consumer that takes its time over an event gives the request time to
+    # read the next chunk ahead, the way a slow handle_info does.
+    test "leaves nothing behind in the caller's mailbox" do
+      assert [%Event.MessageStart{}] =
+               chunked_client()
+               |> Messages.stream!(@params)
+               |> Elixir.Stream.each(fn _event -> Process.sleep(50) end)
+               |> Enum.take(1)
+
+      assert mailbox() == []
+    end
+
+    test "leaves nothing behind when it stops on the reply's last event" do
+      assert %Event.MessageStop{} =
+               chunked_client()
+               |> Messages.stream!(@params)
+               |> Elixir.Stream.each(fn _event -> Process.sleep(50) end)
+               |> Enum.reduce_while(nil, fn
+                 %Event.MessageStop{} = stop, _last -> {:halt, stop}
+                 event, _last -> {:cont, event}
+               end)
+
+      assert mailbox() == []
+    end
+
+    test "leaves nothing behind when the consumer raises" do
+      assert_raise RuntimeError, fn ->
+        chunked_client()
+        |> Messages.stream!(@params)
+        |> Enum.each(fn _event ->
+          Process.sleep(50)
+          raise "handler failed"
+        end)
+      end
+
+      assert mailbox() == []
+    end
   end
 
   defp event(name, payload), do: "event: #{name}\ndata: #{Jason.encode!(payload)}\n\n"

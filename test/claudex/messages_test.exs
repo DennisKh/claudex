@@ -57,6 +57,56 @@ defmodule Claudex.MessagesTest do
     assert Message.text(message) == "Hi there"
   end
 
+  describe "create/2 and a reply that can outlast the timeout" do
+    defp reply_and_count(conn) do
+      send(self(), :sent)
+
+      Req.Test.json(conn, %{
+        "id" => "msg_1",
+        "type" => "message",
+        "role" => "assistant",
+        "model" => "claude-opus-5",
+        "content" => [%{"type" => "text", "text" => "Hi"}],
+        "stop_reason" => "end_turn",
+        "stop_sequence" => nil,
+        "usage" => %{"input_tokens" => 3, "output_tokens" => 1}
+      })
+    end
+
+    defp params(max_tokens) do
+      %{model: "claude-opus-5", max_tokens: max_tokens, messages: [Message.user("Hello")]}
+    end
+
+    test "is refused before sending with the default timeout" do
+      Req.Test.stub(__MODULE__, &reply_and_count/1)
+
+      assert {:error, %Error{type: :bad_request, message: message}} =
+               Messages.create(client(), params(21_334))
+
+      assert message =~ "stream!/2"
+      refute_received :sent
+    end
+
+    test "is sent when it fits in the default timeout" do
+      Req.Test.stub(__MODULE__, &reply_and_count/1)
+
+      assert {:ok, %Message{}} = Messages.create(client(), params(21_333))
+    end
+
+    test "is sent when the client sets its own timeout" do
+      Req.Test.stub(__MODULE__, &reply_and_count/1)
+
+      for client <- [
+            client(receive_timeout: :timer.minutes(60)),
+            client(
+              req_options: [plug: {Req.Test, __MODULE__}, receive_timeout: :timer.minutes(60)]
+            )
+          ] do
+        assert {:ok, %Message{}} = Messages.create(client, params(64_000))
+      end
+    end
+  end
+
   test "create/2 expands a tools: module into the tool list the API expects" do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
@@ -177,6 +227,77 @@ defmodule Claudex.MessagesTest do
 
     assert message =~ "messages"
     assert message =~ "max_tokens"
+  end
+
+  test "create/2 says when a required param has a string key" do
+    params = %{"model" => "claude-opus-5", "max_tokens" => 16, "messages" => []}
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.create(client(), params)
+
+    assert message =~ ~s("model")
+    assert message =~ ~s("messages")
+    assert message =~ "atom keys"
+    refute message =~ "missing"
+  end
+
+  test "create/2 refuses a string key next to its atom twin" do
+    params = %{"model" => "claude-opus-5", model: "claude-opus-5", max_tokens: 16, messages: []}
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.create(client(), params)
+
+    assert message =~ ~s("model")
+  end
+
+  test "create/2 refuses a string key for a param it doesn't read" do
+    params = %{"temperature" => 0.5, model: "claude-opus-5", max_tokens: 16, messages: []}
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.create(client(), params)
+
+    assert message =~ ~s("temperature")
+  end
+
+  test "count_tokens/2 refuses system given under a string key" do
+    params = %{
+      "system" => [%Claudex.ContentBlock.Text{text: "Be brief."}],
+      model: "claude-opus-5",
+      messages: [Message.user("hi")]
+    }
+
+    assert {:error, %Error{type: :bad_request, message: message}} =
+             Messages.count_tokens(client(), params)
+
+    assert message =~ ~s("system")
+  end
+
+  test "count_tokens/2 sends system blocks given as structs as the maps the API takes" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, raw_body, conn} = Plug.Conn.read_body(conn)
+
+      assert Jason.decode!(raw_body)["system"] == [
+               %{"type" => "text", "text" => "Be brief."},
+               %{
+                 "type" => "text",
+                 "text" => "Answer in French.",
+                 "cache_control" => %{"type" => "ephemeral"}
+               }
+             ]
+
+      Req.Test.json(conn, %{"input_tokens" => 9})
+    end)
+
+    params = %{
+      model: "claude-opus-5",
+      system: [
+        %Claudex.ContentBlock.Text{text: "Be brief."},
+        %{type: "text", text: "Answer in French.", cache_control: %{type: "ephemeral"}}
+      ],
+      messages: [Message.user("hi")]
+    }
+
+    assert {:ok, 9} = Messages.count_tokens(client(), params)
   end
 
   test "count_tokens/2 returns the input token count" do

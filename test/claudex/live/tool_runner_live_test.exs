@@ -78,6 +78,20 @@ defmodule Claudex.Live.ToolRunnerTest do
     def checkpoint, do: "Saved. Now print the file."
   end
 
+  defmodule Interrupted do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Adds two integers together."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b) do
+      send(self(), {:claudex_cancel, Process.get(:cancel_ref)})
+
+      a + b
+    end
+  end
+
   defp params(messages, extra \\ %{}) do
     Map.merge(
       %{
@@ -136,12 +150,50 @@ defmodule Claudex.Live.ToolRunnerTest do
            end)
   end
 
+  test "a cancel while a tool runs ends on its turn, and that history carries on",
+       %{client: client} do
+    cancel_ref = make_ref()
+    Process.put(:cancel_ref, cancel_ref)
+
+    params = params([Message.user("What is 12 plus 30?")], %{tools: Interrupted})
+
+    assert {:ok, %Turn{stop: :cancelled, index: 1} = cancelled} =
+             ToolRunner.run(client, params, cancel_ref: cancel_ref)
+
+    assert [%{content: "42"}] = cancelled.tool_results
+
+    assert {:ok, %Turn{stop: :completed} = resumed} =
+             ToolRunner.run(client, %{params | tools: Calculator, messages: cancelled.messages})
+
+    assert Message.text(resumed.message) =~ "42"
+  end
+
+  test "a cancel mid-reply ends the run on that turn, cancelled", %{client: client} do
+    cancel_ref = make_ref()
+    runner = self()
+
+    cancel_on_first_delta = fn
+      %Event.ContentBlockDelta{} -> send(runner, {:claudex_cancel, cancel_ref})
+      _event -> :ok
+    end
+
+    params = params([Message.user("Write a 300-word story about a lighthouse.")])
+
+    assert {:ok, %Turn{stop: :cancelled, index: 1} = turn} =
+             ToolRunner.run(client, params,
+               cancel_ref: cancel_ref,
+               on_event: cancel_on_first_delta
+             )
+
+    assert turn.message.stop_reason == nil
+  end
+
   test "a tool that refuses sends its reason back and the conversation goes on", %{client: client} do
     # The refusal is a rule Claude can't see coming — it has no reason not to
     # call add/2 here, so the tool is what turns the request down.
     turns =
       client
-      |> ToolRunner.stream(params([Message.user("What is 150 plus 30?")]))
+      |> ToolRunner.stream!(params([Message.user("What is 150 plus 30?")]))
       |> Enum.to_list()
 
     refusal =
@@ -175,7 +227,7 @@ defmodule Claudex.Live.ToolRunnerTest do
     test "an approved call runs the tool", %{client: client} do
       assert [first | _rest] =
                client
-               |> ToolRunner.stream(approval_params("Delete report.csv please."),
+               |> ToolRunner.stream!(approval_params("Delete report.csv please."),
                  before_call: fn %ContentBlock.ToolUse{name: "delete_file"} -> :ok end
                )
                |> Enum.to_list()
@@ -192,7 +244,7 @@ defmodule Claudex.Live.ToolRunnerTest do
 
       turns =
         client
-        |> ToolRunner.stream(approval_params("Delete report.csv please."),
+        |> ToolRunner.stream!(approval_params("Delete report.csv please."),
           before_call: fn %ContentBlock.ToolUse{} = call ->
             send(test_pid, {:asked, call.name, call.input})
 
@@ -232,7 +284,7 @@ defmodule Claudex.Live.ToolRunnerTest do
       refute Process.get(:deleted)
 
       [stored, results] =
-        [halted.messages, halted.tool_results] |> JSON.encode!() |> JSON.decode!()
+        [halted.messages, halted.tool_results] |> Jason.encode!() |> Jason.decode!()
 
       assert {:ok, resumed} =
                ToolRunner.run(client, %{params | messages: stored}, tool_results: results)
@@ -322,7 +374,7 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert truncated.messages == params.messages
       refute Process.get(:deleted)
 
-      stored = truncated.messages |> JSON.encode!() |> JSON.decode!()
+      stored = truncated.messages |> Jason.encode!() |> Jason.decode!()
 
       assert {:ok, resumed} =
                ToolRunner.run(client, %{params | max_tokens: 512, messages: stored},
@@ -356,7 +408,7 @@ defmodule Claudex.Live.ToolRunnerTest do
           container
         )
 
-      turns = client |> ToolRunner.stream(params) |> Enum.to_list()
+      turns = client |> ToolRunner.stream!(params) |> Enum.to_list()
 
       assert [%Turn{tool_uses: [%{name: "checkpoint"}]} | _rest] = turns
       assert %Turn{stop: :completed} = last = List.last(turns)
@@ -392,7 +444,7 @@ defmodule Claudex.Live.ToolRunnerTest do
 
     resumed =
       client
-      |> ToolRunner.stream(
+      |> ToolRunner.stream!(
         %{params | messages: halted.messages} |> Map.put(:container, container),
         tool_results: halted.tool_results
       )
@@ -406,6 +458,41 @@ defmodule Claudex.Live.ToolRunnerTest do
     assert Enum.all?(resumed_in, &(&1 == container))
 
     assert Message.text(last.message) =~ "zebra-42"
+  end
+
+  test "a turn paused after compaction resumes, and the run completes" do
+    client = Claudex.new(api_key: @api_key, beta: ["compact-2026-01-12"])
+
+    log =
+      for i <- 1..2600, into: "" do
+        "Log line #{i}: the sensor in bay #{rem(i * 7, 97)} reported #{rem(i * 13, 1000)} units.\n"
+      end
+
+    messages = [
+      Message.user("Here is a log:\n" <> log <> "\nReply with just OK."),
+      Message.assistant("OK."),
+      Message.user("Add the bay numbers in lines 5 and 6.")
+    ]
+
+    context_management = %{
+      edits: [
+        %{
+          type: "compact_20260112",
+          trigger: %{type: "input_tokens", value: 50_000},
+          pause_after_compaction: true
+        }
+      ]
+    }
+
+    turns =
+      client
+      |> ToolRunner.stream!(
+        params(messages, %{model: "claude-haiku-5-5", context_management: context_management})
+      )
+      |> Enum.to_list()
+
+    assert [%Turn{stop: nil, message: %{stop_reason: "compaction"}} | _rest] = turns
+    assert %Turn{stop: :completed} = List.last(turns)
   end
 
   describe "stream_to/3" do
@@ -450,5 +537,69 @@ defmodule Claudex.Live.ToolRunnerTest do
     after
       60_000 -> flunk("the loop never finished")
     end
+  end
+
+  defmodule Camera do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Takes a photo of the wall in front of the camera."
+    @tool true
+    @spec photo() :: ContentBlock.Image.t()
+    def photo do
+      "test/fixtures/red_square.png"
+      |> File.read!()
+      |> Base.encode64()
+      |> ContentBlock.Image.base64("image/png")
+    end
+  end
+
+  defmodule Library do
+    @moduledoc false
+    use Claudex.Tool
+
+    @doc "Looks a topic up in the archive and returns the passages found."
+    @tool true
+    @spec look_up(String.t()) :: [ContentBlock.SearchResult.t()]
+    def look_up(_topic) do
+      [
+        ContentBlock.SearchResult.new(
+          "https://archive.example/quenby",
+          "Quenby founding records",
+          "The town of Quenby was founded in 1742 by a guild of glassblowers.",
+          citations: true
+        )
+      ]
+    end
+  end
+
+  test "an image a tool returns reaches Claude as an image", %{client: client} do
+    assert {:ok, %Turn{stop: :completed} = turn} =
+             ToolRunner.run(client, %{
+               model: @model,
+               max_tokens: 64,
+               tools: Camera,
+               messages: [
+                 Message.user("Take a photo of the wall, then name its colour in one word.")
+               ]
+             })
+
+    assert Message.text(turn.message) =~ ~r/red/i
+  end
+
+  test "search results a tool returns are cited by their source", %{client: client} do
+    assert {:ok, %Turn{stop: :completed} = turn} =
+             ToolRunner.run(client, %{
+               model: @model,
+               max_tokens: 256,
+               tools: Library,
+               messages: [Message.user("Use the archive: in what year was Quenby founded?")]
+             })
+
+    citations =
+      for %ContentBlock.Text{citations: cited} <- turn.message.content, c <- cited, do: c
+
+    assert Enum.any?(citations, &(&1["source"] == "https://archive.example/quenby"))
+    assert Message.text(turn.message) =~ "1742"
   end
 end

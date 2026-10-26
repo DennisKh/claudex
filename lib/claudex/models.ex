@@ -14,7 +14,11 @@ defmodule Claudex.Models do
   A paging option for `list/2` and `stream!/2`, each described under
   "Options" in `list/2`.
   """
-  @type option :: {:limit, pos_integer()} | {:after_id, String.t()} | {:before_id, String.t()}
+  @type option ::
+          {:limit, pos_integer()}
+          | {:after_id, String.t()}
+          | {:before_id, String.t()}
+          | {:lifecycle, [String.t()]}
 
   @doc """
   Lists the models available to your key, newest first.
@@ -24,11 +28,15 @@ defmodule Claudex.Models do
       Enum.map(page.data, & &1.id)
       #=> ["claude-opus-5", "claude-sonnet-5"]
 
-  Options become query parameters. The API defines three:
+  Options become query parameters. The API defines four:
 
     * `:limit` - how many to return per page, 1 to 1000. Defaults to 20.
     * `:after_id` - return the page right after this model id.
     * `:before_id` - return the page right before this model id.
+    * `:lifecycle` - a list of up to three stages to include, out of
+      `"active"`, `"deprecated"` and `"retired"`. Without it, or with an
+      empty list, the list holds active and deprecated models, and retired
+      ones appear only when asked for.
 
   The result is one page. Check `has_more` and pass `after_id: page.last_id`
   to get the next one.
@@ -36,7 +44,7 @@ defmodule Claudex.Models do
   @spec list(Client.t()) :: {:ok, Page.t(Model.t())} | {:error, Error.t()}
   @spec list(Client.t(), [option()]) :: {:ok, Page.t(Model.t())} | {:error, Error.t()}
   def list(%Client{} = client, opts \\ []) do
-    with {:ok, body} <- API.get(client, "/v1/models", opts) do
+    with {:ok, body} <- API.get(client, "/v1/models", query(opts)) do
       {:ok, Page.decode(body, &Model.decode/1)}
     end
   end
@@ -46,7 +54,7 @@ defmodule Claudex.Models do
 
       client
       |> Claudex.Models.stream!()
-      |> Enum.filter(&Claudex.Model.supports?(&1, "code_execution"))
+      |> Enum.filter(&Claudex.Model.supports?(&1, ["server_tools", "code_execution"]))
       |> Enum.map(& &1.id)
       #=> ["claude-opus-5", "claude-sonnet-5", ...]
 
@@ -54,8 +62,12 @@ defmodule Claudex.Models do
   where a hardcoded list goes stale.
 
   Pages are fetched as you consume them, so taking the first few costs one
-  request. Takes the same options as `list/2`; a cursor among them says
-  where to start, and is threaded from there. Enumerating raises `Claudex.Error` if a request fails.
+  request. Takes the same options as `list/2`. `:after_id` starts after that
+  id and walks forward. `:before_id` walks the other way, towards the first
+  item an uncursored `list/2` returns, a page at a time. Each page keeps
+  `list/2`'s order, so the item right before the cursor ends the first page
+  rather than opening it. Enumerating raises `Claudex.Error` if a request
+  fails.
   """
   @spec stream!(Client.t()) :: Enumerable.t()
   @spec stream!(Client.t(), [option()]) :: Enumerable.t()
@@ -79,5 +91,12 @@ defmodule Claudex.Models do
     with {:ok, body} <- API.get(client, path) do
       {:ok, Model.decode(body)}
     end
+  end
+
+  defp query(opts) do
+    Enum.flat_map(opts, fn
+      {:lifecycle, stages} -> for stage <- stages, do: {"lifecycle[]", stage}
+      option -> [option]
+    end)
   end
 end

@@ -74,7 +74,7 @@ system: [
 
 `cache_control` at the top of the request caches automatically; on a content block, as above, it pins a breakpoint there, which is what a long `system` prompt wants.
 
-A breakpoint goes on any block: a `system` block, a message block from either role, or a tool definition. Four per request is the ceiling, and a fifth is a 400. Each one caches everything before it, so they go on the parts that don't change, and the request-level form exists because pinning one to the newest message every turn spends all four within a few turns.
+A breakpoint goes on any block: a `system` block, a message block from either role, or a tool definition, which for a `@tool` function is `@tool %{cache_control: ...}`. Four per request is the ceiling, and a fifth is a 400. Each one caches everything before it, so they go on the parts that don't change, and the request-level form exists because pinning one to the newest message every turn spends all four within a few turns.
 
 `ttl` belongs to the `cache_control` object wherever it sits, and takes `"5m"`, the default, or `"1h"`, which costs more to write and keeps the prefix alive between turns that are minutes apart. `Claudex.Usage` reports what happened: `cache_creation_input_tokens` for what was written, `cache_read_input_tokens` for what was read back, and `cache_creation` for the split between the two lifetimes.
 
@@ -121,7 +121,15 @@ client = Claudex.new()                    # picks all of that up
 scoped = Claudex.new(api_key: other_key)  # one override, the rest from config
 ```
 
-Anything passed to `Claudex.new/1` wins over config. `:api_key` has one more fallback below config — the `ANTHROPIC_API_KEY` environment variable — so scripts and `iex` work with nothing configured at all.
+`Claudex.Client.put_header/3` returns a copy of a client that sends one more header, such as `anthropic-workspace-id` for a key that can act on more than one workspace:
+
+```elixir
+client
+|> Claudex.Client.put_header("anthropic-workspace-id", workspace_id)
+|> Claudex.Messages.create(params)
+```
+
+Anything passed to `Claudex.new/1` wins over config. `:api_key` has one more fallback below config, the `ANTHROPIC_API_KEY` environment variable, so scripts and `iex` work with nothing configured at all.
 
 ## Streaming
 
@@ -164,7 +172,7 @@ def handle_info({:claudex, ref, :done}, socket), do: {:noreply, assign(socket, s
 def handle_info({:claudex, ref, {:error, error}}, socket), do: {:noreply, put_error(socket, error)}
 ```
 
-The forwarding process is linked to the caller, so it goes away with your LiveView. `Claudex.Stream.cancel/1` stops it early. Errors arrive as `{:error, %Claudex.Error{}}` messages rather than raising — that's the difference from `stream!/2`, which raises.
+The forwarding process stops when your LiveView does, however it exits. `Claudex.Stream.cancel/1` stops it early. Errors arrive as `{:error, %Claudex.Error{}}` messages rather than raising — that's the difference from `stream!/2`, which raises.
 
 ## Tool use
 
@@ -202,6 +210,12 @@ end
 
 The `@doc` becomes the tool's description and the `@spec` becomes its schema, so both are prompt material. `:args` adds a description per argument, merged into the inferred schema — worth writing for any argument whose name doesn't say it all, since that description is how Claude decides what to pass.
 
+The function receives each argument as Claude sent it, decoded from JSON: an atom or a date in the `@spec` arrives as a string, and a struct as a map with string keys.
+
+`@tool` also takes the API's own tool-definition fields, `:cache_control`, `:defer_loading`, `:allowed_callers`, `:eager_input_streaming` and `:input_examples`, and copies them onto the definition as given.
+
+A tool can hand Claude content instead of data: an image, a PDF, or `Claudex.ContentBlock.SearchResult` passages it cites, returned as content block structs, or as `{:content, blocks}` for blocks written as maps. `Claudex.ToolRunner` says which return values are content.
+
 `mix claudex.gen.tool MyApp.Tools read_file path` writes that module for you, with every attribute in place and a description slot per argument.
 
 A tool refuses a call by raising `Claudex.Tool.Error` with the reason:
@@ -236,18 +250,18 @@ Claude sees the reason and can try something else; [Deciding whether a call runs
 
 Claudex.Message.text(turn.message)  # the final reply
 turn.messages                       # the whole conversation
-turn.stop                           # :completed | :truncated | :refusal | :max_turns
+turn.stop                           # :completed | :truncated | :refusal | :max_turns | :cancelled
 ```
 
-The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options — `:max_turns`, `:before_call`, `:on_event` — go in a keyword list after it.
+The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options (`:max_turns`, `:before_call`, `:on_event`) go in a keyword list after it.
 
-It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. Match on `turn.stop` rather than assuming Claude finished: hitting the turn limit looks identical without it.
+It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. `turn.stop` says why it ended, and a run that hit the turn limit reads as a finished one everywhere else.
 
-For one turn at a time, `stream/3` yields a `Claudex.ToolRunner.Turn` per reply and you decide when to stop:
+For one turn at a time, `stream!/3` yields a `Claudex.ToolRunner.Turn` per reply and you decide when to stop:
 
 ```elixir
 client
-|> Claudex.ToolRunner.stream(params)
+|> Claudex.ToolRunner.stream!(params)
 |> Enum.reduce_while(nil, fn turn, _last ->
   if interesting?(turn), do: {:cont, turn}, else: {:halt, turn}
 end)
@@ -279,7 +293,7 @@ defmodule MyApp.Tools do
   @tool true
   @spec read_file(String.t()) :: String.t()
   def read_file(path) do
-    unless allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
+    if not allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
 
     File.read!(path)
   end
@@ -288,7 +302,7 @@ end
 
 Any other exception becomes an error result too, labelled as a failure and logged, so a bug in a tool doesn't read to Claude like a policy decision and doesn't end the conversation.
 
-When the decision belongs to the caller rather than the tool — a confirmation prompt, an allowlist, a human clicking approve — `:before_call` runs on each `tool_use` before dispatch:
+When the decision belongs to the caller rather than the tool (a confirmation prompt, an allowlist, a human clicking approve), `:before_call` runs on each `tool_use` before dispatch:
 
 ```elixir
 Claudex.ToolRunner.run(client, params,
@@ -308,6 +322,7 @@ Claudex.ToolRunner.run(client, params,
 case Claudex.Message.stop(message) do
   :tool_use -> run(Claudex.Message.tool_uses(message))
   :paused -> resend(history)
+  :compacted -> continue_from_summary(history, message)
   stop when stop in [:refusal, :truncated, :unknown] -> stop_here(stop)
   :completed -> render(message)
 end
@@ -464,7 +479,7 @@ end
     messages: [Claudex.Message.user("File a ticket for this thread: ...")]
   })
 
-{:ok, ticket} = message |> Claudex.Message.text() |> JSON.decode()
+{:ok, ticket} = message |> Claudex.Message.text() |> Jason.decode()
 ```
 
 `stop_reason` decides whether there is anything to decode: a reply cut short by `max_tokens`, or a refusal, is not the promised shape.
@@ -479,7 +494,7 @@ A schema written by hand goes through untouched, so `output_config: %{format: %{
 
 ## Beta features
 
-A beta feature needs two things: the `anthropic-beta` header, which `Claudex.new(beta: ...)` sets on every request, and its parameter, which passes through like any other. No separate client and no separate endpoint.
+A beta feature needs two things: the `anthropic-beta` header, which `Claudex.new(beta: ...)` sets on every request, and its parameter, which passes through like any other. No separate endpoint.
 
 ```elixir
 client = Claudex.new(beta: ["context-management-2025-06-27", "fast-mode-2026-02-01"])
@@ -492,6 +507,8 @@ Claudex.Messages.create(client, %{
   messages: history
 })
 ```
+
+`Claudex.Client.put_beta/2` adds a beta to a copy of a client, alongside the ones it already sends, for the requests that need it: `client |> Claudex.Client.put_beta("fast-mode-2026-02-01") |> Claudex.Messages.create(params)`.
 
 These were checked against the API with `Claudex.Messages.count_tokens/2`, which validates a request for free:
 
@@ -614,7 +631,7 @@ results it has so far.
 
 ## Telemetry and logging
 
-Claudex writes nothing to your logs on its own. It emits `:telemetry` events, and ships a logger you can turn on in one line while debugging:
+Claudex logs a warning in three cases: Req logs each retry it makes, `Claudex.ToolRunner` logs a tool that raised, threw or exited, with its message, and a stream sending to a process name nobody registered logs once that its messages are dropped. `req_options: [retry_log_level: false]` turns the retry warning off. Everything else goes out as `:telemetry` events, and Claudex ships a logger for them you can turn on in one line while debugging:
 
 ```elixir
 Claudex.Telemetry.attach_default_logger()
@@ -622,16 +639,13 @@ Claudex.Telemetry.attach_default_logger()
 
 ```
 [debug] claudex POST /v1/messages claude-opus-5 → 200 in 890.4ms (8 in / 16 out) request_id=req_011CQ...
-[debug] claudex POST /v1/messages claude-opus-5 → 200 in 6531.5ms, streamed 4821 B in 10 chunk(s) request_id=req_011CQ...
+[debug] claudex POST /v1/messages claude-opus-5 → 200 in 6531.5ms, streamed 4821 B in 10 chunk(s) (8 in / 212 out) request_id=req_011CQ...
 [debug] claudex tool add → ok in 0.1ms
 [debug] claudex tool_runner turn 1 → 1 tool call(s)
 [debug] claudex tool_runner finished after 2 turn(s): completed
 ```
 
-Streaming and non-streaming report the same `[:claudex, :request, :*]` span; a
-streamed one adds the chunk and byte counts. Token counts arrive in the
-response body, so a streamed span has none — read `usage` off the message from
-`Claudex.Stream.final_message/1`.
+Streaming and non-streaming report the same `[:claudex, :request, :*]` span, with the same token counts; a streamed one adds the chunk and byte counts.
 
 Every line carries the Logger domain `[:elixir, :claudex]`, so an application
 can tell them apart from its own — useful in a Phoenix app, where Ecto and
@@ -652,7 +666,7 @@ The events cover the things you can't otherwise see: the model and `request_id` 
 
 Claudex emits OpenTelemetry spans as well: one per request, one per turn of a tool conversation, and one per tool call, nested so a trace reads as the conversation it was. Attributes follow the [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so a backend shows the model, token counts and stop reason with no Claudex-specific integration.
 
-![Langfuse trace view](assets/langfuse-trace-1.png)
+![Langfuse trace view](https://raw.githubusercontent.com/DennisKh/claudex/main/assets/langfuse-trace-1.png)
 
 *One tool conversation in Langfuse: a single `invoke_agent` trace, a `turn` span per round, with the request and each tool call nested under it.*
 
@@ -716,7 +730,7 @@ The span stays open and unexported until `end_conversation/3` runs, so every way
 
 ### Running Langfuse locally
 
-`docker-compose.langfuse.yml` brings up the whole stack — web, worker, Postgres, ClickHouse, Redis and MinIO — so you can see your traces without sending them anywhere:
+`docker-compose.langfuse.yml` brings up the whole stack (web, worker, Postgres, ClickHouse, Redis and MinIO), so you can see your traces without sending them anywhere:
 
 ```bash
 cp .env.langfuse.example .env.langfuse
@@ -733,7 +747,7 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 
 Only port 3000 and the MinIO console on 9090 are exposed; everything else stays on the compose network. `docker compose -f docker-compose.langfuse.yml down -v` removes the volumes and starts over. `.env.langfuse` is gitignored, because that is where real keys end up.
 
-![Langfuse session view](assets/langfuse-trace-2.png)
+![Langfuse session view](https://raw.githubusercontent.com/DennisKh/claudex/main/assets/langfuse-trace-2.png)
 
 *The same session id across several runs: each run is its own trace, grouped under one session.*
 
@@ -859,10 +873,11 @@ The workflow pins Elixir and OTP explicitly, so a CI run doesn't drift from the 
 | `thinking_live_test.exs` | thinking blocks, streamed and not |
 | `caching_live_test.exs` | `cache_control`, cache write and read token counts |
 | `errors_live_test.exs` | 404, 400, 401, and `count_tokens` rejecting `max_tokens` |
+| `client_live_test.exs` | headers and betas a derived client adds, plain and streamed |
 | `models_live_test.exs` | list, paging, alias resolution, `count_tokens` |
 | `files_live_test.exs` | upload, metadata, list, download refusal, delete |
 | `batches_live_test.exs` | create, retrieve, cancel, list, results-not-ready |
-| `tool_runner_live_test.exs` | `run/3` and `stream/3` against real tool calls |
+| `tool_runner_live_test.exs` | `run/3` and `stream!/3` against real tool calls |
 
 They're tagged `:live` and excluded from `mix test` (network + cost). To run them locally, export a real key first:
 
@@ -871,7 +886,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 mix test.live
 ```
 
-In CI they are a separate, manually triggered workflow — **Actions → Live evals → Run workflow** — never part of the normal pipeline, because every run costs money. It runs every eval in `test/claudex/live/` and nothing else — CI has already run the offline suite — and an optional `file` input narrows it to one file. It needs an `ANTHROPIC_API_KEY` repository secret, and fails immediately if that secret is missing rather than skipping every test and reporting success.
+In CI they are a separate, manually triggered workflow (**Actions → Live evals → Run workflow**), never part of the normal pipeline, because every run costs money. It runs every eval in `test/claudex/live/` and nothing else, since CI has already run the offline suite, and an optional `file` input narrows it to one file. It needs an `ANTHROPIC_API_KEY` repository secret, and fails immediately if that secret is missing rather than skipping every test and reporting success.
 
 ### Releases
 

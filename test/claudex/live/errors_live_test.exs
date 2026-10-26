@@ -19,7 +19,9 @@ defmodule Claudex.Live.ErrorsTest do
     assert error.message != ""
   end
 
-  test "an out-of-range max_tokens is a bad-request error", %{client: client} do
+  test "an out-of-range max_tokens is a bad-request error" do
+    client = Claudex.new(api_key: @api_key, receive_timeout: :timer.minutes(60))
+
     assert {:error, %Error{} = error} =
              client
              |> Recorder.record_json("error_400")
@@ -32,6 +34,35 @@ defmodule Claudex.Live.ErrorsTest do
     assert error.type == :bad_request
     assert error.status == 400
     assert error.message != ""
+  end
+
+  test "a streamed request the API rejects reports a stop with its status", %{client: client} do
+    id = {__MODULE__, make_ref()}
+    test = self()
+
+    :telemetry.attach_many(
+      id,
+      [[:claudex, :request, :stop], [:claudex, :request, :exception]],
+      fn event, _measurements, metadata, _config -> send(test, {event, metadata}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    assert_raise Error, fn ->
+      client
+      |> Messages.stream!(%{
+        model: "claude-does-not-exist",
+        max_tokens: 16,
+        messages: [%{role: "user", content: "Hello"}]
+      })
+      |> Enum.to_list()
+    end
+
+    assert_receive {[:claudex, :request, :stop],
+                    %{status: 404, error_type: :not_found, request_id: "req_" <> _id}}
+
+    refute_received {[:claudex, :request, :exception], _metadata}
   end
 
   test "count_tokens rejects max_tokens, as its docs claim", %{client: client} do
@@ -52,5 +83,14 @@ defmodule Claudex.Live.ErrorsTest do
                max_tokens: 16,
                messages: [%{role: "user", content: "Hello"}]
              })
+  end
+
+  test "the API tells the client not to retry a bad API key" do
+    client = Claudex.new(api_key: "sk-ant-not-a-real-key", max_retries: 0)
+
+    assert {:ok, %Req.Response{status: 401} = response} =
+             Req.get(client.req, url: "/v1/models")
+
+    assert Req.Response.get_header(response, "x-should-retry") == ["false"]
   end
 end

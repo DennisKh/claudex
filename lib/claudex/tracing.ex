@@ -53,7 +53,9 @@ defmodule Claudex.Tracing do
   Attributes follow the
   [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
   so any backend that reads them shows the model, the token counts and the
-  stop reason without a Claudex-specific integration.
+  stop reason without a Claudex-specific integration. Their input count
+  includes the tokens read from and written to the cache, which
+  `Claudex.Usage`'s `input_tokens` leaves out.
 
   ## What a trace looks like
 
@@ -208,6 +210,14 @@ defmodule Claudex.Tracing do
   """
   @type session_option :: {:session, String.t() | nil}
 
+  @typedoc """
+  A span handle, from `start_span/1`, `start_conversation/2` or
+  `current_span/0`. `start_span/1` returns `:untraced` while tracing is off.
+  """
+  @type span ::
+          :untraced
+          | {:opentelemetry.span_ctx() | :undefined, :opentelemetry.span_ctx() | :undefined}
+
   @doc """
   Checks the two things a span needs: `config :claudex, tracing: true`, and an
   OpenTelemetry SDK loaded to record into.
@@ -298,8 +308,8 @@ defmodule Claudex.Tracing do
   the span across callbacks ends it on each way the exchange can finish,
   including the error and abandoned ones.
   """
-  @spec start_conversation(map()) :: term()
-  @spec start_conversation(map(), keyword()) :: term()
+  @spec start_conversation(map()) :: span()
+  @spec start_conversation(map(), keyword()) :: span()
   def start_conversation(params, opts \\ []) do
     start_span(fn ->
       Attributes.conversation(params, Keyword.get(opts, :max_turns), Keyword.get(opts, :session))
@@ -315,9 +325,9 @@ defmodule Claudex.Tracing do
   cancelled before any content has a stop and no message. Ending with neither
   still closes the span.
   """
-  @spec end_conversation(term()) :: :ok
-  @spec end_conversation(term(), Message.t() | nil) :: :ok
-  @spec end_conversation(term(), Message.t() | nil, atom() | nil) :: :ok
+  @spec end_conversation(span()) :: :ok
+  @spec end_conversation(span(), Message.t() | nil) :: :ok
+  @spec end_conversation(span(), Message.t() | nil, atom() | nil) :: :ok
   def end_conversation(span, message \\ nil, stop \\ nil) do
     set_attributes(span, Attributes.conversation_result(message, stop))
 
@@ -375,7 +385,7 @@ defmodule Claudex.Tracing do
   unchanged. With `trace_content` off, the span records the exception's type
   and a stacktrace without arguments, not its message.
   """
-  @spec span((-> {String.t(), map()}), (term() -> result)) :: result when result: term()
+  @spec span((-> {String.t(), map()}), (span() -> result)) :: result when result: term()
   def span(describe, fun) when is_function(describe, 0) and is_function(fun, 1) do
     if enabled?(), do: traced(describe, fun), else: fun.(:untraced)
   end
@@ -386,7 +396,7 @@ defmodule Claudex.Tracing do
   `describe` returns `{name, attributes}` and is only called while tracing is
   on; the handle is `:untraced` otherwise.
   """
-  @spec start_span((-> {String.t(), map()})) :: term()
+  @spec start_span((-> {String.t(), map()})) :: span()
   def start_span(describe) when is_function(describe, 0) do
     if enabled?() do
       {name, attributes} = describe.()
@@ -402,7 +412,7 @@ defmodule Claudex.Tracing do
   Ending a span is what hands it to the exporter. An `:untraced` handle does
   nothing.
   """
-  @spec end_span(term()) :: :ok
+  @spec end_span(span()) :: :ok
   def end_span(span_ctx), do: stop(span_ctx)
 
   @doc """
@@ -426,7 +436,7 @@ defmodule Claudex.Tracing do
   A span is found through the process dictionary, so work handed to a new
   process starts a trace of its own unless the context goes with it.
   """
-  @spec context() :: term()
+  @spec context() :: :otel_ctx.t()
   def context do
     :otel_ctx.get_current()
   rescue
@@ -436,7 +446,7 @@ defmodule Claudex.Tracing do
   end
 
   @doc "Adopts a context from `context/0` into this process."
-  @spec attach(term()) :: :ok
+  @spec attach(:otel_ctx.t()) :: :ok
   def attach(:undefined), do: :ok
 
   def attach(context) do
@@ -456,7 +466,7 @@ defmodule Claudex.Tracing do
   The handle carries no parent, so ending it would leave this process with no
   current span.
   """
-  @spec current_span() :: term()
+  @spec current_span() :: span()
   def current_span do
     {:otel_tracer.current_span_ctx(), :undefined}
   rescue
@@ -466,7 +476,7 @@ defmodule Claudex.Tracing do
   end
 
   @doc "Puts `attributes` on `span`. An `:untraced` handle does nothing."
-  @spec set_attributes(term(), map()) :: :ok
+  @spec set_attributes(span(), map()) :: :ok
   def set_attributes(:untraced, _attributes), do: :ok
 
   def set_attributes({span_ctx, _parent}, attributes) do
@@ -484,7 +494,7 @@ defmodule Claudex.Tracing do
 
   An `:untraced` handle does nothing.
   """
-  @spec set_error(term(), String.t()) :: :ok
+  @spec set_error(span(), String.t()) :: :ok
   def set_error(:untraced, _message), do: :ok
   def set_error({span_ctx, _parent}, message), do: put_error(span_ctx, message)
 

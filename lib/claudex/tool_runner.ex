@@ -1,7 +1,25 @@
 defmodule Claudex.ToolRunner do
   @default_max_turns 20
   @failure_text_max 4096
-  @reserved_stops [nil, true, false, :completed, :truncated, :refusal, :unknown, :max_turns]
+
+  @result_blocks [
+    Claudex.ContentBlock.Text,
+    Claudex.ContentBlock.Image,
+    Claudex.ContentBlock.Document,
+    Claudex.ContentBlock.SearchResult,
+    Claudex.ContentBlock.ToolReference
+  ]
+  @reserved_stops [
+    nil,
+    true,
+    false,
+    :completed,
+    :truncated,
+    :refusal,
+    :unknown,
+    :max_turns,
+    :cancelled
+  ]
 
   @moduledoc """
   Runs a tool conversation: send, run whatever Claude asks for, send the
@@ -17,7 +35,7 @@ defmodule Claudex.ToolRunner do
 
       Claudex.Message.text(turn.message)  # the final reply
       turn.messages                       # the whole conversation
-      turn.stop                           # :completed | :truncated | :refusal | :max_turns
+      turn.stop                           # :completed | :truncated | :refusal | :max_turns | :cancelled
 
   `params` takes exactly what `Claudex.Messages.create/2` takes, so `:system`,
   `:thinking`, `:tool_choice` and the rest go in the same map. The options
@@ -25,18 +43,21 @@ defmodule Claudex.ToolRunner do
 
   > #### Tip {: .tip}
   >
-  > `tool_choice: %{type: "any"}` forces Claude to run at least one tool. This means no `end_turn` will ever occur on its own.
-  > You need to handle this yourself: provide an `exit` tool and catch it to stop execution, the way the
-  > [arithmetix example](https://github.com/DennisKh/claudex/tree/main/examples/arithmetix) does with its `finish` tool.
-  > Yes, you can skip `tool_choice: %{type: "any"}`, but the model will not run all your tools, even if the system prompt says so,
-  > especially weaker models.
+  > `tool_choice: %{type: "any"}` makes Claude call a tool every turn, so a reply never ends
+  > with `end_turn`. A `finish` tool the caller halts on ends the conversation, as the
+  > [arithmetix example](https://github.com/DennisKh/claudex/tree/main/examples/arithmetix) does.
   >
-  > Also, sometimes a model can perform an operation without calling your tool, even if it's valid to do so. So if it's
-  > required that a tool must be used, because, let's say, you log it or important checks must happen for every
-  > action, `tool_choice: %{type: "any"}` is your only option.
+  > Some models reject `"any"` and `"tool"` with a 400, Claude Opus 5.5 among them, and no model
+  > takes either with `thinking: %{type: "enabled"}`. The docs'
+  > [Forcing tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools#forcing-tool-use)
+  > table lists which. With `"auto"`, the default, Claude decides each turn whether to call a
+  > tool, the system prompt steers which, and `@tool %{strict: true}` keeps its inputs to the
+  > schema sent. `Claudex.OutputFormat` fixes the shape of a final answer instead. A forced
+  > call skips thinking: the reply opens with the tool call.
 
   A turn the API pauses part-way through a server-side tool loop
-  (`stop_reason: "pause_turn"`) resumes on its own. The history goes back
+  (`stop_reason: "pause_turn"`), or after compacting the conversation
+  (`stop_reason: "compaction"`), resumes on its own. The history goes back
   unchanged and the conversation carries on, so a pause costs a turn but does
   not end anything.
 
@@ -45,11 +66,11 @@ defmodule Claudex.ToolRunner do
   gets its answer in the run that called it. A `:container` in `params` that
   has no id gets that one.
 
-  `stream/3` hands you one turn at a time instead, so you can watch the
+  `stream!/3` hands you one turn at a time instead, so you can watch the
   conversation, log it, or stop it:
 
       client
-      |> Claudex.ToolRunner.stream(params)
+      |> Claudex.ToolRunner.stream!(params)
       |> Enum.reduce_while(nil, fn turn, _last ->
         if interesting?(turn), do: {:cont, turn}, else: {:halt, turn}
       end)
@@ -65,7 +86,7 @@ defmodule Claudex.ToolRunner do
       @tool true
       @spec read_file(String.t()) :: String.t()
       def read_file(path) do
-        unless allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
+        if not allowed?(path), do: raise(Claudex.Tool.Error, "path is outside the workspace")
 
         File.read!(path)
       end
@@ -75,15 +96,19 @@ defmodule Claudex.ToolRunner do
   a warning in your logs — a bug in a tool shouldn't read to
   Claude like a policy decision, and shouldn't end the conversation either.
 
-  Whatever a tool returns is the result: text is sent as-is, anything else is
-  encoded with `Jason`, and anything Jason can't encode is described instead.
-  A struct sends the fields its `Jason.Encoder` exposes. Returning
-  is success; raising is failure. A tool's return value is your own data, so
+  Whatever a tool returns is the result. Text is sent as-is. A content block
+  struct, or a list made only of them, is sent as content, so a tool can hand
+  Claude a picture, a PDF, or passages to cite: `Claudex.ContentBlock.Text`,
+  `Image`, `Document`, `SearchResult` and `ToolReference`. A list that mixes
+  them with anything else is data. `{:content, blocks}` sends `blocks` as
+  content, one block or a list, structs or maps alike, and `{:content, text}`
+  sends the text. Anything else is encoded with `Jason`, and anything Jason
+  can't encode is described instead. A struct sends the fields its
+  `Jason.Encoder` exposes. Returning is success; raising is failure. A tool's return value is your own data, so
   it can't double as an error channel.
 
-  `:tools` takes several modules as a list. Keep tool names unique across
-  them — Claude is told about both, but only the one from the last module
-  listed can be called.
+  `:tools` takes several modules as a list, and their tool names must be
+  unique, as `Claudex.Tool.list/1` says.
 
   ## Options
 
@@ -92,14 +117,16 @@ defmodule Claudex.ToolRunner do
       both count. The last turn then carries `stop: :max_turns`.
     * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
       before the tool does, returning `:ok`, `{:deny, reason}` or
-      `{:halt, stop}`
+      `{:halt, stop}`. A call whose input didn't parse is answered as an
+      error without it, as `Claudex.ContentBlock.ToolUse` describes
     * `:tool_results` - the `tool_results` of a halted turn, to carry on from
       the history it left. See "Approving a tool call".
     * `:on_event` - a function run on each `Claudex.Stream.Event` as it
       arrives, for showing a reply while it is still being written
     * `:cancel_ref` - tags every request the loop makes, so a
-      `Claudex.Stream.Handle` carrying the same reference stops the one in
-      flight. `stream_to/3` sets it itself.
+      `Claudex.Stream.Handle` carrying the same reference stops the
+      conversation: the request in flight, or the next one when it arrives
+      between requests. `stream_to/3` sets it itself.
     * `:session` - names the conversation for tracing, as `session.id` on its
       span. Without one the trace stands alone, which is right for a conversation
       that belongs to nothing larger. See `Claudex.Tracing`.
@@ -125,7 +152,8 @@ defmodule Claudex.ToolRunner do
 
   `{:halt, stop}` ends the run instead, with `stop` as the turn's `stop`, an
   atom of your own. The tool is not called, nor is any call after it, and the
-  results of the ones before it are in `tool_results`. They stay off
+  results of the ones before it are in `tool_results`, along with the answer
+  to any call whose input didn't parse. They stay off
   `messages`, which ends with Claude's reply, because the API answers every
   call of a reply in one message and a partial one cannot be sent. That is how
   an approval outlives the process holding the run:
@@ -165,8 +193,9 @@ defmodule Claudex.ToolRunner do
 
   Without `:tool_results`, a history is only ever sent to the API, and a
   history ending in calls nobody answered is refused there. A `:refusal`,
-  `:truncated` or `:unknown` reply that asked for tools is left off
-  `messages`, so passing that history back asks Claude again.
+  `:truncated` or `:unknown` reply that asked for tools, or one that asked for
+  tools before a cancel cut it off, is left off `messages`, so passing that
+  history back asks Claude again.
 
   A resumed turn makes no request, so its `message` carries no id or model,
   its usage is all zeros, `:on_event` sees nothing for it, and `:max_turns`
@@ -232,7 +261,7 @@ defmodule Claudex.ToolRunner do
   alias Claudex.Tracing.Attributes
 
   @typedoc """
-  An option for `run/3`, `stream/3` and `stream_to/3`, each described under
+  An option for `run/3`, `stream!/3` and `stream_to/3`, each described under
   "Options" in `Claudex.ToolRunner`.
   """
   @type option ::
@@ -243,7 +272,7 @@ defmodule Claudex.ToolRunner do
           | Tracing.session_option()
 
   @typedoc """
-  An option for `run/3` and `stream/3`: any `t:option/0`, plus the reference
+  An option for `run/3` and `stream!/3`: any `t:option/0`, plus the reference
   that cancels the request in flight.
   """
   @type loop_option :: option() | {:cancel_ref, reference()}
@@ -265,7 +294,7 @@ defmodule Claudex.ToolRunner do
   `params` takes exactly what `Claudex.Messages.create/2` takes; `opts` are
   the runner's own, listed in `Claudex.ToolRunner`.
 
-  It returns a `Claudex.ToolRunner.Turn`, the same thing `stream/3` yields.
+  It returns a `Claudex.ToolRunner.Turn`, the same thing `stream!/3` yields.
   `message` is the last reply, `messages` the whole conversation, and `stop`
   says why it ended, as `Claudex.ToolRunner.Turn` lists.
   A conversation that ran out of turns is `{:ok, turn}` like any other, and
@@ -282,9 +311,10 @@ defmodule Claudex.ToolRunner do
           {:ok, Turn.t()} | {:error, Error.t()}
   def run(%Client{} = client, params, opts \\ []) do
     client
-    |> stream(params, opts)
+    |> stream!(params, opts)
     |> Enum.reduce(nil, fn turn, _last -> turn end)
     |> case do
+      %Turn{stop: nil} = turn -> {:ok, %{turn | stop: :cancelled}}
       %Turn{} = turn -> {:ok, turn}
       nil -> {:error, %Error{type: :bad_request, message: "no turns ran"}}
     end
@@ -295,24 +325,29 @@ defmodule Claudex.ToolRunner do
   @doc """
   Returns a lazy stream of `Claudex.ToolRunner.Turn` structs, one per reply.
 
-  `params` takes exactly what `Claudex.Messages.create/2` takes; `opts` are the
-  runner's own, listed in `Claudex.ToolRunner`.
+  `params` takes exactly what `Claudex.Messages.create/2` takes, except
+  `:compaction`, which raises `ArgumentError`: a compaction request returns a
+  summary instead of an answer, so every request in the loop would compact
+  again. `opts` are the runner's own, listed in `Claudex.ToolRunner`.
 
   Nothing happens until you enumerate it. Tools for a turn have already run by
   the time you see that turn, so halting stops the conversation rather than
   cancelling work — a tool that shouldn't run guards itself instead.
 
-  Each turn carries the usage of its own request, so a run's cost is the sum
-  over the stream:
+  Each turn carries the usage of its own request, so a run's token counts are
+  the sum over the stream:
 
       client
-      |> Claudex.ToolRunner.stream(params)
+      |> Claudex.ToolRunner.stream!(params)
       |> Enum.reduce(%{input: 0, output: 0}, fn turn, total ->
         %{
           input: total.input + turn.message.usage.input_tokens,
           output: total.output + turn.message.usage.output_tokens
         }
       end)
+
+  Those are the requested model's counts. A compaction or advisor step is left
+  out of them and listed in the turn's `usage.iterations`.
 
   `Claudex.Usage.merge/2` is not that sum. It folds the two halves of one
   streamed reply and replaces field by field, so reducing turns with it reports
@@ -322,7 +357,7 @@ defmodule Claudex.ToolRunner do
   the conversation:
 
       client
-      |> Claudex.ToolRunner.stream(params, before_call: &MyApp.Session.approve/1)
+      |> Claudex.ToolRunner.stream!(params, before_call: &MyApp.Session.approve/1)
       |> Enum.reduce_while(MyApp.Session.new(), fn turn, session ->
         case MyApp.Session.apply_turn(session, turn) do
           {:continue, session} -> {:cont, session}
@@ -334,15 +369,20 @@ defmodule Claudex.ToolRunner do
   add up belongs here instead.
 
   A cancel sent with `:cancel_ref` stops the request in flight. The turn it
-  interrupts arrives with `stop: :truncated` and its tool calls unrun, and the
-  stream ends there.
+  interrupts arrives with `stop: :cancelled` and its tool calls unrun, and the
+  stream ends there. A cancel that arrives while tools run lets them finish,
+  and their turn arrives with `stop: :cancelled` and its results. One that
+  arrives after a turn was handed over ends the stream on that turn as it was.
+  Either way no request follows. A cancel before the first reply has started
+  raises.
 
   Enumerating raises `Claudex.Error` if a request fails.
   """
-  @spec stream(Client.t(), map() | keyword()) :: Enumerable.t()
-  @spec stream(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
-  def stream(%Client{} = client, params, opts \\ []) do
+  @spec stream!(Client.t(), map() | keyword()) :: Enumerable.t()
+  @spec stream!(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
+  def stream!(%Client{} = client, params, opts \\ []) do
     params = Map.new(params)
+    reject_compaction!(params)
 
     config = %{
       client: client,
@@ -352,6 +392,7 @@ defmodule Claudex.ToolRunner do
       before_call: Keyword.get(opts, :before_call),
       on_event: Keyword.get(opts, :on_event, &ignore/1),
       cancel_ref: Keyword.get_lazy(opts, :cancel_ref, &make_ref/0),
+      forwarded: Keyword.get(opts, :forwarded, false),
       session: Keyword.get(opts, :session)
     }
 
@@ -364,6 +405,12 @@ defmodule Claudex.ToolRunner do
     |> Stream.map(&emit_turn/1)
     |> traced(config)
   end
+
+  @doc false
+  @deprecated "Use stream!/3 instead"
+  @spec stream(Client.t(), map() | keyword()) :: Enumerable.t()
+  @spec stream(Client.t(), map() | keyword(), [loop_option()]) :: Enumerable.t()
+  def stream(%Client{} = client, params, opts \\ []), do: stream!(client, params, opts)
 
   @doc """
   Runs the conversation in its own process and returns straight away,
@@ -411,7 +458,7 @@ defmodule Claudex.ToolRunner do
   them. Every other option is the runner's own, listed in `Claudex.ToolRunner`,
   and an `:on_event` of your own still runs with the event forwarded either way.
 
-  The forwarding process is linked to the caller, so it dies with it, and it
+  The forwarding process stops when the caller exits, normally or not, and it
   is also where `:before_call` runs. A gate that asks another process for a
   decision blocks the forwarder rather than the caller, which is the point;
   send that process a message and wait for its answer rather than calling into
@@ -423,11 +470,11 @@ defmodule Claudex.ToolRunner do
   reader whose disappearance says nothing about the work, a view that
   reconnects or a consumer its supervisor restarts.
 
-  `monitor: true` stops the conversation as soon as that process goes away, so
-  a run nobody is left to read stops costing tokens. It stops at the next turn
-  boundary, since the turn already in flight has been paid for, and it stops
-  silently: the process the messages were for is the one that has gone. A
-  caller that needs to know monitors the handle's `pid`.
+  `monitor: true` stops the conversation as soon as that process goes away,
+  cancelling the request in flight the way `Claudex.Stream.cancel/1` does, so
+  a run nobody is left to read stops costing tokens. It stops silently: the
+  process the messages were for is the one that has gone. A caller that needs
+  to know monitors the handle's `pid`.
 
   `Claudex.Stream.cancel/1` stops the request in flight, so a reply being
   written stops part-way and the tool calls it had got as far as asking for
@@ -444,7 +491,7 @@ defmodule Claudex.ToolRunner do
 
     Forwarder.start(forwarder_opts, fn sink ->
       client
-      |> stream(params, forwarding(runner_opts, sink))
+      |> stream!(params, forwarding(runner_opts, sink))
       |> Forwarder.forward_each(sink, :turn)
     end)
   end
@@ -465,10 +512,23 @@ defmodule Claudex.ToolRunner do
     Stream.transform(
       turns,
       start,
-      fn turn, {span, _previous} -> {[turn], {span, turn}} end,
+      fn
+        {:cancelled, _turns}, {span, nil} -> {[], {span, :cancelled}}
+        {:cancelled, _turns}, {span, last} -> {[], {span, %{last | stop: :cancelled}}}
+        turn, {span, _previous} -> {[turn], {span, turn}}
+      end,
+      &started!/1,
       fn {span, last} -> finish_conversation(span, last) end
     )
   end
+
+  defp started!({_span, :cancelled}) do
+    raise Error.stream_error("the request was cancelled before the reply started")
+  end
+
+  defp started!(state), do: {[], state}
+
+  defp finish_conversation(span, :cancelled), do: Tracing.end_conversation(span, nil, :cancelled)
 
   defp finish_conversation(span, %Turn{message: message, stop: stop}) when is_atom(stop) do
     Tracing.end_conversation(span, message, stop)
@@ -484,6 +544,7 @@ defmodule Claudex.ToolRunner do
 
     opts
     |> Keyword.put(:cancel_ref, sink.ref)
+    |> Keyword.put(:forwarded, true)
     |> Keyword.put(:on_event, fn event ->
       on_event.(event)
       Forwarder.deliver(sink, {:event, event})
@@ -504,14 +565,31 @@ defmodule Claudex.ToolRunner do
     turn
   end
 
+  defp emit_turn({:cancelled, turns} = cancelled) do
+    :telemetry.execute([:claudex, :tool_runner, :stop], %{turns: turns}, %{stop: :cancelled})
+
+    cancelled
+  end
+
   defp first_turn(history, nil), do: {history, 1}
   defp first_turn(history, results), do: {:resume, history, results}
 
-  defp next_turn(config, state) do
-    {turn, next} = take_turn(config, state)
-
-    {turn, {in_container(config, turn.message), next}}
+  defp next_turn(config, {:resume, _history, _results} = state) do
+    config |> take_turn(state) |> continue(config, 1)
   end
+
+  defp next_turn(config, {_history, index} = state) do
+    if index > 1 and take_cancel(config),
+      do: cancelled_after(index),
+      else: config |> take_turn(state) |> continue(config, index)
+  end
+
+  defp continue(:cancelled, _config, index), do: cancelled_after(index)
+
+  defp continue({turn, next}, config, _index),
+    do: {turn, {in_container(config, turn.message), next}}
+
+  defp cancelled_after(index), do: {{:cancelled, index - 1}, {nil, :done}}
 
   defp take_turn(config, {:resume, history, results}) do
     Tracing.span(fn -> Attributes.turn(1) end, fn _span ->
@@ -539,18 +617,23 @@ defmodule Claudex.ToolRunner do
   defp with_container_id(pinned, _id), do: pinned
 
   defp run_turn(config, history, index) do
-    message = request!(config, history)
+    case request(config, history) do
+      {:ok, message} ->
+        resolve_turn(
+          config,
+          %Turn{message: message, index: index, tool_uses: Message.tool_uses(message)},
+          history
+        )
 
-    resolve_turn(
-      config,
-      %Turn{message: message, index: index, tool_uses: Message.tool_uses(message)},
-      history
-    )
+      :cancelled ->
+        :cancelled
+    end
   end
 
-  # canceled stream may carry stop_reason `nil`
-  defp resolve_turn(_config, %Turn{message: %Message{stop_reason: nil}} = turn, history) do
-    stop_without_running(turn, history, :truncated)
+  # A stream cut off before message_delta, cancelled or not, carries no stop_reason
+  defp resolve_turn(config, %Turn{message: %Message{stop_reason: nil}} = turn, history) do
+    stop = if take_cancel(config), do: :cancelled, else: :truncated
+    stop_without_running(turn, history, stop)
   end
 
   defp resolve_turn(config, %Turn{} = turn, history) do
@@ -558,7 +641,7 @@ defmodule Claudex.ToolRunner do
       stop when stop in [:refusal, :truncated, :unknown] ->
         stop_without_running(turn, history, stop)
 
-      :paused when turn.tool_uses == [] ->
+      stop when stop in [:paused, :compacted] and turn.tool_uses == [] ->
         advance(config, with_reply(turn, history))
 
       _other when turn.tool_uses != [] ->
@@ -589,6 +672,14 @@ defmodule Claudex.ToolRunner do
       answered!(results, tool_uses)
     )
   end
+
+  defp reject_compaction!(%{compaction: compaction}) when not is_nil(compaction) do
+    raise ArgumentError,
+          "`:compaction` can't be set on a tool runner: a compaction request returns a summary " <>
+            "instead of an answer, so every request in the loop would compact again"
+  end
+
+  defp reject_compaction!(_params), do: :ok
 
   defp trailing_reply!(history) do
     with %{} = last <- List.last(history),
@@ -655,17 +746,39 @@ defmodule Claudex.ToolRunner do
   end
 
   defp run_tools(tool_uses, answered, config) do
+    invalid = invalid_answers(tool_uses, answered)
+    answered = Map.merge(invalid, answered)
+
     tool_uses
     |> Enum.reduce_while({:ok, []}, fn tool_use, {:ok, results} ->
       case answer_call(tool_use, answered, config) do
-        {:ok, result} -> {:cont, {:ok, [result | results]}}
-        {:halt, stop} -> {:halt, {:halted, stop, Enum.reverse(results)}}
+        {:ok, result} ->
+          {:cont, {:ok, [result | results]}}
+
+        {:halt, stop} ->
+          results = Enum.reverse(results)
+          {:halt, {:halted, stop, results ++ unreached(tool_uses, invalid, results)}}
       end
     end)
     |> case do
       {:ok, results} -> {:ok, Enum.reverse(results)}
       halted -> halted
     end
+  end
+
+  defp invalid_answers(tool_uses, answered) do
+    for %ToolUse{id: id, invalid_input: json} = tool_use <- tool_uses,
+        is_binary(json) and not is_map_key(answered, id),
+        into: %{},
+        do: {id, invalid(tool_use, json)}
+  end
+
+  defp unreached(tool_uses, invalid, results) do
+    reached = MapSet.new(results, & &1.tool_use_id)
+
+    for %ToolUse{id: id} <- tool_uses,
+        is_map_key(invalid, id) and not MapSet.member?(reached, id),
+        do: Map.fetch!(invalid, id)
   end
 
   defp answer_call(%ToolUse{id: id} = tool_use, answered, config) do
@@ -676,14 +789,24 @@ defmodule Claudex.ToolRunner do
   end
 
   defp advance(config, %Turn{index: index, messages: messages} = turn) do
-    if index >= config.max_turns do
-      {%{turn | stop: :max_turns}, :done}
-    else
-      {turn, {messages, index + 1}}
+    cond do
+      take_cancel(config) -> {%{turn | stop: :cancelled}, :done}
+      index >= config.max_turns -> {%{turn | stop: :max_turns}, :done}
+      true -> {turn, {messages, index + 1}}
     end
   end
 
-  defp request!(config, messages) do
+  defp take_cancel(%{cancel_ref: ref, forwarded: forwarded}) do
+    receive do
+      {:claudex_cancel, ^ref} = cancel ->
+        if forwarded, do: send(self(), cancel)
+        true
+    after
+      0 -> false
+    end
+  end
+
+  defp request(config, messages) do
     config.client
     |> Messages.stream!(Map.put(config.params, :messages, messages),
       cancel_ref: config.cancel_ref,
@@ -695,9 +818,15 @@ defmodule Claudex.ToolRunner do
     end)
     |> Accumulator.message()
     |> case do
-      nil -> raise Error.stream_error("the stream ended without starting a message")
-      message -> message
+      nil -> no_message(config)
+      message -> {:ok, message}
     end
+  end
+
+  defp no_message(config) do
+    if take_cancel(config),
+      do: :cancelled,
+      else: raise(Error.stream_error("the stream ended without starting a message"))
   end
 
   defp ignore(_event), do: :ok
@@ -731,6 +860,12 @@ defmodule Claudex.ToolRunner do
     end
   end
 
+  defp invalid(tool_use, json) do
+    report(tool_use, :invalid_input, fn ->
+      Tool.result(tool_use, Jason.encode!(%{"INVALID_JSON" => json}), is_error: true)
+    end)
+  end
+
   defp denied(tool_use, reason) do
     report(tool_use, :denied, fn -> Tool.result(tool_use, reason, is_error: true) end)
   end
@@ -749,7 +884,7 @@ defmodule Claudex.ToolRunner do
 
   defp call(module, tool_use, session) do
     case Tool.call(module, tool_use.name, tool_use.input, session: session) do
-      {:ok, value} -> Tool.result(tool_use, encode(value))
+      {:ok, value} -> Tool.result(tool_use, content(value))
       {:error, reason} -> Tool.result(tool_use, describe(tool_use, reason), is_error: true)
     end
   end
@@ -759,6 +894,19 @@ defmodule Claudex.ToolRunner do
       {build_result.(), %{tool: tool_use.name, outcome: outcome}}
     end)
   end
+
+  defp content({:content, text}) when is_binary(text), do: encode(text)
+  defp content({:content, blocks}) when is_list(blocks), do: blocks
+  defp content({:content, %{} = block}), do: [block]
+  defp content(%module{} = block) when module in @result_blocks, do: [block]
+
+  defp content([_ | _] = values) do
+    if Enum.all?(values, &match?(%module{} when module in @result_blocks, &1)),
+      do: values,
+      else: encode(values)
+  end
+
+  defp content(value), do: encode(value)
 
   defp encode(value) when is_binary(value) do
     if String.valid?(value), do: value, else: inspect(value)

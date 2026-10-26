@@ -34,6 +34,27 @@ defmodule Claudex.Live.ModelsTest do
     end
   end
 
+  test "accepts lifecycle stages given as a list", %{client: client} do
+    assert {:ok, %Page{data: [%Model{} | _rest]}} =
+             Models.list(client, lifecycle: ["active", "retired"])
+  end
+
+  test "an active-only list holds active models, each with its line", %{client: client} do
+    assert {:ok, %Page{data: [_first | _rest] = models}} =
+             Models.list(client, lifecycle: ["active"], limit: 100)
+
+    assert Enum.all?(models, &(&1.lifecycle == "active"))
+    assert Enum.all?(models, &(&1.deprecated_at == nil))
+    assert Enum.any?(models, &(&1.line == "haiku"))
+  end
+
+  test "sends lifecycle under the name the API reads", %{client: client} do
+    assert {:error, %Claudex.Error{status: 400, message: message}} =
+             Models.list(client, lifecycle: ["claudex-probe"])
+
+    assert message =~ "`claudex-probe` is not a valid lifecycle stage"
+  end
+
   test "resolves an alias to a concrete model id", %{client: client} do
     assert {:ok, %Model{} = model} =
              client |> Recorder.record_json("model") |> Models.retrieve(@model)

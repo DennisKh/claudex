@@ -82,7 +82,7 @@ defmodule Claudex.Live.ThinkingTest do
 
     # How a row stored block by block, without Message.to_param/1, reads back.
     stored =
-      reply.content |> Enum.map(&ContentBlock.to_param/1) |> JSON.encode!() |> JSON.decode!()
+      reply.content |> Enum.map(&ContentBlock.to_param/1) |> Jason.encode!() |> Jason.decode!()
 
     assert [%{"type" => "thinking", "signature" => ""}] = stored
 

@@ -17,7 +17,7 @@ defmodule Claudex.Live.ToolsTest do
     @doc "Returns the current temperature, in Celsius, for a city."
     @tool true
     @spec get_temperature(String.t()) :: String.t()
-    def get_temperature("Tokyo"), do: "24"
+    def get_temperature("Tokyo" = _city), do: "24"
     def get_temperature(_city), do: "18"
 
     @doc "Returns the average of the temperatures given, in Celsius."
@@ -45,6 +45,179 @@ defmodule Claudex.Live.ToolsTest do
     @tool %{strict: true}
     @spec repeat(String.t(), non_neg_integer()) :: String.t()
     def repeat(word, times), do: String.duplicate(word, times)
+  end
+
+  defmodule Arithmetic do
+    @moduledoc false
+    use Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+  end
+
+  defmodule Strings do
+    @moduledoc false
+    use Tool
+
+    @doc "Joins two strings."
+    @tool true
+    @spec add(String.t(), String.t()) :: String.t()
+    def add(a, b), do: a <> b
+  end
+
+  defmodule Maps do
+    @moduledoc false
+    use Tool
+
+    @doc "Merges two maps."
+    @tool true
+    @spec merge(map(), map()) :: map()
+    def merge(%{} = left, %{} = right), do: Map.merge(left, right)
+  end
+
+  defmodule Annotated do
+    @moduledoc false
+    use Tool
+
+    @doc "Adds two integers."
+    @tool %{
+      allowed_callers: ["direct"],
+      cache_control: %{type: "ephemeral"},
+      eager_input_streaming: true,
+      input_examples: [%{"a" => 1, "b" => 2}]
+    }
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+
+    @doc "Subtracts the second integer from the first."
+    @tool %{defer_loading: true}
+    @spec subtract(integer(), integer()) :: integer()
+    def subtract(a, b), do: a - b
+  end
+
+  defmodule Unannotated do
+    @moduledoc false
+    use Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b), do: a + b
+
+    @doc "Subtracts the second integer from the first."
+    @tool true
+    @spec subtract(integer(), integer()) :: integer()
+    def subtract(a, b), do: a - b
+  end
+
+  defmodule Deferred do
+    @moduledoc false
+    use Tool
+
+    @doc "Subtracts the second integer from the first."
+    @tool %{defer_loading: true}
+    @spec subtract(integer(), integer()) :: integer()
+    def subtract(a, b), do: a - b
+  end
+
+  test "a tool's definition fields are ones the API accepts and counts", %{client: client} do
+    count = fn tools ->
+      Messages.count_tokens(client, %{
+        model: @model,
+        tools: tools,
+        messages: [Message.user("Add 2 and 3.")]
+      })
+    end
+
+    assert {:ok, annotated} = count.(Annotated)
+    assert {:ok, unannotated} = count.(Unannotated)
+    assert annotated != unannotated
+  end
+
+  test "a tool's definition fields reach the API", %{client: client} do
+    assert {:error, %Claudex.Error{status: 400, message: message}} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: Deferred,
+               messages: [Message.user("Subtract 2 from 3.")]
+             })
+
+    assert message =~ "cannot be deferred"
+  end
+
+  test "parameters written as bound patterns are a schema the API accepts", %{client: client} do
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: Maps,
+               messages: [Message.user("Merge two maps.")]
+             })
+
+    assert tokens > 0
+  end
+
+  test "a call whose streamed input didn't parse replays with its error answer",
+       %{client: client} do
+    call = %Claudex.ContentBlock.ToolUse{
+      id: "toolu_01",
+      name: "get_temperature",
+      input: %{},
+      invalid_input: ~s({"city": "Par)
+    }
+
+    answer =
+      Tool.result(call, Jason.encode!(%{"INVALID_JSON" => call.invalid_input}), is_error: true)
+
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: WeatherTool,
+               messages: [
+                 Message.user("What is the temperature in Paris?"),
+                 %{role: "assistant", content: [call]},
+                 Message.tool_results([answer])
+               ]
+             })
+
+    assert tokens > 0
+  end
+
+  test "two modules with a tool of the same name are refused", %{client: client} do
+    assert {:error, %Claudex.Error{status: 400, message: message}} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: [Arithmetic, Strings],
+               messages: [Message.user("Add 2 and 3.")]
+             })
+
+    assert message =~ "unique"
+  end
+
+  test "the longest tool name a function may take is accepted", %{client: client} do
+    name = String.duplicate("a", 128)
+
+    [{module, _bytecode}] =
+      Code.compile_string("""
+      defmodule LongestName do
+        use Claudex.Tool
+
+        @doc "Returns true."
+        @tool true
+        @spec #{name}() :: boolean()
+        def #{name}, do: true
+      end
+      """)
+
+    assert {:ok, tokens} =
+             Messages.count_tokens(client, %{
+               model: @model,
+               tools: module,
+               messages: [Message.user("Call the tool.")]
+             })
+
+    assert tokens > 0
   end
 
   test "a strict tool with a bounded integer is accepted and called", %{client: client} do

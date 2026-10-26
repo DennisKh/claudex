@@ -35,7 +35,14 @@ defmodule Claudex.ClientConfigTest do
   end
 
   defp header(client, name) do
-    client.req.headers |> Map.get(name, []) |> List.first()
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(conn, Plug.Conn.get_req_header(conn, name))
+    end)
+
+    req = Req.merge(client.req, plug: {Req.Test, __MODULE__}, retry: false)
+    {:ok, %Req.Response{body: sent}} = Req.get(req, url: "/v1/models")
+
+    List.first(sent)
   end
 
   describe "api key" do
@@ -155,7 +162,6 @@ defmodule Claudex.ClientConfigTest do
       Application.put_env(:claudex, :api_key, "sk-ant-test")
     end
 
-    # The struct fields are a copy; these are the values that decide behaviour.
     test "configured settings are on the Req request, not just the struct" do
       Application.put_env(:claudex, :base_url, "https://proxy.internal")
       Application.put_env(:claudex, :max_retries, 5)

@@ -40,7 +40,7 @@ defmodule Claudex.Messages.Batches do
   big to hold in memory is still fine to walk.
   """
 
-  alias Claudex.{API, ChunkStream, Client, Error, JSONL, Message, Page, Tool}
+  alias Claudex.{API, ChunkStream, Client, Error, JSONL, Messages, Page}
   alias Claudex.Messages.{Batch, BatchResult}
 
   @typedoc """
@@ -52,8 +52,8 @@ defmodule Claudex.Messages.Batches do
   @doc """
   Submits a batch.
 
-  Each request is a map with a `:custom_id` — 1 to 64 characters of letters,
-  digits, hyphens, and underscores, unique within the batch — and `:params`,
+  Each request is a map with a `:custom_id` (1 to 64 characters of letters,
+  digits, hyphens, and underscores, unique within the batch) and `:params`,
   which takes exactly what `Claudex.Messages.create/2` takes. `:tools` in
   those params accepts a module the same way, and `max_tokens` must be at
   least 1.
@@ -128,8 +128,12 @@ defmodule Claudex.Messages.Batches do
   batches rather than pages.
 
   Pages are fetched as you consume them, so taking the first few costs one
-  request. Takes the same options as `list/2`; a cursor among them says
-  where to start, and is threaded from there. Enumerating raises `Claudex.Error` if a request fails.
+  request. Takes the same options as `list/2`. `:after_id` starts after that
+  id and walks forward. `:before_id` walks the other way, towards the first
+  item an uncursored `list/2` returns, a page at a time. Each page keeps
+  `list/2`'s order, so the item right before the cursor ends the first page
+  rather than opening it. Enumerating raises `Claudex.Error` if a request
+  fails.
   """
   @spec stream!(Client.t()) :: Enumerable.t()
   @spec stream!(Client.t(), [option()]) :: Enumerable.t()
@@ -198,41 +202,23 @@ defmodule Claudex.Messages.Batches do
 
   defp stream_results(client, %Batch{results_url: results_url}) do
     stream =
-      client
-      |> ChunkStream.stream(method: :get, url: results_url)
-      |> Stream.transform(&JSONL.new/0, &decode_chunk/2, &flush/1, fn _decoder -> :ok end)
-      |> Stream.map(&decode_line/1)
+      ChunkStream.stream(client, [method: :get, url: results_url], {JSONL, &result/1})
 
     {:ok, stream}
   end
 
-  defp decode_chunk(chunk, decoder) do
-    JSONL.decode(decoder, chunk)
-  end
-
-  defp flush(decoder), do: JSONL.flush(decoder)
-
-  defp decode_line(line) do
-    case JSON.decode(line) do
-      {:ok, json} when is_map(json) -> BatchResult.decode(json)
+  defp result(line) do
+    case Jason.decode(line) do
+      {:ok, json} when is_map(json) -> [BatchResult.decode(json)]
       _not_an_object -> raise Error.stream_error("a batch result line wasn't a JSON object", line)
     end
   end
 
   defp normalize_request(%{params: params} = request) do
-    %{request | params: params |> Map.new() |> normalize_tools() |> normalize_messages()}
+    %{request | params: Messages.to_body(params)}
   end
 
   defp normalize_request(request), do: request
-
-  defp normalize_tools(%{tools: tools} = params), do: %{params | tools: Tool.list(tools)}
-  defp normalize_tools(params), do: params
-
-  defp normalize_messages(%{messages: messages} = params) when is_list(messages) do
-    %{params | messages: Enum.map(messages, &Message.to_param/1)}
-  end
-
-  defp normalize_messages(params), do: params
 
   defp path(batch_id) do
     "/v1/messages/batches/" <> URI.encode(batch_id, &URI.char_unreserved?/1)

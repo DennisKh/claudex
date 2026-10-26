@@ -32,6 +32,48 @@ defmodule Claudex.Live.StreamingTest do
     assert message.usage.output_tokens > 0
   end
 
+  test "a streamed request's telemetry stop carries the reply's token counts", %{client: client} do
+    id = {__MODULE__, make_ref()}
+    test = self()
+
+    :telemetry.attach(
+      id,
+      [:claudex, :request, :stop],
+      fn _event, _measurements, metadata, _config -> send(test, {:stop, metadata}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    {:ok, message} =
+      client
+      |> Messages.stream!(%{
+        model: @model,
+        max_tokens: 64,
+        messages: [%{role: "user", content: "Count from one to five."}]
+      })
+      |> Stream.final_message()
+
+    assert_receive {:stop, metadata}
+    assert metadata.input_tokens == message.usage.input_tokens
+    assert metadata.output_tokens == message.usage.output_tokens
+    assert metadata.output_tokens > 1
+  end
+
+  test "stream!/2 stopped early leaves nothing in the caller's mailbox", %{client: client} do
+    assert [%Event.MessageStart{}] =
+             client
+             |> Messages.stream!(%{
+               model: @model,
+               max_tokens: 256,
+               messages: [%{role: "user", content: "Count from 1 to 40, one number per line."}]
+             })
+             |> Elixir.Stream.each(fn _event -> Process.sleep(500) end)
+             |> Enum.take(1)
+
+    assert Process.info(self(), :messages) == {:messages, []}
+  end
+
   test "stream_to/3 delivers events to a process and finishes with :done", %{client: client} do
     {:ok, handle} =
       Messages.stream_to(client, %{
@@ -173,6 +215,26 @@ defmodule Claudex.Live.StreamingTest do
 
     assert message.usage.input_tokens > 0
     assert message.usage.input_tokens == opening.input_tokens
+  end
+
+  test "a streamed reply keeps the iterations and context edits a created one has" do
+    client = Claudex.new(api_key: @api_key, beta: ["compact-2026-01-12"])
+
+    params = %{
+      model: "claude-haiku-5-5",
+      max_tokens: 16,
+      messages: [Message.user("Say OK.")],
+      context_management: %{edits: [%{type: "compact_20260112"}]}
+    }
+
+    {:ok, created} = Messages.create(client, params)
+    {:ok, streamed} = client |> Messages.stream!(params) |> Stream.final_message()
+
+    for message <- [created, streamed] do
+      assert message.context_management == %{"applied_edits" => []}
+      assert message.raw["context_management"] == %{"applied_edits" => []}
+      assert [%{"type" => "message"}] = message.usage.iterations
+    end
   end
 
   test "a programmatic tool call carried by message_start reassembles into the message",

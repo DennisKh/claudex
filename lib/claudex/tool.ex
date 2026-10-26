@@ -45,6 +45,47 @@ defmodule Claudex.Tool do
         a / b
       end
 
+  A tool's return value reaches Claude as text: a string as it is, anything
+  else as JSON. To hand Claude something to look at or cite instead, return
+  content blocks. One block, or a list made only of them, is sent as content:
+
+      @doc "Takes a screenshot of the dashboard."
+      @tool true
+      @spec screenshot() :: Claudex.ContentBlock.Image.t()
+      def screenshot do
+        MyApp.Dashboard.png()
+        |> Base.encode64()
+        |> Claudex.ContentBlock.Image.base64("image/png")
+      end
+
+      @doc "Searches the handbook and returns the passages found."
+      @tool true
+      @spec search_handbook(String.t()) :: [Claudex.ContentBlock.SearchResult.t()]
+      def search_handbook(query) do
+        for page <- MyApp.Handbook.search(query) do
+          Claudex.ContentBlock.SearchResult.new(page.url, page.title, page.text, citations: true)
+        end
+      end
+
+  Tag the value with `{:content, ...}` for blocks written as maps, or for maps
+  and structs together. It takes a list, one block, or text:
+
+      @doc "Shows a metric's chart, with what it covers."
+      @tool true
+      @spec chart(String.t()) :: {:content, [map() | Claudex.ContentBlock.Image.t()]}
+      def chart(metric) do
+        {:content,
+         [
+           %{type: "text", text: "Weekly #{metric}, last 12 weeks."},
+           MyApp.Charts.png(metric)
+           |> Base.encode64()
+           |> Claudex.ContentBlock.Image.base64("image/png")
+         ]}
+      end
+
+  `Claudex.ToolRunner` lists which return values are content and which are
+  data.
+
   Pass a map instead of `true` for options:
 
     * `:args` - a description per argument, merged into the inferred schema
@@ -57,7 +98,13 @@ defmodule Claudex.Tool do
       inferring one from `@spec`. Takes full priority: when it's set, the
       `@spec` is never even inspected, so it's also the way out of a type
       Claudex can't map (see below), or when you need something a
-      typespec can't express (an `enum`, say)
+      typespec can't express (an `enum`, say). It needs a property for
+      every parameter without a default, named as the parameter is
+    * `:allowed_callers`, `:cache_control`, `:defer_loading`,
+      `:eager_input_streaming` and `:input_examples` - copied onto the tool
+      definition as given. The
+      [tool reference](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference#tool-definition-properties)
+      says what each one does
 
   Claude picks arguments from their descriptions, so an argument named
   `path` tells it less than one described as an absolute path. `:args` merges
@@ -101,6 +148,13 @@ defmodule Claudex.Tool do
       Claudex.Tool.call(MyApp.Tools, "add", %{"a" => 1, "b" => 2})
       #=> {:ok, 3}
 
+  The function receives each argument as Claude sent it, decoded from JSON,
+  whatever its `@spec` type. An atom other than `true`, `false` and `nil`
+  arrives as a string, so `@spec set_priority(:low | :high)` publishes
+  `enum: ["low", "high"]` and is called with `"low"`. A date or time arrives as
+  the string Claude sent, and a struct or keyword list as a map with string
+  keys.
+
   `Claudex.ToolRunner` does this natively — it runs the tools Claude asks for
   and feeds the results back, so a whole tool conversation is one call.
 
@@ -116,9 +170,19 @@ defmodule Claudex.Tool do
   and both properties come out unconstrained. Writing one `@spec` per arity
   is fine — the matching one is picked whichever order they're in.
 
+  A tool is named for its function, so `@tool` goes on one arity of a
+  function at most. Tagging `add/2` and `add/3` both fails to compile, since
+  they would be two tools named `"add"`. A tool name holds only ASCII
+  letters, digits, `_` and `-`, up to 128 characters, so a function such as
+  `valid?` or `run!` can't be a tool either.
+
   Naming the arguments in a `@spec`, `add(a :: number(), b :: number())`, is
   read the same as leaving them bare. The property names come from the
-  function's own parameters either way.
+  function's own parameters either way. A pattern takes the name of the
+  variable bound to the whole of it, as in `%{} = opts`, and one with no such
+  variable, as in `def get_temperature("Tokyo")`, is published as `"arg"`,
+  with a compile warning unless `:args_schema` is set. Two parameters that
+  would share a name fail to compile.
 
   ## Structs as arguments
 
@@ -162,13 +226,21 @@ defmodule Claudex.Tool do
   that tool. `Claudex.OutputFormat` lists what each type becomes.
   """
 
+  alias Claudex.ContentBlock
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Tool.{CallError, Dispatch, Schema, SchemaError}
   alias Claudex.Tool.Schema.{Strict, StructExpansion}
   alias Claudex.Tracing
   alias Claudex.Tracing.Attributes
 
-  @tool_opts [:args, :args_schema, :strict]
+  @definition_fields [
+    :allowed_callers,
+    :cache_control,
+    :defer_loading,
+    :eager_input_streaming,
+    :input_examples
+  ]
+  @tool_opts [:args, :args_schema, :strict | @definition_fields]
   @strict_unexpressible "A strict tool needs a concrete type for every argument, and `any()`, " <>
                           "`term()` and a struct that refers to itself have none. Give it one, " <>
                           "or pass args_schema: in the @tool options to describe it explicitly"
@@ -234,7 +306,8 @@ defmodule Claudex.Tool do
       #=> {:ok, 3}
 
   Arguments are matched to the function's parameters by name, so their order in
-  the map doesn't matter, and a trailing optional parameter can be left out.
+  the map doesn't matter, and a trailing optional parameter can be left out. Each
+  one is passed as decoded JSON, whatever its `@spec` type.
 
   A tool that fails returns a `Claudex.Tool.CallError` instead of taking the
   caller down with it. Its `type` separates a refusal from a bug,
@@ -282,8 +355,10 @@ defmodule Claudex.Tool do
   Takes the `Claudex.ContentBlock.ToolUse` it answers, or that call's id.
 
   `content` must be a string or a list of content blocks, per the Messages
-  API — if your tool returns something else, encode it first
-  (`Jason.encode!/1` for structured data).
+  API, and a `Claudex.ContentBlock` struct in the list is turned into the map
+  the API takes. A `Claudex.ContentBlock.Text` goes without its citations,
+  which the API takes only on top-level text. If your tool returns something
+  else, encode it first (`Jason.encode!/1` for structured data).
 
   `:is_error` in `opts` marks the result as a failure Claude should react to
   rather than an answer, and defaults to `false`.
@@ -324,7 +399,7 @@ defmodule Claudex.Tool do
     %{
       type: "tool_result",
       tool_use_id: tool_use_id,
-      content: content,
+      content: content_param(content),
       is_error: Keyword.get(opts, :is_error, false)
     }
   end
@@ -338,6 +413,9 @@ defmodule Claudex.Tool do
   just write `tools: MyApp.Tools` — this is public mainly for building a
   tools list ahead of time, or for something other than
   `Messages.create/2` (Batches, a hand-rolled request).
+
+  Tool names must be unique across the whole list, server tools included: the
+  API refuses a request that lists two tools with the same name.
 
   The maps use atom keys, while the property names inside `input_schema` are
   strings, since those come from the function's parameters:
@@ -374,6 +452,9 @@ defmodule Claudex.Tool do
       module = registry[tool_use.name]
       Claudex.Tool.call(module, tool_use.name, tool_use.input)
 
+  A call with `invalid_input` set has no input to run with;
+  `Claudex.ContentBlock.ToolUse` shows how to answer it instead.
+
   Takes the same shapes as `list/1`. Plain tool maps have no implementation
   behind them, so they don't appear — a `tool_use` naming one is an unknown
   tool as far as dispatch is concerned.
@@ -403,10 +484,48 @@ defmodule Claudex.Tool do
       "is a #{kind} — Claudex would register a tool it can't call"
   end
 
+  defp check_tool_name!(module, name, arity) do
+    if not Regex.match?(~r/\A[a-zA-Z0-9_-]{1,128}\z/, Atom.to_string(name)) do
+      raise SchemaError,
+        message:
+          "`@tool` is on #{name}/#{arity} in #{inspect(module)}, but a tool name may hold only " <>
+            "ASCII letters, digits, _ and -, up to 128 characters. Rename the function"
+    end
+  end
+
+  defp reject_taken_name!(module, name, arity) do
+    module
+    |> Module.get_attribute(:tool_dispatch_entries)
+    |> Enum.find(&(&1.function == name))
+    |> reject_taken(module, name, arity)
+  end
+
+  defp reject_taken(nil, _module, _name, _arity), do: :ok
+
+  defp reject_taken(%{params: params}, module, name, arity) when length(params) == arity do
+    raise SchemaError,
+      message:
+        "`@tool` is on two clauses of #{name}/#{arity} in #{inspect(module)}. " <>
+          "A function is one tool, so put `@tool` once, above the first clause"
+  end
+
+  defp reject_taken(%{params: params}, module, name, arity) do
+    raise SchemaError,
+      message:
+        "`@tool` is on #{name}/#{length(params)} and #{name}/#{arity} in " <>
+          "#{inspect(module)}, which would be both the tool #{inspect(Atom.to_string(name))}. " <>
+          "Tool names must be unique, so keep `@tool` on one of them"
+  end
+
   defp register(env, name, args, tool_opts) do
     module = env.module
+    check_tool_name!(module, name, length(args))
+    reject_taken_name!(module, name, length(args))
     opts = normalize_opts(tool_opts)
     {properties, params} = schema_for(opts, name, args, module, env)
+    reject_shared_names!(module, name, args, params)
+    reject_uncovered_params!(module, name, args, opts, params)
+    warn_unnamed(env, name, args, opts)
     properties = describe_args(properties, opts, name)
 
     input_schema =
@@ -427,6 +546,7 @@ defmodule Claudex.Tool do
     }
 
     tool = if Map.get(opts, :strict, false), do: Map.put(tool, :strict, true), else: tool
+    tool = Map.merge(tool, Map.take(opts, @definition_fields))
 
     Module.put_attribute(module, :registered_tools, tool)
 
@@ -439,6 +559,57 @@ defmodule Claudex.Tool do
     Module.delete_attribute(module, :tool)
 
     :ok
+  end
+
+  defp reject_shared_names!(module, name, args, params) do
+    names = Enum.map(params, &elem(&1, 0))
+
+    case names -- Enum.uniq(names) do
+      [] -> :ok
+      [shared | _] -> raise_shared_name!(module, name, args, names, shared)
+    end
+  end
+
+  defp raise_shared_name!(module, name, args, names, shared) do
+    [first, second | _] = for {arg, ^shared} <- Enum.zip(args, names), do: Macro.to_string(arg)
+
+    raise SchemaError,
+      message:
+        "`@tool` is on #{name}/#{length(args)} in #{inspect(module)}, but `#{first}` and " <>
+          "`#{second}` would both be the property #{inspect(shared)}. " <>
+          "Give each parameter its own name"
+  end
+
+  defp reject_uncovered_params!(module, name, args, %{args_schema: schema}, params) do
+    keys = for {key, _property} <- schema, do: to_string(key)
+
+    case for({param, false} <- params, param not in keys, do: param) do
+      [] ->
+        :ok
+
+      [missing | _] ->
+        raise SchemaError,
+          message:
+            "`@tool` is on #{name}/#{length(args)} in #{inspect(module)}, but its " <>
+              ":args_schema has no property #{inspect(missing)}, the name the parameter " <>
+              "is read by. Add it, or rename the parameter to match"
+    end
+  end
+
+  defp reject_uncovered_params!(_module, _name, _args, _opts, _params), do: :ok
+
+  defp warn_unnamed(_env, _name, _args, %{args_schema: _schema}), do: :ok
+
+  defp warn_unnamed(env, name, args, _opts) do
+    for pattern <- Schema.unnamed(args) do
+      source = Macro.to_string(pattern)
+
+      IO.warn(
+        "#{inspect(env.module)}.#{name}/#{length(args)} has a parameter, `#{source}`, " <>
+          "with no name to publish, so Claude sees it as \"arg\". Name it, as in `#{source} = _name`",
+        env
+      )
+    end
   end
 
   # args_schema: takes full priority over @spec — when it's set, the spec
@@ -478,7 +649,7 @@ defmodule Claudex.Tool do
         raise SchemaError,
           message:
             "unknown `@tool` option #{inspect(unknown)} — " <>
-              "`@tool` takes #{Enum.map_join(@tool_opts, " and ", &inspect/1)}"
+              "`@tool` takes #{Enum.map_join(@tool_opts, ", ", &inspect/1)}"
     end
   end
 
@@ -563,4 +734,13 @@ defmodule Claudex.Tool do
               "pass a module that does, or a list of tool maps"
     end
   end
+
+  defp content_param(blocks) when is_list(blocks), do: Enum.map(blocks, &block_param/1)
+  defp content_param(text), do: text
+
+  defp block_param(%ContentBlock.Text{} = block),
+    do: ContentBlock.to_param(%{block | citations: []})
+
+  defp block_param(%{} = block), do: ContentBlock.to_param(block)
+  defp block_param(other), do: other
 end

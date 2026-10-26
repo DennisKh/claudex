@@ -24,6 +24,19 @@ defmodule Claudex.UsageTest do
     assert Usage.merge(nil, nil) == nil
   end
 
+  test "merge/2 folds the later raw object into the earlier one" do
+    start =
+      Usage.decode(%{"input_tokens" => 15, "output_tokens" => 1, "service_tier" => "standard"})
+
+    delta = Usage.decode(%{"input_tokens" => 15, "output_tokens" => 6})
+
+    assert Usage.merge(start, delta).raw == %{
+             "input_tokens" => 15,
+             "output_tokens" => 6,
+             "service_tier" => "standard"
+           }
+  end
+
   describe "cached?/1" do
     test "a read or a write means the cache did something" do
       assert Usage.cached?(%Usage{cache_read_input_tokens: 2048})

@@ -17,9 +17,8 @@ defmodule Claudex.Tool.Dispatch do
 
   A trailing optional parameter left out of `args` gets the function's own
   default. An optional parameter left out while a later one is present
-  can't fall back to its default — Elixir can only skip defaults from the
-  end of the argument list — so it's called with `nil` instead; keep
-  optional tool parameters to the ones you're fine skipping that way.
+  can't fall back to its default, because Elixir can only skip defaults
+  from the end of the argument list, so it's called with `nil` instead.
   """
   @spec call(module(), [entry()], String.t(), map()) :: {:ok, term()} | {:error, CallError.t()}
   def call(module, entries, name, args) do
