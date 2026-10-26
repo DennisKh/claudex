@@ -1,20 +1,5 @@
 defmodule Claudex.Stream.Forwarder do
-  @moduledoc """
-  The process behind `Claudex.Messages.stream_to/3` and
-  `Claudex.ToolRunner.stream_to/3`: it consumes a stream and forwards each
-  item to another process as a message.
-
-  It stops when whoever started it exits, for any reason. There's no
-  `child_spec/1`, so it can't go in a supervision tree.
-
-  The process being delivered to is not linked, so a stream carries on when
-  that one goes away. Starting it with `monitor: true` watches it instead, and
-  the stream stops when it does.
-
-  Starting it with `every:` puts a batcher between the two, which holds events
-  for a window and sends them as one `{:events, [event]}` message. Anything
-  else it is handed goes out after the batch before it.
-  """
+  @moduledoc false
 
   require Logger
 

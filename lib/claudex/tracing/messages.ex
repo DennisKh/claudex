@@ -1,19 +1,11 @@
 defmodule Claudex.Tracing.Messages do
-  @moduledoc """
-  Claude's messages in the shapes a tracing backend reads.
+  @moduledoc false
 
-  The conventions define `gen_ai.input.messages` and `gen_ai.output.messages`
-  as a list of `%{role, parts}`, where a part is text, a tool call, or a tool
-  call's response. Claude's content blocks map onto those almost one for one,
-  which is what lets a backend render a Claudex trace as a conversation
-  rather than a blob.
-
-  `chat_input/2` and `chat_output/1` build a second shape for `gen_ai.prompt`
-  and `gen_ai.completion`. Those attributes predate the structured model and
-  have no defined shape, so what their readers expect is the chat message one:
-  a role, a string of content, and tool calls under `tool_calls`. A reply
-  asking for a tool would otherwise read as a reply asking for nothing.
-  """
+  # `gen_ai.prompt` and `gen_ai.completion` predate the structured
+  # `%{role, parts}` model and have no defined shape, so `chat_input/2` and
+  # `chat_output/1` build the chat message one their readers expect: a role, a
+  # string of content, and tool calls under `tool_calls`. A reply asking for a
+  # tool would otherwise read as a reply asking for nothing.
 
   @doc "Shapes the conversation so far into the conventions' input messages."
   @spec input([map()]) :: [map()]

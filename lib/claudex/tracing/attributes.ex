@@ -1,20 +1,10 @@
 defmodule Claudex.Tracing.Attributes do
-  @moduledoc """
-  Every span name and attribute key Claudex records.
+  @moduledoc false
 
-  `Claudex.Tracing` owns the mechanics of a span; this owns its vocabulary.
-  The GenAI semantic conventions are still moving, so a rename lands here and
-  nowhere else.
-
-  The builders come in pairs. One returns `{name, attributes}` for a span
-  about to be started, because the conventions name a span for its operation
-  and model and that is as much part of the vocabulary as the attributes are.
-  The others return attributes alone, for what is learned after a span is
-  open: a response, a finished stream, how a tool call turned out.
-
-  Message content goes on a span only when `Claudex.Tracing.trace_content?/0`
-  says so, which is why the shapers are passed in unapplied.
-  """
+  # The GenAI semantic conventions are still moving, so a rename lands here and
+  # nowhere else. Message content goes on a span only when
+  # `Claudex.Tracing.trace_content?/0` says so, which is why the shapers are
+  # passed in unapplied.
 
   alias Claudex.{ContentBlock, Message, Tracing, Usage}
   alias Claudex.Tool.CallError

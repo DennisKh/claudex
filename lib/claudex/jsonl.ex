@@ -1,14 +1,9 @@
 defmodule Claudex.JSONL do
-  @moduledoc """
-  Splits a JSON Lines byte stream into complete lines — the format the Message
-  Batches API uses for results.
+  @moduledoc false
 
-  Pure and incremental, like `Claudex.Stream.SSE`: feed it whatever bytes
-  arrived, get back the lines those bytes completed and a decoder holding the
-  rest. Turning a line into JSON is the caller's job, so a malformed line can
-  be reported with its contents instead of surfacing as a decode error from
-  somewhere deeper.
-  """
+  # Turning a line into JSON is the caller's job, so a malformed line can be
+  # reported with its contents instead of surfacing as a decode error from
+  # somewhere deeper.
 
   @behaviour Claudex.ChunkStream.Decoder
 

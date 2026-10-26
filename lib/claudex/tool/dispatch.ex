@@ -1,10 +1,5 @@
 defmodule Claudex.Tool.Dispatch do
-  @moduledoc """
-  Calls a registered tool function with a decoded `tool_use` input map.
-
-  Arguments are matched to the function's parameters by name, in the order
-  the tool's `entry` declares.
-  """
+  @moduledoc false
 
   @typedoc "One dispatchable tool: its wire name, the function it calls, and that function's parameters in order."
   @type entry :: %{name: String.t(), function: atom(), params: [Claudex.Tool.Schema.param()]}

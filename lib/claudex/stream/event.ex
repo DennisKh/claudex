@@ -17,8 +17,7 @@ defmodule Claudex.Stream.Event do
 
       %Event.ContentBlockDelta{delta: {:text, chunk}} -> IO.write(chunk)
 
-  `from_sse/1` turns a raw `Claudex.Stream.SSE.Event` into one of these.
-  Keep-alive `ping` events are dropped, and an `error` event the API sends
+  Keep-alive `ping` events never reach you, and an `error` event the API sends
   mid-stream comes back as a `Claudex.Error`, ending the reply there.
   """
 
@@ -44,12 +43,8 @@ defmodule Claudex.Stream.Event do
           | MessageStop.t()
           | Unknown.t()
 
-  @doc """
-  Turns one raw event from `Claudex.Stream.SSE` into a typed event.
-
-  Returns `:ignore` for a `ping`, and `{:error, %Claudex.Error{}}` both for
-  an `error` event from the API and for data that isn't a JSON object.
-  """
+  # Data that isn't a JSON object is an error, the same as an `error` event.
+  @doc false
   @spec from_sse(SSE.Event.t()) :: {:ok, t()} | :ignore | {:error, Error.t()}
   def from_sse(%SSE.Event{name: "ping"}), do: :ignore
 

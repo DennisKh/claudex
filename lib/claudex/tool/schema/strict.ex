@@ -1,8 +1,5 @@
 defmodule Claudex.Tool.Schema.Strict do
-  @moduledoc """
-  Fits a JSON schema to the subset the API takes for structured outputs and
-  strict tools, as `Claudex.OutputFormat` describes.
-  """
+  @moduledoc false
 
   alias Claudex.Tool.SchemaError
 

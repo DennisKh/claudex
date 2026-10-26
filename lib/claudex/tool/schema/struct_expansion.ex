@@ -1,49 +1,17 @@
 defmodule Claudex.Tool.Schema.StructExpansion do
-  @moduledoc """
-  Expands a struct module into JSON schema object properties, for the
-  `Mod.t()` references `Claudex.Tool.Schema` finds in a `@spec` that
-  aren't one of the built-in types.
+  @moduledoc false
 
-  Three sources of field info, tried in this order:
-
-    * a struct declaring `use Claudex.Schema`: its `__json_schema__/0`,
-      built while it compiled, so it needs no readable `.beam`
-    * an Ecto schema, read via the module's own `__schema__/1`
-      reflection. Claudex has no compile-time dependency on Ecto; this
-      only runs when the referenced module itself implements `__schema__/1`,
-      so it works whether or not your project has Ecto installed at all.
-      Verified against Ecto 3.14. A field whose type Claudex doesn't
-      recognize (an older Ecto's internal representation for a
-      parameterized type, or a custom `Ecto.Type` that doesn't implement
-      `type/0`) raises `Claudex.Tool.SchemaError`. Association fields
-      (`belongs_to`, `has_many`, `has_one`, `many_to_many`) are skipped:
-      Ecto doesn't even include them in `__schema__(:fields)`. Embeds
-      (`embeds_one`, `embeds_many`) are genuine data, not a relationship,
-      and are expanded.
-    * a plain struct with `@type t :: %__MODULE__{...}`, read from the
-      module's own compiled typespec.
-
-  A referenced module that isn't compiled yet is waited for, so a struct
-  from the same project can be expanded while that project compiles.
-
-  A plain struct whose `.beam` can't be read raises
-  `Claudex.Tool.SchemaError`, naming `use Claudex.Schema` as the fix: it is
-  compiled in the same build, or a release stripped its typespecs. A plain
-  struct whose `.beam` reads fine but declares no `@type t` still expands,
-  with every field left unconstrained (`%{}`), since the field names alone
-  are more useful to Claude than nothing.
-
-  Ecto doesn't expose which fields are `NOT NULL`, so an Ecto-backed
-  object's `required` list is the one its `use Claudex.Schema, required:`
-  names, or empty without it. A plain struct's `required`
-  list is inferred from its typespec: a field typed `t | nil` (or bare
-  `nil`) is optional, anything else is required.
-
-  Every object built here sets `additionalProperties: false`, since the
-  field set is known and closed — the same thing `Claudex.Tool` does for
-  the top-level `input_schema`, and what a tool declared `strict: true`
-  needs at every level rather than only the outermost one.
-  """
+  # A referenced module that isn't compiled yet is waited for, so a struct from
+  # the same project can be expanded while that project compiles.
+  #
+  # Ecto leaves association fields out of `__schema__(:fields)`, so they are
+  # skipped; embeds are data and are expanded. Ecto doesn't expose which fields
+  # are `NOT NULL`, so an Ecto-backed object requires only what its
+  # `use Claudex.Schema, required:` names.
+  #
+  # A plain struct with no `@type t` still expands, with every field
+  # unconstrained, since the field names alone are more useful to Claude than
+  # nothing.
 
   alias Claudex.Tool.Schema
   alias Claudex.Tool.SchemaError
