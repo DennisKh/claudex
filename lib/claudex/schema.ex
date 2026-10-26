@@ -171,12 +171,15 @@ defmodule Claudex.Schema do
       visited: [env.module],
       env: env,
       current_module: env.module,
+      dependent: env.module,
       escape_hatch: @escape_hatch
     }
 
     schema = env.module |> struct_fields!() |> StructExpansion.typed_object(context)
 
     quote do
+      unquote_splicing(StructExpansion.requires(env.module))
+
       @doc false
       @spec __json_schema__() :: map()
       def __json_schema__, do: unquote(Macro.escape(schema))

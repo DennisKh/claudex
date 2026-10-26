@@ -48,6 +48,8 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   alias Claudex.Tool.Schema
   alias Claudex.Tool.SchemaError
 
+  @dependencies :claudex_schema_dependencies
+
   @doc """
   Expands `module` into an object schema.
 
@@ -84,6 +86,22 @@ defmodule Claudex.Tool.Schema.StructExpansion do
     object(properties, required)
   end
 
+  @doc """
+  Returns a `require` for every module expanded while `module` compiled,
+  for a context whose `:dependent` is `module`.
+
+  A schema built at compile time is only as current as the modules it was
+  built from, and requiring them makes Mix recompile `module` when one of
+  them changes.
+  """
+  @spec requires(module()) :: [Macro.t()]
+  def requires(module) do
+    for dependency <- module |> Module.get_attribute(@dependencies, []) |> Enum.uniq(),
+        dependency != module do
+      quote do: require(unquote(dependency))
+    end
+  end
+
   defp expand_compiled(module, ctx) do
     case Code.ensure_compiled(module) do
       {:module, ^module} -> expand_loaded(module, ctx)
@@ -93,6 +111,8 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   end
 
   defp expand_loaded(module, ctx) do
+    record(ctx, module)
+
     cond do
       declared?(module) -> {:ok, module.__json_schema__()}
       ecto_schema?(module) -> {:ok, ecto_object(module, visit(ctx, module))}
@@ -100,6 +120,17 @@ defmodule Claudex.Tool.Schema.StructExpansion do
       true -> :unsupported
     end
   end
+
+  defp record(%{dependent: dependent}, module) do
+    if Module.open?(dependent) do
+      recorded = Module.get_attribute(dependent, @dependencies, [])
+      Module.put_attribute(dependent, @dependencies, [module | recorded])
+    end
+
+    :ok
+  end
+
+  defp record(_ctx, _module), do: :ok
 
   defp visit(ctx, module), do: %{ctx | visited: [module | ctx.visited], current_module: module}
 
