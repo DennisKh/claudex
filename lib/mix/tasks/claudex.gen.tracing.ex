@@ -80,12 +80,17 @@ defmodule Mix.Tasks.Claudex.Gen.Tracing do
     Mix.shell().info([:green, "* injecting ", :reset, @config_path])
   end
 
-  defp service_name do
+  defp service_name, do: service_name(Mix.Project.config()[:app])
+
+  # An umbrella root names no app of its own
+  defp service_name(nil), do: ""
+
+  defp service_name(app) do
     """
 
     # Names this app in every trace it sends. Unset, the SDK calls it
     # `unknown_service:erl`.
-    config :opentelemetry, resource: %{service: %{name: "#{Mix.Project.config()[:app]}"}}
+    config :opentelemetry, resource: %{service: %{name: "#{app}"}}
     """
   end
 
