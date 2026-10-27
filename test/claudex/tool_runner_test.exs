@@ -131,6 +131,27 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
+  defmodule Latch do
+    @moduledoc """
+    Holds its call open until the test lets it finish, telling the test, not
+    whichever process started it, so it works however deep the conversation
+    runs below the caller.
+    """
+
+    use Claudex.Tool
+
+    @doc "Adds two integers."
+    @tool true
+    @spec add(integer(), integer()) :: integer()
+    def add(a, b) do
+      send(List.last(Process.get(:"$callers")), {:tool_started, self()})
+
+      receive do
+        :finish -> a + b
+      end
+    end
+  end
+
   defmodule CancelOn do
     @moduledoc """
     Sends a cancel from inside the process running the conversation the
@@ -2153,6 +2174,220 @@ defmodule Claudex.ToolRunnerTest do
         max_retries: 0,
         req_options: [adapter: StallingTransport]
       )
+    end
+  end
+
+  describe "stream_to/3 with :every" do
+    test "sends events in batches, each turn after the batch before it, then :done" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{ref: ref}} = ToolRunner.stream_to(client(), @params, every: 10_000)
+
+      # The window outlasts the test, so only a turn or the end can send a batch.
+      assert [
+               {:events, [%Event.MessageStart{} | _] = first},
+               {:turn, %Turn{index: 1}},
+               {:events, [%Event.MessageStart{} | _] = second},
+               {:turn, %Turn{index: 2, stop: :completed}},
+               :done
+             ] = mailbox(ref)
+
+      assert %Event.MessageStop{} = List.last(first)
+      assert %Event.MessageStop{} = List.last(second)
+    end
+
+    test "delivers the open batch when its window closes while a tool runs" do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{ref: ref}} =
+               ToolRunner.stream_to(client(), %{@params | tools: Latch}, every: 50)
+
+      assert_receive {:tool_started, tool}, 2_000
+
+      # The tool is still holding the turn, so the window closing is the only
+      # thing that can send the reply's events.
+      assert_receive {:claudex, ^ref, {:events, events}}, 1_000
+      assert %Event.MessageStop{} = List.last(events)
+      refute_received {:claudex, ^ref, {:turn, _turn}}
+
+      send(tool, :finish)
+
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1}}}, 2_000
+      assert_receive {:claudex, ^ref, :done}, 2_000
+    end
+
+    test "a cancel while a tool runs lets it finish, sends the open batch, then :cancelled" do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{ref: ref} = handle} =
+               ToolRunner.stream_to(client(), %{@params | tools: Latch}, every: 10_000)
+
+      assert_receive {:tool_started, tool}, 2_000
+      Claudex.Stream.cancel(handle)
+      send(tool, :finish)
+
+      assert [{:events, [%Event.MessageStart{} | _]}, :cancelled] = mailbox(ref)
+      assert_received {:sent, _first}
+      refute_received {:sent, _second}
+    end
+
+    test "monitor: true stops the conversation when that process is gone" do
+      receiver = spawn(fn -> Process.sleep(:infinity) end)
+
+      assert {:ok, %Handle{pid: pid}} =
+               ToolRunner.stream_to(stalling_client(), @params,
+                 to: receiver,
+                 monitor: true,
+                 every: 50
+               )
+
+      batcher = batcher(pid)
+      finished = Process.monitor(pid)
+      batching = Process.monitor(batcher)
+      Process.exit(receiver, :kill)
+
+      # The stub is five seconds into a stall.
+      assert_receive {:DOWN, ^finished, :process, ^pid, _reason}, 1_000
+      assert_receive {:DOWN, ^batching, :process, ^batcher, _reason}, 1_000
+    end
+
+    test "runs the tools in the handle's process, where a cancel lands" do
+      respond_with([
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        message([text("3")], "end_turn")
+      ])
+
+      assert {:ok, %Handle{ref: ref, pid: pid}} =
+               ToolRunner.stream_to(client(), %{@params | tools: Latch}, every: 10_000)
+
+      assert_receive {:tool_started, ^pid}, 2_000
+      send(pid, :finish)
+
+      assert [{:events, _}, {:turn, _}, {:events, _}, {:turn, _}, :done] = mailbox(ref)
+    end
+
+    test "stops its batcher when the conversation ends" do
+      assert {:ok, %Handle{ref: ref, pid: pid} = handle} =
+               ToolRunner.stream_to(stalling_client(), @params, every: 50)
+
+      batcher = batcher(pid)
+      batching = Process.monitor(batcher)
+
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{}]}}, 1_000
+      refute_received {:DOWN, ^batching, _, _, _}
+
+      Claudex.Stream.cancel(handle)
+
+      assert_receive {:claudex, ^ref, :cancelled}, 1_000
+      assert_receive {:DOWN, ^batching, :process, ^batcher, :normal}, 1_000
+    end
+
+    test "runs an :on_event of the caller's own as well as forwarding it" do
+      respond_with([message([text("42")], "end_turn")])
+
+      parent = self()
+
+      assert {:ok, %Handle{ref: ref}} =
+               ToolRunner.stream_to(client(), @params,
+                 every: 10_000,
+                 on_event: &send(parent, {:mine, &1})
+               )
+
+      assert_receive {:mine, %Event.MessageStart{}}, 2_000
+      assert [{:events, [%Event.MessageStart{} | _]}, {:turn, %Turn{}}, :done] = mailbox(ref)
+    end
+
+    test "sends a failed request as an error, after the batch before it" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        case Agent.get_and_update(counter, &{&1, &1 + 1}) do
+          0 ->
+            MessageStream.respond(
+              conn,
+              message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use")
+            )
+
+          _second ->
+            Plug.Conn.send_resp(conn, 429, "")
+        end
+      end)
+
+      assert {:ok, %Handle{ref: ref}} = ToolRunner.stream_to(client(), @params, every: 10_000)
+
+      assert_receive {:claudex, ^ref, {:events, [%Event.MessageStart{} | _]}}, 2_000
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1}}}, 2_000
+      assert_receive {:claudex, ^ref, {:error, %Error{type: :rate_limit}}}, 2_000
+      refute_receive {:claudex, ^ref, :done}, 200
+    end
+
+    test "delivers the last batch and :done before the handle's pid exits" do
+      respond_with([message([text("42")], "end_turn")])
+
+      assert {:ok, %Handle{ref: ref, pid: pid}} =
+               ToolRunner.stream_to(client(), @params, every: 10_000)
+
+      assert [{:events, _events}, {:turn, %Turn{}}, :done] =
+               until_down(ref, pid, Process.monitor(pid))
+    end
+
+    test "refuses an :every that is not a positive integer" do
+      for every <- [0, -5, 2.5] do
+        assert_raise ArgumentError, ~r/:every/, fn ->
+          ToolRunner.stream_to(client(), @params, every: every)
+        end
+      end
+    end
+
+    # The forwarder starts its batcher, linked, after stream_to/3 has returned.
+    defp batcher(forwarder, tries \\ 100) do
+      {:links, links} = Process.info(forwarder, :links)
+
+      case Enum.find(links, &batching?/1) do
+        nil when tries > 0 ->
+          Process.sleep(10)
+          batcher(forwarder, tries - 1)
+
+        nil ->
+          flunk("the forwarder has no batcher")
+
+        batcher ->
+          batcher
+      end
+    end
+
+    defp batching?(pid) do
+      Process.info(pid, :current_function) ==
+        {:current_function, {Claudex.Stream.Forwarder, :collect, 1}}
+    end
+
+    # What arrived before the pid's DOWN, read in arrival order.
+    defp until_down(ref, pid, monitor) do
+      receive do
+        {:claudex, ^ref, message} -> [message | until_down(ref, pid, monitor)]
+        {:DOWN, ^monitor, :process, ^pid, _reason} -> []
+      after
+        2_000 -> flunk("the forwarder never exited")
+      end
+    end
+
+    # Everything the stream sends, in order, up to the message that ends it.
+    defp mailbox(ref) do
+      receive do
+        {:claudex, ^ref, ending} when ending in [:done, :cancelled] -> [ending]
+        {:claudex, ^ref, message} -> [message | mailbox(ref)]
+      after
+        2_000 -> flunk("the stream never ended")
+      end
     end
   end
 end

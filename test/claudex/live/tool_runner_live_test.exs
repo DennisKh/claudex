@@ -526,6 +526,42 @@ defmodule Claudex.Live.ToolRunnerTest do
       assert Enum.all?(turns, &(&1.messages != []))
       assert length(last.messages) > length(hd(turns).messages)
     end
+
+    test "with :every delivers events in batches, each turn after its reply's last event",
+         %{client: client} do
+      {:ok, handle} =
+        ToolRunner.stream_to(client, params([Message.user("What is 12 plus 30?")]), every: 250)
+
+      messages = collect_messages(handle.ref)
+
+      refute Enum.any?(messages, &match?({:event, _event}, &1))
+      assert [{:events, [%Event.MessageStart{} | _]} | _rest] = messages
+      assert List.last(messages) == :done
+
+      turns = for {:turn, turn} <- messages, do: turn
+      assert length(turns) >= 2
+      assert %Turn{stop: :completed} = List.last(turns)
+
+      before_each_turn =
+        for {before, {:turn, _turn}} <- Enum.zip(messages, tl(messages)), do: before
+
+      assert length(before_each_turn) == length(turns)
+
+      for before <- before_each_turn do
+        assert {:events, events} = before
+        assert %Event.MessageStop{} = List.last(events)
+      end
+    end
+  end
+
+  defp collect_messages(ref) do
+    receive do
+      {:claudex, ^ref, :done} -> [:done]
+      {:claudex, ^ref, {:error, error}} -> flunk("the loop failed: #{inspect(error)}")
+      {:claudex, ^ref, message} -> [message | collect_messages(ref)]
+    after
+      60_000 -> flunk("the loop never finished")
+    end
   end
 
   defp collect_turns(ref, turns) do

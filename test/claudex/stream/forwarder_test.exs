@@ -302,6 +302,37 @@ defmodule Claudex.Stream.ForwarderTest do
     end
   end
 
+  # The forwarder starts its batcher, linked, once it is running.
+  defp batcher(forwarder, tries \\ 100) do
+    {:links, links} = Process.info(forwarder, :links)
+
+    case Enum.find(links, &batching?/1) do
+      nil when tries > 0 ->
+        Process.sleep(10)
+        batcher(forwarder, tries - 1)
+
+      nil ->
+        flunk("the forwarder has no batcher")
+
+      batcher ->
+        batcher
+    end
+  end
+
+  defp batching?(pid) do
+    Process.info(pid, :current_function) == {:current_function, {Forwarder, :collect, 1}}
+  end
+
+  # What arrived before the pid's DOWN, read in arrival order.
+  defp until_down(ref, pid, monitor) do
+    receive do
+      {:claudex, ^ref, message} -> [message | until_down(ref, pid, monitor)]
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> []
+    after
+      2_000 -> flunk("the forwarder never exited")
+    end
+  end
+
   defp client do
     Client.new(api_key: "sk-ant-test", max_retries: 0, req_options: [adapter: StubTransport])
   end
@@ -317,6 +348,57 @@ defmodule Claudex.Stream.ForwarderTest do
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStart{}}}, 2_000
     assert_receive {:claudex, ^ref, {:event, %Event.MessageStop{}}}, 2_000
     assert_receive {:claudex, ^ref, :done}, 2_000
+  end
+
+  test "events/3 with :every delivers the last batch and :done before the handle's pid exits" do
+    for _run <- 1..20 do
+      assert {:ok, %Handle{ref: ref, pid: pid}} =
+               Forwarder.events(client(), @params, to: self(), every: 1)
+
+      # The handle's pid is what a reader monitors to know the stream is over.
+      assert [{:events, _events}, :done] = until_down(ref, pid, Process.monitor(pid))
+    end
+  end
+
+  test "start/2 with :every does not let a batch sent early close the next window early" do
+    {:ok, %Handle{ref: ref}} =
+      Forwarder.start([every: 200], fn sink ->
+        Forwarder.deliver(sink, {:event, 1})
+        Process.sleep(150)
+        Forwarder.deliver(sink, {:turn, :t})
+        Process.sleep(10)
+        Forwarder.deliver(sink, {:event, 2})
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive {:claudex, ^ref, {:events, [1]}}, 1_000
+    assert_receive {:claudex, ^ref, {:turn, :t}}, 1_000
+
+    # The first window's timer still fires at 200 ms. The second window opened
+    # at 160 ms, so its batch is due at 360 ms and not before.
+    refute_receive {:claudex, ^ref, {:events, [2]}}, 150
+    assert_receive {:claudex, ^ref, {:events, [2]}}, 1_000
+  end
+
+  test "start/2 with :every takes the batcher down with the caller" do
+    test = self()
+
+    caller =
+      spawn(fn ->
+        {:ok, handle} =
+          Forwarder.start([to: test, every: 50], fn _sink -> Process.sleep(:infinity) end)
+
+        send(test, {:handle, handle})
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive {:handle, %Handle{pid: forwarder}}, 1_000
+    batcher = batcher(forwarder)
+    watched = Process.monitor(batcher)
+
+    Process.exit(caller, :kill)
+
+    assert_receive {:DOWN, ^watched, :process, ^batcher, _reason}, 1_000
   end
 
   test "events/3 batches a window's events into one message" do
