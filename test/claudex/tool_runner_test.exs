@@ -1142,6 +1142,26 @@ defmodule Claudex.ToolRunnerTest do
       assert total == 15
     end
 
+    test "a run given :tool_results yields the resumed turn first, at index 1" do
+      respond_with([
+        message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
+        message([text("42.")], "end_turn")
+      ])
+
+      halt = fn _call -> {:halt, :awaiting_approval} end
+      assert {:ok, halted} = ToolRunner.run(client(), @params, before_call: halt)
+
+      turns =
+        client()
+        |> ToolRunner.stream!(%{@params | messages: halted.messages},
+          tool_results: halted.tool_results
+        )
+        |> Enum.to_list()
+
+      assert [%Turn{index: 1, message: %Message{id: nil}}, %Turn{index: 2, message: next}] = turns
+      assert is_binary(next.id)
+    end
+
     test "without :tool_results, a history ending in calls goes to the API as it is, running nothing" do
       respond_with([
         message([tool_use("add", %{"a" => 12, "b" => 30})], "tool_use"),
