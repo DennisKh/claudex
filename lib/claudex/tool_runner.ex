@@ -452,7 +452,8 @@ defmodule Claudex.ToolRunner do
       completes, tools already run
     * `{:claudex, ref, :done}` when the conversation ends
     * `{:claudex, ref, {:error, %Claudex.Error{}}}` if a request fails
-    * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
+    * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`, in place
+      of `:done`
 
   A failed request arrives as an `{:error, error}` message, a missing `:model`
   or `:max_tokens` included, so there is nothing to match on the return. An
@@ -486,8 +487,11 @@ defmodule Claudex.ToolRunner do
 
   `Claudex.Stream.cancel/1` stops the request in flight, so a reply being
   written stops part-way and the tool calls it had got as far as asking for
-  are not run. A tool already running is not interrupted, and the turn it
-  belongs to is never sent.
+  are not run. A tool already running is not interrupted. Either way the turn
+  arrives with `stop: :cancelled`, as `stream!/3` yields it, and then
+  `:cancelled`. A cancel that lands before the reply's first event sends only
+  `:cancelled`, and one that lands after the last turn finished leaves that
+  turn's `stop` as it was.
   """
   @spec stream_to(Client.t(), map() | keyword()) :: {:ok, Handle.t()}
   @spec stream_to(Client.t(), map() | keyword(), [stream_to_option()]) :: {:ok, Handle.t()}
@@ -497,7 +501,9 @@ defmodule Claudex.ToolRunner do
     Forwarder.start(forwarder_opts, fn sink ->
       client
       |> stream!(params, forwarding(runner_opts, sink))
-      |> Forwarder.forward_each(sink, :turn)
+      |> Enum.each(&Forwarder.deliver(sink, {:turn, &1}))
+
+      :running
     end)
   end
 

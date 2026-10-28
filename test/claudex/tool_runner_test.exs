@@ -1622,15 +1622,16 @@ defmodule Claudex.ToolRunnerTest do
       refute_received {:sent, %{"messages" => [_, _, _]}}
     end
 
-    test "stream_to/3 still reports :cancelled and never sends the turn" do
+    test "stream_to/3 sends the turn the cancel ended, with its results, then :cancelled" do
       {:ok, %Handle{ref: ref} = handle} = ToolRunner.stream_to(client(), %{@params | tools: Gate})
 
       assert_receive {:tool_started, runner}, 2_000
       Claudex.Stream.cancel(handle)
       send(runner, :finish)
 
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1, stop: :cancelled} = turn}}, 2_000
+      assert [%{content: "3"}] = turn.tool_results
       assert_receive {:claudex, ^ref, :cancelled}, 2_000
-      refute_received {:claudex, ^ref, {:turn, _turn}}
       refute_received {:sent, %{"messages" => [_, _, _]}}
     end
   end
@@ -2084,9 +2085,9 @@ defmodule Claudex.ToolRunnerTest do
 
       # The stub is five seconds into a stall. A cancel the loop only notices
       # between turns cannot report inside this window.
+      assert_receive {:claudex, ^ref, {:turn, %Turn{index: 1, stop: :cancelled}}}, 1_000
       assert_receive {:claudex, ^ref, :cancelled}, 1_000
 
-      refute_receive {:claudex, ^ref, {:turn, _turn}}, 200
       refute_receive {:claudex, ^ref, :done}, 100
     end
 
@@ -2125,10 +2126,14 @@ defmodule Claudex.ToolRunnerTest do
       assert_receive {:claudex, ^ref, {:event, %Event.ContentBlockStop{}}}, 2_000
 
       assert Claudex.Stream.cancel(handle) == :ok
+
+      assert_receive {:claudex, ^ref, {:turn, %Turn{stop: :cancelled} = turn}}, 2_000
+      assert [%ContentBlock.ToolUse{}] = turn.tool_uses
+      assert turn.tool_results == []
+      assert turn.messages == @params.messages
       assert_receive {:claudex, ^ref, :cancelled}, 2_000
 
       refute_receive {:tool_ran, _a, _b}, 500
-      refute_received {:claudex, ^ref, {:turn, _turn}}
     end
 
     test "stops when the caller exits normally, mid-request" do
@@ -2235,7 +2240,12 @@ defmodule Claudex.ToolRunnerTest do
       Claudex.Stream.cancel(handle)
       send(tool, :finish)
 
-      assert [{:events, [%Event.MessageStart{} | _]}, :cancelled] = mailbox(ref)
+      assert [
+               {:events, [%Event.MessageStart{} | _]},
+               {:turn, %Turn{index: 1, stop: :cancelled}},
+               :cancelled
+             ] = mailbox(ref)
+
       assert_received {:sent, _first}
       refute_received {:sent, _second}
     end
