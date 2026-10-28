@@ -277,6 +277,8 @@ Both of those block the process they run in. `stream_to/3` runs the loop in a li
 # {:claudex, ref, :done}             the conversation ended
 ```
 
+With `every: 50`, events arrive as `{:claudex, ref, {:events, [event]}}`, one message per 50 ms window instead of one per delta, and each turn still arrives on its own after the events before it.
+
 By default the conversation is independent of the process it delivers to, so a reader that restarts or reconnects finds it still running. Pass `monitor: true` to stop it as soon as that process goes away, so a run nobody is left to read stops costing tokens.
 
 `Claudex.Stream.cancel/1` on that handle stops the request in flight, and the tool calls of the reply it interrupts are not run.

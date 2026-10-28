@@ -282,7 +282,11 @@ defmodule Claudex.ToolRunner do
   its messages go. It sets its own `:cancel_ref` from the handle it returns.
   """
   @type stream_to_option ::
-          option() | {:to, pid()} | {:ref, reference()} | {:monitor, boolean()}
+          option()
+          | {:to, pid()}
+          | {:ref, reference()}
+          | {:monitor, boolean()}
+          | {:every, pos_integer()}
 
   @doc """
   Runs the conversation until Claude stops asking for tools, returning the last
@@ -443,20 +447,24 @@ defmodule Claudex.ToolRunner do
   message is tagged with, and then sends:
 
     * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`, on
-      every turn
+      every turn, or `{:claudex, ref, {:events, [event]}}` when `:every` is set
     * `{:claudex, ref, {:turn, turn}}` as each `Claudex.ToolRunner.Turn`
       completes, tools already run
     * `{:claudex, ref, :done}` when the conversation ends
     * `{:claudex, ref, {:error, %Claudex.Error{}}}` if a request fails
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`
 
-  Every failure arrives as an `{:error, error}` message, a missing `:model` or
-  `:max_tokens` included, so there is nothing to match on the return.
+  A failed request arrives as an `{:error, error}` message, a missing `:model`
+  or `:max_tokens` included, so there is nothing to match on the return. An
+  `:every` that is not a positive integer raises `ArgumentError`.
 
-  `:to`, `:ref` and `:monitor` work as they do on `Claudex.Messages.stream_to/3`:
-  where the messages go, what tags them, and whether the conversation ends with
-  them. Every other option is the runner's own, listed in `Claudex.ToolRunner`,
-  and an `:on_event` of your own still runs with the event forwarded either way.
+  `:to`, `:ref`, `:monitor` and `:every` work as they do on
+  `Claudex.Messages.stream_to/3`: where the messages go, what tags them,
+  whether the conversation ends with them, and how long to batch events over.
+  A turn is never batched: it goes out after the events before it, which a
+  window still open sends first. Every other option is the runner's own,
+  listed in `Claudex.ToolRunner`, and an `:on_event` of your own still runs
+  with the event forwarded either way.
 
   The forwarding process stops when the caller exits, normally or not, and it
   is also where `:before_call` runs. A gate that asks another process for a
@@ -480,14 +488,11 @@ defmodule Claudex.ToolRunner do
   written stops part-way and the tool calls it had got as far as asking for
   are not run. A tool already running is not interrupted, and the turn it
   belongs to is never sent.
-
-  Turns arrive one per message. `Claudex.Messages.stream_to/3`'s `:every`
-  batches events, which a completed turn is not.
   """
   @spec stream_to(Client.t(), map() | keyword()) :: {:ok, Handle.t()}
   @spec stream_to(Client.t(), map() | keyword(), [stream_to_option()]) :: {:ok, Handle.t()}
   def stream_to(%Client{} = client, params, opts \\ []) do
-    {forwarder_opts, runner_opts} = Keyword.split(opts, [:to, :ref, :monitor])
+    {forwarder_opts, runner_opts} = Keyword.split(opts, [:to, :ref, :monitor, :every])
 
     Forwarder.start(forwarder_opts, fn sink ->
       client

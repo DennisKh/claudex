@@ -10,6 +10,10 @@ defmodule Claudex.Stream.Forwarder do
   The process being delivered to is not linked, so a stream carries on when
   that one goes away. Starting it with `monitor: true` watches it instead, and
   the stream stops when it does.
+
+  Starting it with `every:` puts a batcher between the two, which holds events
+  for a window and sends them as one `{:events, [event]}` message. Anything
+  else it is handed goes out after the batch before it.
   """
 
   require Logger
@@ -35,6 +39,7 @@ defmodule Claudex.Stream.Forwarder do
     to = Keyword.get(opts, :to, self())
     ref = Keyword.get(opts, :ref, make_ref())
     monitor? = Keyword.get(opts, :monitor, false)
+    every = opts |> Keyword.get(:every) |> validate_every()
     caller = self()
     callers = [caller | Process.get(:"$callers", [])]
     context = Tracing.context()
@@ -46,7 +51,10 @@ defmodule Claudex.Stream.Forwarder do
         Tracing.attach(context)
         monitor = if monitor?, do: Process.monitor(to)
 
-        forward(consume, %{to: to, ref: ref, monitor: monitor})
+        sink = %{to: through(to, ref, every), ref: ref, monitor: monitor}
+
+        forward(consume, sink)
+        await_batcher(sink, every)
       end)
 
     {:ok, %Handle{ref: ref, pid: pid}}
@@ -56,15 +64,11 @@ defmodule Claudex.Stream.Forwarder do
   @spec events(Client.t(), map(), keyword()) :: {:ok, Handle.t()}
   def events(%Client{} = client, body, opts) do
     session = Keyword.get(opts, :session)
-    every = opts |> Keyword.get(:every) |> validate_every()
 
     start(opts, fn sink ->
-      stream = Connection.stream(client, body, cancel_ref: sink.ref, session: session)
-
-      case every do
-        nil -> forward_each(stream, sink, :event)
-        every -> forward_batched(stream, sink, every)
-      end
+      client
+      |> Connection.stream(body, cancel_ref: sink.ref, session: session)
+      |> forward_each(sink, :event)
     end)
   end
 
@@ -109,99 +113,61 @@ defmodule Claudex.Stream.Forwarder do
           ":every must be a positive integer of milliseconds, got: #{inspect(every)}"
   end
 
-  # The stream runs in a reader process of its own, so a stream gone quiet
-  # blocks the reader and not the timer that closes a window.
-  defp forward_batched(enumerable, sink, every) do
-    reader = start_reader(enumerable, sink.ref)
+  defp through(to, _ref, nil), do: to
 
-    collect(%{sink: sink, reader: reader, every: every, buffered: [], deadline: nil})
+  defp through(to, ref, every) do
+    sink = %{to: to, ref: ref, monitor: nil}
+
+    spawn_link(fn -> collect(%{sink: sink, every: every, buffered: [], window: nil}) end)
   end
 
-  defp start_reader(enumerable, ref) do
-    forwarder = self()
-    callers = [forwarder | Process.get(:"$callers", [])]
-    context = Tracing.context()
+  defp await_batcher(_sink, nil), do: :ok
 
-    spawn_link(fn ->
-      Process.put(:"$callers", callers)
-      Tracing.attach(context)
+  defp await_batcher(%{to: batcher, ref: ref}, _every) do
+    stopped = Process.monitor(batcher)
+    send(batcher, {:claudex_stop, ref})
 
-      send(forwarder, {:claudex_read_end, ref, read(enumerable, forwarder, ref)})
-    end)
-  end
-
-  defp read(enumerable, forwarder, ref) do
-    Enum.each(enumerable, &send(forwarder, {:claudex_read, ref, &1}))
-    :done
-  catch
-    kind, reason -> {:failed, kind, reason, __STACKTRACE__}
-  end
-
-  defp collect(%{sink: %{ref: ref, monitor: monitor}} = batch) do
     receive do
-      {:claudex_read, ^ref, event} ->
-        collect(add(batch, event))
-
-      {:claudex_read_end, ^ref, ending} ->
-        batch |> deliver_batch() |> read_ended(ending)
-
-      {:claudex_cancel, ^ref} = cancel ->
-        batch |> stop_reader(cancel) |> deliver_batch()
-        :cancelled
-
-      {:DOWN, ^monitor, :process, _to, _reason} ->
-        stop_reader(batch, {:claudex_cancel, ref})
-        :unreachable
-    after
-      time_left(batch) -> batch |> deliver_batch() |> collect()
+      {:DOWN, ^stopped, :process, ^batcher, _reason} -> :ok
     end
   end
 
-  # A window is also checked as an event arrives, because a steady stream keeps
-  # the mailbox busy and `after` only fires once it is empty.
-  defp add(%{buffered: []} = batch, event), do: open_window(batch, event)
+  defp collect(%{sink: %{ref: ref}, window: window} = batch) do
+    receive do
+      {:claudex, ^ref, {:event, event}} ->
+        batch |> add(event) |> collect()
 
-  defp add(batch, event) do
-    if now() >= batch.deadline do
-      batch |> deliver_batch() |> open_window(event)
-    else
-      %{batch | buffered: [event | batch.buffered]}
+      {:timeout, ^window, {:claudex_window, ^ref}} ->
+        batch |> deliver_batch() |> collect()
+
+      {:timeout, _closed, {:claudex_window, ^ref}} ->
+        collect(batch)
+
+      {:claudex, ^ref, payload} ->
+        batch = deliver_batch(batch)
+        deliver(batch.sink, payload)
+        collect(batch)
+
+      {:claudex_stop, ^ref} ->
+        :ok
     end
   end
 
-  defp open_window(batch, event), do: %{batch | buffered: [event], deadline: now() + batch.every}
+  defp add(%{buffered: []} = batch, event) do
+    window = :erlang.start_timer(batch.every, self(), {:claudex_window, batch.sink.ref})
+
+    %{batch | buffered: [event], window: window}
+  end
+
+  defp add(batch, event), do: %{batch | buffered: [event | batch.buffered]}
 
   defp deliver_batch(%{buffered: []} = batch), do: batch
 
   defp deliver_batch(batch) do
     deliver(batch.sink, {:events, Enum.reverse(batch.buffered)})
 
-    %{batch | buffered: [], deadline: nil}
+    %{batch | buffered: [], window: nil}
   end
-
-  defp read_ended(_batch, :done), do: :running
-  defp read_ended(_batch, {:failed, kind, reason, stack}), do: :erlang.raise(kind, reason, stack)
-
-  # The reader's transport halts on the same cancel message, which closes the
-  # connection; waiting for it to finish keeps that ahead of what the sink hears.
-  defp stop_reader(%{reader: reader, sink: %{ref: ref}} = batch, cancel) do
-    send(reader, cancel)
-    await_reader(ref)
-
-    batch
-  end
-
-  defp await_reader(ref) do
-    receive do
-      {:claudex_read, ^ref, _event} -> await_reader(ref)
-      {:claudex_read_end, ^ref, _ending} -> :ok
-    end
-  end
-
-  defp time_left(%{deadline: nil}), do: :infinity
-  defp time_left(%{deadline: deadline}), do: max(deadline - now(), 0)
-
-  defp now, do: System.monotonic_time(:millisecond)
 
   defp warn_unreachable(to) do
     if !Process.get(:claudex_unreachable_logged) do
