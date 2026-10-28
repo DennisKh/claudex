@@ -112,9 +112,10 @@ defmodule Claudex.ToolRunner do
 
   ## Options
 
-    * `:max_turns` - how many requests the conversation may make before giving
+    * `:max_turns` - how many turns the conversation may take before giving
       up, defaulting to #{@default_max_turns}. Tool rounds and resumed pauses
-      both count. The last turn then carries `stop: :max_turns`.
+      both count, and so does the resumed turn of a run given `:tool_results`,
+      though it makes no request. The last turn then carries `stop: :max_turns`.
     * `:before_call` - a function run on each `Claudex.ContentBlock.ToolUse`
       before the tool does, returning `:ok`, `{:deny, reason}` or
       `{:halt, stop}`. A call whose input didn't parse is answered as an
@@ -197,9 +198,11 @@ defmodule Claudex.ToolRunner do
   tools before a cancel cut it off, is left off `messages`, so passing that
   history back asks Claude again.
 
-  A resumed turn makes no request, so its `message` carries no id or model,
-  its usage is all zeros, `:on_event` sees nothing for it, and `:max_turns`
-  counts from one again.
+  A run given `:tool_results` yields the resumed turn first, at `index: 1`,
+  and every turn after it made a request. The resumed turn makes none, so its
+  `message` carries no id, model or `stop_reason`, its usage is all zeros, and
+  `:on_event` sees nothing for it. `:max_turns` counts from one again, starting
+  with it.
 
   The function is called in the process enumerating the stream, so it can block
   — waiting on a `GenServer.call` for a decision from a UI, say.
@@ -378,7 +381,8 @@ defmodule Claudex.ToolRunner do
   and their turn arrives with `stop: :cancelled` and its results. One that
   arrives after a turn was handed over ends the stream on that turn as it was.
   Either way no request follows. A cancel before the first reply has started
-  raises.
+  raises, unless the run resumes with `:tool_results`, whose first turn needs
+  no reply.
 
   Enumerating raises `Claudex.Error` if a request fails.
   """
