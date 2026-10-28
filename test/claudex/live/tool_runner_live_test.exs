@@ -554,6 +554,40 @@ defmodule Claudex.Live.ToolRunnerTest do
     end
   end
 
+  describe "stream_to/3 cancelled mid-reply" do
+    test "sends the cut-off turn with the reply so far, then :cancelled", %{client: client} do
+      {:ok, handle} =
+        ToolRunner.stream_to(
+          client,
+          params(
+            [Message.user("Count from 1 to 300, one number per line, with no tools.")],
+            %{system: "Follow the instruction exactly.", max_tokens: 2_000}
+          )
+        )
+
+      ref = handle.ref
+      assert_receive {:claudex, ^ref, {:event, %Event.ContentBlockDelta{}}}, 60_000
+      Claudex.Stream.cancel(handle)
+
+      turn = receive_turn(ref)
+
+      assert %Turn{index: 1, stop: :cancelled, message: %{stop_reason: nil}} = turn
+      assert Message.text(turn.message) =~ "1"
+      assert_receive {:claudex, ^ref, :cancelled}, 10_000
+      refute_received {:claudex, ^ref, :done}
+    end
+  end
+
+  defp receive_turn(ref) do
+    receive do
+      {:claudex, ^ref, {:turn, turn}} -> turn
+      {:claudex, ^ref, {:event, _event}} -> receive_turn(ref)
+      {:claudex, ^ref, other} -> flunk("expected the cancelled turn, got #{inspect(other)}")
+    after
+      10_000 -> flunk("no turn arrived")
+    end
+  end
+
   defp collect_messages(ref) do
     receive do
       {:claudex, ^ref, :done} -> [:done]

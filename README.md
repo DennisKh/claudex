@@ -281,7 +281,7 @@ With `every: 50`, events arrive as `{:claudex, ref, {:events, [event]}}`, one me
 
 By default the conversation is independent of the process it delivers to, so a reader that restarts or reconnects finds it still running. Pass `monitor: true` to stop it as soon as that process goes away, so a run nobody is left to read stops costing tokens.
 
-`Claudex.Stream.cancel/1` on that handle stops the request in flight, and the tool calls of the reply it interrupts are not run.
+`Claudex.Stream.cancel/1` on that handle stops the request in flight, and the tool calls of the reply it interrupts are not run. A reply that had started still arrives as a turn, with `stop: :cancelled` and the reply as far as it got, before `:cancelled`.
 
 ### Deciding whether a call runs
 
