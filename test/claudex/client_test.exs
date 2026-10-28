@@ -28,7 +28,7 @@ defmodule Claudex.ClientTest do
     client = Client.new(api_key: "sk-ant-test")
 
     assert sent_header(client, "x-api-key") == ["sk-ant-test"]
-    assert Req.Request.get_header(client.req, "anthropic-version") == ["2023-06-01"]
+    assert Req.Request.get_header(client.req, "anthropic-version") == ["2026-10-21"]
   end
 
   test "new/1 keeps the default headers when req_options adds its own" do
@@ -36,7 +36,7 @@ defmodule Claudex.ClientTest do
       Client.new(api_key: "sk-ant-test", req_options: [headers: [{"x-request-id", "abc"}]])
 
     assert sent_header(client, "x-api-key") == ["sk-ant-test"]
-    assert Req.Request.get_header(client.req, "anthropic-version") == ["2023-06-01"]
+    assert Req.Request.get_header(client.req, "anthropic-version") == ["2026-10-21"]
     assert Req.Request.get_header(client.req, "x-request-id") == ["abc"]
   end
 

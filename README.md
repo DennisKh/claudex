@@ -102,6 +102,10 @@ one `anthropic-beta` header on every request, and `:beta` can sit in config
 with the rest. See [Beta features](#beta-features) for the ones checked against
 the API, and the parameter each one takes.
 
+Requests use API version `2026-10-21`, which refuses `temperature`, `top_p` and
+`top_k`. `Claudex.Client` lists what else it refuses and how to send the
+previous version.
+
 ### Configuration
 
 Connection settings can live in application config, so an app names them once:

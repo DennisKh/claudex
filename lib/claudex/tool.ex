@@ -357,8 +357,8 @@ defmodule Claudex.Tool do
   `content` must be a string or a list of content blocks, per the Messages
   API, and a `Claudex.ContentBlock` struct in the list is turned into the map
   the API takes. A `Claudex.ContentBlock.Text` goes without its citations,
-  which the API takes only on top-level text. If your tool returns something
-  else, encode it first (`Jason.encode!/1` for structured data).
+  which the API refuses in anything sent as the user. If your tool returns
+  something else, encode it first (`Jason.encode!/1` for structured data).
 
   `:is_error` in `opts` marks the result as a failure Claude should react to
   rather than an answer, and defaults to `false`.

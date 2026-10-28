@@ -152,7 +152,7 @@ defmodule Claudex.ClientConfigTest do
       client = Client.new(beta: "fast-mode-2026-02-01")
 
       assert header(client, "x-api-key") == "sk-ant-test"
-      assert header(client, "anthropic-version") == "2023-06-01"
+      assert header(client, "anthropic-version") == "2026-10-21"
       assert header(client, "anthropic-beta") == "fast-mode-2026-02-01"
     end
   end
