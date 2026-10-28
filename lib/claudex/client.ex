@@ -8,6 +8,14 @@ defmodule Claudex.Client do
   several at once (different keys, different workspaces) without any shared
   process state. `put_header/3` and `put_beta/2` return a copy with a header
   or a beta added, for the requests that need it.
+
+  Requests go out with API version `2026-10-21`, which answers `temperature`,
+  `top_p` or `top_k`, a `document` block directly in an `assistant` message,
+  and a `text` block with `citations` in a `user` message with a 400. The
+  [migration guide](https://platform.claude.com/docs/en/api/migration-2026-10-21)
+  has the details. A copy made with
+  `put_header(client, "anthropic-version", "2023-06-01")` sends the previous
+  version, for a request that still needs one of them.
   """
 
   @default_base_url "https://api.anthropic.com"
@@ -19,7 +27,7 @@ defmodule Claudex.Client do
   @initial_retry_delay 500
   @max_retry_delay :timer.seconds(8)
   @default_connect_timeout :timer.seconds(5)
-  @anthropic_version "2023-06-01"
+  @anthropic_version "2026-10-21"
 
   @derive {Inspect, only: [:base_url, :max_retries]}
   @enforce_keys [:api_key, :req]

@@ -169,7 +169,9 @@ defmodule Claudex.Message do
 
   `content` is a string for plain text, or a list of content blocks for
   anything richer — images, documents, or `Claudex.ContentBlock` structs from
-  an earlier reply.
+  an earlier reply. The API refuses a `Claudex.ContentBlock.Text` with
+  `citations` in a user message, so a cited block from a reply goes in as
+  `%{text | citations: []}`.
   """
   @spec user(String.t() | [map() | ContentBlock.t()]) :: map()
   def user(content), do: %{role: "user", content: content}

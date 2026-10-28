@@ -55,7 +55,7 @@ defmodule Claudex.Messages do
 
   `params` must include `:model`, `:messages`, and `:max_tokens`, with atom
   keys throughout. Everything else the Messages API accepts (`:system`,
-  `:temperature`, `:thinking`, ...) is optional and passed straight through, so
+  `:thinking`, `:output_config`, ...) is optional and passed straight through, so
   any parameter the API supports works here — see the
   [Messages API reference](https://platform.claude.com/docs/en/api/messages).
 
