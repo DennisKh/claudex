@@ -259,7 +259,7 @@ turn.stop                           # :completed | :truncated | :refusal | :max_
 
 The params map is the one `Claudex.Messages.create/2` takes, so `system:` and everything else in [API parameters](#api-parameters) goes in it; the runner's own options (`:max_turns`, `:before_call`, `:on_event`) go in a keyword list after it.
 
-It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. `turn.stop` says why it ended, and a run that hit the turn limit reads as a finished one everywhere else.
+It sends the request, runs whatever Claude asks for, sends the results back, and repeats until Claude stops asking. `turn.messages` is the whole conversation, ready to append to for the next turn — decoded Claudex structs go straight back in, no conversion. A turn that a halt or a cancel stopped before all its calls ran ends in Claude's reply instead, and resumes with `tool_results:`, as `Claudex.ToolRunner` shows. `turn.stop` says why it ended, and a run that hit the turn limit reads as a finished one everywhere else.
 
 For one turn at a time, `stream!/3` yields a `Claudex.ToolRunner.Turn` per reply and you decide when to stop:
 
@@ -277,7 +277,7 @@ Both of those block the process they run in. `stream_to/3` runs the loop in a li
 {:ok, handle} = Claudex.ToolRunner.stream_to(client, params)
 
 # {:claudex, ref, {:event, event}}   per delta, every turn
-# {:claudex, ref, {:turn, turn}}     as each turn completes, tools already run
+# {:claudex, ref, {:turn, turn}}     as each turn completes, with the tools it ran
 # {:claudex, ref, :done}             the conversation ended
 ```
 
@@ -285,7 +285,7 @@ With `every: 50`, events arrive as `{:claudex, ref, {:events, [event]}}`, one me
 
 By default the conversation is independent of the process it delivers to, so a reader that restarts or reconnects finds it still running. Pass `monitor: true` to stop it as soon as that process goes away, so a run nobody is left to read stops costing tokens.
 
-`Claudex.Stream.cancel/1` on that handle stops the request in flight, and the tool calls of the reply it interrupts are not run. A reply that had started still arrives as a turn, with `stop: :cancelled` and the reply as far as it got, before `:cancelled`.
+`Claudex.Stream.cancel/1` on that handle stops the request in flight, and the tool calls of the reply it interrupts are not run. One that lands after the reply lets the tool already running finish and starts no other. A reply that had started still arrives as a turn, with `stop: :cancelled` and the reply as far as it got, before `:cancelled`.
 
 ### Deciding whether a call runs
 
