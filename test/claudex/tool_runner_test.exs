@@ -1656,6 +1656,132 @@ defmodule Claudex.ToolRunnerTest do
     end
   end
 
+  describe "a cancel before or between a reply's calls" do
+    setup do
+      respond_with([
+        message(
+          [
+            tool_use("add", %{"a" => 1, "b" => 2}, "toolu_1"),
+            tool_use("add", %{"a" => 3, "b" => 4}, "toolu_2")
+          ],
+          "tool_use"
+        ),
+        message([text("done")], "end_turn")
+      ])
+
+      %{cancel_ref: make_ref(), params: %{@params | tools: Ledger}}
+    end
+
+    test "one that lands as the reply finishes runs none of its calls",
+         %{cancel_ref: cancel_ref, params: params} do
+      count_requests()
+
+      cancel = fn
+        %Event.MessageDelta{} -> send(self(), {:claudex_cancel, cancel_ref})
+        _event -> :ok
+      end
+
+      {result, left} =
+        in_own_process(fn ->
+          ToolRunner.run(client(), params, cancel_ref: cancel_ref, on_event: cancel)
+        end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled, tool_results: []} = turn} = result
+      assert %{role: "assistant"} = List.last(turn.messages)
+      assert left == []
+      assert requests_started() == 1
+    end
+
+    test "one that lands between two calls runs the first and stops before the second",
+         %{cancel_ref: cancel_ref, params: params} do
+      cancel_on([:claudex, :tool, :stop], 1, cancel_ref)
+      count_requests()
+
+      {result, left} =
+        in_own_process(fn -> ToolRunner.run(client(), params, cancel_ref: cancel_ref) end)
+
+      assert {:ok, %Turn{index: 1, stop: :cancelled} = turn} = result
+      assert [%{tool_use_id: "toolu_1", content: "3"}] = turn.tool_results
+      assert %{role: "assistant"} = List.last(turn.messages)
+      assert left == [{:ran, 1, 2}]
+      assert requests_started() == 1
+    end
+
+    test "a turn it stopped resumes with its tool_results, running only the call left",
+         %{cancel_ref: cancel_ref, params: params} do
+      cancel_on([:claudex, :tool, :stop], 1, cancel_ref)
+
+      {{:ok, stopped}, _left} =
+        in_own_process(fn -> ToolRunner.run(client(), params, cancel_ref: cancel_ref) end)
+
+      {result, left} =
+        in_own_process(fn ->
+          ToolRunner.run(client(), %{params | messages: stopped.messages},
+            tool_results: stopped.tool_results
+          )
+        end)
+
+      assert {:ok, %Turn{stop: :completed}} = result
+      assert left == [{:ran, 3, 4}]
+    end
+
+    test "one that lands while :before_call decides keeps that call from running",
+         %{cancel_ref: cancel_ref, params: params} do
+      gate = fn _call ->
+        send(self(), {:claudex_cancel, cancel_ref})
+        :ok
+      end
+
+      {result, left} =
+        in_own_process(fn ->
+          ToolRunner.run(client(), params, cancel_ref: cancel_ref, before_call: gate)
+        end)
+
+      assert {:ok, %Turn{stop: :cancelled, tool_results: []}} = result
+      assert left == []
+    end
+
+    test "a resumed turn it stops keeps the answers it was given for later calls",
+         %{cancel_ref: cancel_ref, params: params} do
+      history =
+        params.messages ++
+          [
+            %{
+              role: "assistant",
+              content: [
+                tool_use("add", %{"a" => 1, "b" => 2}, "toolu_1"),
+                tool_use("add", %{"a" => 3, "b" => 4}, "toolu_2")
+              ]
+            }
+          ]
+
+      {result, left} =
+        in_own_process(fn ->
+          send(self(), {:claudex_cancel, cancel_ref})
+
+          ToolRunner.run(client(), %{params | messages: history},
+            cancel_ref: cancel_ref,
+            tool_results: [Claudex.Tool.result("toolu_2", "7")]
+          )
+        end)
+
+      assert {:ok, %Turn{stop: :cancelled} = turn} = result
+      assert [%{tool_use_id: "toolu_2", content: "7"}] = turn.tool_results
+      assert left == []
+    end
+
+    test "stream_to/3 sends the stopped turn, then :cancelled",
+         %{cancel_ref: cancel_ref, params: params} do
+      cancel_on([:claudex, :tool, :stop], 1, cancel_ref)
+
+      {:ok, %Handle{ref: ^cancel_ref}} = ToolRunner.stream_to(client(), params, ref: cancel_ref)
+
+      assert_receive {:claudex, ^cancel_ref, {:turn, %Turn{stop: :cancelled} = turn}}, 2_000
+      assert [%{tool_use_id: "toolu_1"}] = turn.tool_results
+      assert_receive {:claudex, ^cancel_ref, :cancelled}, 2_000
+    end
+  end
+
   describe "a cancel between turns" do
     setup do
       respond_with([
@@ -1792,7 +1918,7 @@ defmodule Claudex.ToolRunnerTest do
       assert requests_sent() == 2
     end
 
-    test "every call of the turn still runs, and all their results are kept",
+    test "the call already running finishes, and the next one waits for a resume",
          %{cancel_ref: cancel_ref} do
       respond_with([
         message(
@@ -1811,7 +1937,8 @@ defmodule Claudex.ToolRunnerTest do
         end)
 
       assert {:ok, %Turn{index: 1, stop: :cancelled} = turn} = result
-      assert Enum.map(turn.tool_results, & &1.content) == ["3", "7"]
+      assert Enum.map(turn.tool_results, & &1.content) == ["3"]
+      assert %{role: "assistant"} = List.last(turn.messages)
       assert left == []
       assert requests_sent() == 1
     end
