@@ -789,8 +789,6 @@ defmodule Claudex.ToolRunner do
         do: {id, invalid(tool_use, json)}
   end
 
-  # Answers already in hand for calls after the halt go back with the ones that
-  # ran, so resuming never runs or loses them.
   defp unreached(tool_uses, answered, results) do
     reached = MapSet.new(results, & &1.tool_use_id)
 
@@ -806,9 +804,6 @@ defmodule Claudex.ToolRunner do
     end
   end
 
-  # A cancel stops the calls that haven't started, the way a halt does, so the
-  # turn resumes from its tool_results like any other. It's checked again once
-  # :before_call decides, since a gate can wait on a person.
   defp run_unless_cancelled(tool_use, config) do
     if take_cancel(config), do: {:halt, :cancelled}, else: run_tool(tool_use, config)
   end
