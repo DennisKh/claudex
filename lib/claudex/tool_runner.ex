@@ -337,8 +337,8 @@ defmodule Claudex.ToolRunner do
   summary instead of an answer, so every request in the loop would compact
   again. `opts` are the runner's own, listed in `Claudex.ToolRunner`.
 
-  Nothing happens until you enumerate it. Tools for a turn have already run by
-  the time you see that turn, so halting stops the conversation rather than
+  Nothing happens until you enumerate it. Whatever tools a turn runs have run
+  by the time you see that turn, so halting stops the conversation rather than
   cancelling work — a tool that shouldn't run guards itself instead.
 
   Each turn carries the usage of its own request, so a run's token counts are
@@ -377,8 +377,9 @@ defmodule Claudex.ToolRunner do
 
   A cancel sent with `:cancel_ref` stops the request in flight. The turn it
   interrupts arrives with `stop: :cancelled` and its tool calls unrun, and the
-  stream ends there. A cancel that arrives while tools run lets them finish,
-  and their turn arrives with `stop: :cancelled` and its results. One that
+  stream ends there. A cancel that arrives after the reply lets the tool
+  already running finish and starts no other, and the turn arrives with
+  `stop: :cancelled`, as `Claudex.ToolRunner.Turn` describes. One that
   arrives after a turn was handed over ends the stream on that turn as it was.
   Either way no request follows. A cancel before the first reply has started
   raises, unless the run resumes with `:tool_results`, whose first turn needs
@@ -453,7 +454,7 @@ defmodule Claudex.ToolRunner do
     * `{:claudex, ref, {:event, event}}` for each `Claudex.Stream.Event`, on
       every turn, or `{:claudex, ref, {:events, [event]}}` when `:every` is set
     * `{:claudex, ref, {:turn, turn}}` as each `Claudex.ToolRunner.Turn`
-      completes, tools already run
+      completes, with the tools it ran
     * `{:claudex, ref, :done}` when the conversation ends
     * `{:claudex, ref, {:error, %Claudex.Error{}}}` if a request fails
     * `{:claudex, ref, :cancelled}` after `Claudex.Stream.cancel/1`, in place
@@ -491,9 +492,9 @@ defmodule Claudex.ToolRunner do
 
   `Claudex.Stream.cancel/1` stops the request in flight, so a reply being
   written stops part-way and the tool calls it had got as far as asking for
-  are not run. A tool already running is not interrupted. Either way the turn
-  arrives with `stop: :cancelled`, as `stream!/3` yields it, and then
-  `:cancelled`. A cancel that lands before the reply's first event sends only
+  are not run. A tool already running is not interrupted, and the calls after
+  it don't start. Either way the turn arrives with `stop: :cancelled`, as
+  `stream!/3` yields it, and then `:cancelled`. A cancel that lands before the reply's first event sends only
   `:cancelled`, and one that lands after the last turn finished leaves that
   turn's `stop` as it was.
   """
@@ -772,7 +773,7 @@ defmodule Claudex.ToolRunner do
 
         {:halt, stop} ->
           results = Enum.reverse(results)
-          {:halt, {:halted, stop, results ++ unreached(tool_uses, invalid, results)}}
+          {:halt, {:halted, stop, results ++ unreached(tool_uses, answered, results)}}
       end
     end)
     |> case do
@@ -788,19 +789,27 @@ defmodule Claudex.ToolRunner do
         do: {id, invalid(tool_use, json)}
   end
 
-  defp unreached(tool_uses, invalid, results) do
+  defp unreached(tool_uses, answered, results) do
     reached = MapSet.new(results, & &1.tool_use_id)
 
     for %ToolUse{id: id} <- tool_uses,
-        is_map_key(invalid, id) and not MapSet.member?(reached, id),
-        do: Map.fetch!(invalid, id)
+        is_map_key(answered, id) and not MapSet.member?(reached, id),
+        do: Map.fetch!(answered, id)
   end
 
   defp answer_call(%ToolUse{id: id} = tool_use, answered, config) do
     case Map.fetch(answered, id) do
       {:ok, result} -> {:ok, result}
-      :error -> run_tool(tool_use, config)
+      :error -> run_unless_cancelled(tool_use, config)
     end
+  end
+
+  defp run_unless_cancelled(tool_use, config) do
+    if take_cancel(config), do: {:halt, :cancelled}, else: run_tool(tool_use, config)
+  end
+
+  defp dispatch_unless_cancelled(tool_use, config) do
+    if take_cancel(config), do: {:halt, :cancelled}, else: {:ok, dispatch(tool_use, config)}
   end
 
   defp advance(config, %Turn{index: index, messages: messages} = turn) do
@@ -848,7 +857,7 @@ defmodule Claudex.ToolRunner do
 
   defp run_tool(%ToolUse{} = tool_use, config) do
     case decide(config.before_call, tool_use) do
-      :ok -> {:ok, dispatch(tool_use, config)}
+      :ok -> dispatch_unless_cancelled(tool_use, config)
       {:deny, reason} -> {:ok, denied(tool_use, reason)}
       {:halt, stop} -> {:halt, stop}
     end

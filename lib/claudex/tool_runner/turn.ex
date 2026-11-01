@@ -33,12 +33,14 @@ defmodule Claudex.ToolRunner.Turn do
     * `:max_turns` - the runner's turn limit ran out. Whatever this turn
       produced is in `messages`, tool results included, so the conversation can
       be picked up again by passing that history back.
-    * `:cancelled` - a cancel arrived. One that cut this turn's reply off
-      leaves `message.stop_reason` nil and its tool calls unrun, as with
-      `:truncated`. One that arrived
-      after the reply, while its tools ran or before the next request, lets the
-      tools finish. Their results are in `messages` as with `:max_turns`, and
-      no request followed.
+    * `:cancelled` - a cancel arrived, and no request followed. One that cut
+      this turn's reply off leaves `message.stop_reason` nil and its tool calls
+      unrun, as with `:truncated`. One that arrived after the reply lets the
+      tool already running finish and starts no other: with calls left to run,
+      the turn ends as a `:before_call` halt does, so `tool_results` holds what
+      ran and resumes the rest. With none left, the results are in `messages`
+      as with `:max_turns`. A turn whose `messages` end with Claude's reply,
+      halted or cancelled, still has calls to answer.
     * any other atom - the one a `:before_call` halt named. `tool_results` holds
       what ran before it and `messages` ends with Claude's reply, so passing
       `messages` back to `Claudex.ToolRunner.run/3` with `tool_results: tool_results`
