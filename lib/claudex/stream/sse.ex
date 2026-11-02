@@ -1,19 +1,8 @@
 defmodule Claudex.Stream.SSE do
-  @moduledoc """
-  Decodes a Server-Sent Events byte stream into `Claudex.Stream.SSE.Event`
-  structs. `Claudex.Stream.Event` is what those become once the data is
-  decoded as one of Claude's events.
+  @moduledoc false
 
-  Incremental and network-free: feed it whatever bytes arrived, get back the
-  events those bytes completed plus a decoder holding the leftover tail.
-
-      {events, decoder} = SSE.decode(SSE.new(), chunk)
-
-  Nothing is emitted until an event's terminating blank line arrives, so a
-  chunk that splits an event mid-JSON yields nothing until the rest lands.
-  Call `flush/1` when the connection closes to drain a final event that came
-  without its terminator.
-  """
+  # Nothing is emitted until an event's terminating blank line arrives, so a
+  # chunk that splits an event mid-JSON yields nothing until the rest lands.
 
   @behaviour Claudex.ChunkStream.Decoder
 

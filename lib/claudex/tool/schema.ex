@@ -1,18 +1,5 @@
 defmodule Claudex.Tool.Schema do
-  @moduledoc """
-  Turns a function's arguments and its `@spec` into JSON schema properties,
-  in the shape the Messages API expects for a tool's `input_schema`.
-
-  This is pure AST-to-schema mapping with no macro magic, kept separate
-  from `Claudex.Tool` so the type inference can be tested on its own. A
-  `Mod.t()` reference that isn't one of the built-in types (`String.t()`,
-  `DateTime.t()`, ...) is handed to `Claudex.Tool.Schema.StructExpansion`,
-  which expands it into a nested object when `Mod` is a struct or an Ecto
-  schema.
-
-  A typespec construct that can't be mapped raises
-  `Claudex.Tool.SchemaError` — see `build/4`.
-  """
+  @moduledoc false
 
   alias Claudex.Tool.Schema.StructExpansion
   alias Claudex.Tool.SchemaError

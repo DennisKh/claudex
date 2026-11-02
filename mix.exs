@@ -103,18 +103,6 @@ defmodule Claudex.MixProject do
         Models: [
           Claudex.Models,
           Claudex.Model
-        ],
-        Internals: [
-          Claudex.Tracing.Attributes,
-          Claudex.Tracing.Messages,
-          Claudex.Tool.Schema,
-          Claudex.Tool.Schema.Strict,
-          Claudex.Tool.Schema.StructExpansion,
-          Claudex.Tool.Dispatch,
-          Claudex.Stream.SSE,
-          Claudex.Stream.SSE.Event,
-          Claudex.Stream.Forwarder,
-          Claudex.JSONL
         ]
       ]
     ]

@@ -209,13 +209,14 @@ defmodule Claudex.Tool do
 
   Without it, a struct compiled in the same build as the tool raises
   `Claudex.Tool.SchemaError`, naming the struct. `Claudex.Schema` says when
-  a struct needs it and when it doesn't.
+  a struct needs it and when it doesn't. A struct from a dependency that
+  declares no `@type t` still expands, with every field unconstrained.
 
   An Ecto schema doesn't need `use Claudex.Schema` except to name the fields
   Claude must fill, which `Claudex.Schema` shows. It expands with its
-  `embeds_one` and `embeds_many` fields included. `belongs_to`, `has_many`
-  and `has_one` are skipped: they aren't part of the data, and expanding
-  them risks recursing through a relationship graph.
+  `embeds_one` and `embeds_many` fields included. `belongs_to`, `has_many`,
+  `has_one` and `many_to_many` are skipped: they aren't part of the data, and
+  expanding them risks recursing through a relationship graph.
 
   This only shapes the schema Claude sees. The argument your function
   receives is still the decoded JSON map, with string keys, never cast into

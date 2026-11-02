@@ -5,8 +5,7 @@ defmodule Claudex.ContentBlock do
   `decode/1` reads a block's `"type"` field and returns the matching
   struct.
 
-  Each block type is a module implementing this behaviour, with `decode/1`
-  reading the API's map and `to_param/1` writing it back:
+  Each block type has a module of its own:
 
     * `Claudex.ContentBlock.Text`: what Claude wrote, with any citations
     * `Claudex.ContentBlock.Thinking` and
@@ -64,10 +63,10 @@ defmodule Claudex.ContentBlock do
           | ToolReference.t()
           | Unknown.t()
 
-  @doc "Reads one block of the API's JSON into this module's struct."
+  @doc false
   @callback decode(map()) :: t()
 
-  @doc "Writes the struct back into the map the API expects in a request."
+  @doc false
   @callback to_param(t()) :: map()
 
   # The API's name for a block, and the module that handles it. Every tool the
