@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/DennisKh/claudex/compare/v0.11.0...v0.11.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **tool_runner:** stop the calls a cancel lands before ([#134](https://github.com/DennisKh/claudex/issues/134)) ([de5c7a3](https://github.com/DennisKh/claudex/commit/de5c7a34f095794e975bd7dba70476ed11a7e192))
+
 ## [0.11.0](https://github.com/DennisKh/claudex/compare/v0.10.0...v0.11.0) (2026-10-28)
 
 
