@@ -7,6 +7,7 @@ defmodule Claudex.Live.SkillsAPITest do
   use Claudex.TestSupport.LiveCase, async: false
 
   alias Claudex.{ContentBlock, Error, Messages, Page, Skill, Skills}
+  alias Claudex.Skill.Version
 
   @moduletag :tmp_dir
   @moduletag timeout: 300_000
@@ -126,5 +127,119 @@ defmodule Claudex.Live.SkillsAPITest do
              Skills.create(client, [{"notes\n", "docs/notes.txt"}])
 
     assert error.message =~ "SKILL.md"
+  end
+
+  describe "versions" do
+    test "a new version becomes the latest, pages, and can be deleted down to one", %{
+      client: client
+    } do
+      {:ok, skill} =
+        Skills.create(client, [
+          {skill_md("pineapple-versions"), "SKILL.md"},
+          {"mango\n", "docs/word.txt"}
+        ])
+
+      delete_on_exit(client, skill.id)
+
+      assert {:ok, %Version{} = version} =
+               client
+               |> Recorder.record_json("skill_version")
+               |> Skills.create_version(skill.id, [{skill_md("pineapple-versions"), "SKILL.md"}])
+
+      assert version.id =~ "skver_"
+      assert version.type == "skill_version"
+      assert version.skill_id == skill.id
+      assert version.name == "pineapple-versions"
+      assert version.description =~ "secret word"
+      assert %DateTime{} = version.created_at
+
+      assert {:ok, %Skill{latest_version_id: latest}} = Skills.retrieve(client, skill.id)
+      assert latest == version.id
+      assert {:ok, %Version{id: ^latest}} = Skills.retrieve_version(client, skill.id, "latest")
+
+      assert {:ok, %Version{id: first}} =
+               Skills.retrieve_version(client, skill.id, skill.latest_version_id)
+
+      assert {:ok, %Page{data: versions}} =
+               client
+               |> Recorder.record_json("skill_versions_page")
+               |> Skills.list_versions(skill.id)
+
+      assert Enum.map(versions, & &1.id) == [latest, first]
+
+      assert client |> Skills.stream_versions!(skill.id, limit: 1) |> Enum.map(& &1.id) ==
+               [latest, first]
+
+      assert :ok = Skills.delete_version(client, skill.id, latest)
+      assert {:ok, %Skill{latest_version_id: ^first}} = Skills.retrieve(client, skill.id)
+
+      assert {:error, %Error{type: :bad_request}} =
+               Skills.delete_version(client, skill.id, first)
+    end
+
+    test "a request runs the version it pins, without the files a later one left out", %{
+      client: client
+    } do
+      {:ok, skill} =
+        Skills.create(client, [
+          {skill_md("pineapple-pinned"), "SKILL.md"},
+          {"mango\n", "docs/word.txt"}
+        ])
+
+      delete_on_exit(client, skill.id)
+
+      {:ok, _version} =
+        Skills.create_version(client, skill.id, [{skill_md("pineapple-pinned"), "SKILL.md"}])
+
+      command = "ls -A /skills/pineapple-pinned"
+
+      assert bash_stdout(client, skill.id, skill.latest_version_id, command) =~ "docs"
+
+      # SKILL.md shows the latest is mounted, so a missing docs/ isn't a failed command.
+      latest = bash_stdout(client, skill.id, "latest", command)
+      assert latest =~ "SKILL.md"
+      refute latest =~ "docs"
+    end
+
+    test "refuses a version whose SKILL.md renames the skill", %{client: client} do
+      {:ok, skill} = Skills.create(client, [{skill_md("pineapple-named"), "SKILL.md"}])
+
+      delete_on_exit(client, skill.id)
+
+      assert {:error, %Error{type: :bad_request} = error} =
+               Skills.create_version(client, skill.id, [
+                 {skill_md("pineapple-renamed"), "SKILL.md"}
+               ])
+
+      assert error.message =~ "pineapple-named"
+    end
+
+    test "looks up an Anthropic skill's latest version", %{client: client} do
+      assert {:ok, %Version{skill_id: "xlsx", id: "skver_" <> _id}} =
+               Skills.retrieve_version(client, "xlsx", "latest")
+    end
+  end
+
+  defp bash_stdout(client, skill_id, version, command) do
+    {:ok, message} =
+      Messages.create(client, %{
+        model: @model,
+        max_tokens: 1024,
+        container: %{skills: [%{type: "custom", skill_id: skill_id, version: version}]},
+        tools: [%{type: "code_execution_20250825", name: "code_execution"}],
+        messages: [
+          %{
+            role: "user",
+            content: "Run exactly this one bash command and nothing else: " <> command
+          }
+        ]
+      })
+
+    [stdout | _rest] =
+      for %ContentBlock.ServerToolResult{tool: :bash_code_execution, content: content} <-
+            message.content,
+          do: content["stdout"]
+
+    stdout
   end
 end

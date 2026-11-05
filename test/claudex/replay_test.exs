@@ -414,6 +414,28 @@ defmodule Claudex.ReplayTest do
     assert page.last_id == nil
   end
 
+  test "a recorded skill version decodes with its frontmatter" do
+    stub_json("skill_version")
+
+    assert {:ok, %Skill.Version{} = version} =
+             Skills.retrieve_version(client(), "skill_015p2ddpDHn1g8xTGULzrkCe", "latest")
+
+    assert version.id =~ "skver_"
+    assert version.skill_id =~ "skill_"
+    assert version.name == "pineapple-versions"
+    assert version.description != ""
+    assert %DateTime{} = version.created_at
+  end
+
+  test "a recorded versions page keeps the order the API sent, newest first" do
+    stub_json("skill_versions_page")
+
+    assert {:ok, %Page{data: [newest, oldest], next_page: nil}} =
+             Skills.list_versions(client(), "skill_015p2ddpDHn1g8xTGULzrkCe")
+
+    assert DateTime.after?(newest.created_at, oldest.created_at)
+  end
+
   test "a recorded batch decodes with its request counts" do
     stub_json("batch")
 

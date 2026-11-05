@@ -2,6 +2,7 @@ defmodule Claudex.SkillsTest do
   use ExUnit.Case, async: true
 
   alias Claudex.{Client, Error, Page, Skill, Skills}
+  alias Claudex.Skill.Version
   alias Claudex.TestSupport.Fixtures
 
   @moduletag :tmp_dir
@@ -208,6 +209,108 @@ defmodule Claudex.SkillsTest do
       for id <- [nil, ""] do
         assert {:error, %Error{type: :bad_request}} = Skills.retrieve(client(), id)
         assert {:error, %Error{type: :bad_request}} = Skills.delete(client(), id)
+      end
+
+      refute_received {:request, _conn, _body}
+    end
+  end
+
+  describe "versions" do
+    test "create_version/3 uploads the files under the skill and decodes the version" do
+      stub_capture(Fixtures.json!("skill_version"))
+
+      assert {:ok, %Version{} = version} =
+               Skills.create_version(client(), "skill_1", [{"skill", "SKILL.md"}])
+
+      assert_received {:request, conn, body}
+      assert conn.method == "POST"
+      assert conn.request_path == "/v1/skills/skill_1/versions"
+      assert file_parts(body) == [{"SKILL.md", "skill"}]
+
+      assert version.id == "skver_01K7dQdihrHdZxjk6rWWGpGc"
+      assert version.type == "skill_version"
+      assert version.skill_id == "skill_015p2ddpDHn1g8xTGULzrkCe"
+      assert version.name == "pineapple-versions"
+      assert version.description =~ "secret word"
+      assert version.created_at == ~U[2026-11-05 15:34:39.971756Z]
+    end
+
+    test "create_version/3 takes a directory the way create/3 does", %{tmp_dir: tmp_dir} do
+      dir = Path.join(tmp_dir, "expense-report")
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "SKILL.md"), "skill")
+      File.write!(Path.join(dir, ".env"), "SECRET=1")
+
+      stub_capture(Fixtures.json!("skill_version"))
+
+      assert {:ok, %Version{}} = Skills.create_version(client(), "skill_1", dir)
+
+      assert_received {:request, _conn, body}
+      assert file_parts(body) == [{"expense-report/SKILL.md", "skill"}]
+    end
+
+    test "list_versions/3 sends the paging options and decodes the page" do
+      stub_capture(Fixtures.json!("skill_versions_page"))
+
+      assert {:ok, %Page{data: [%Version{}, %Version{}], next_page: nil}} =
+               Skills.list_versions(client(), "skill_1", limit: 2, page: "sqd:1")
+
+      assert_received {:request, conn, _body}
+      assert conn.request_path == "/v1/skills/skill_1/versions"
+      assert conn.query_string == "limit=2&page=sqd%3A1"
+    end
+
+    test "stream_versions!/3 follows next_page until it runs out" do
+      %{"data" => [newest, oldest]} = Fixtures.json!("skill_versions_page")
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+
+        case conn.query_params["page"] do
+          nil -> Req.Test.json(conn, %{"data" => [newest], "next_page" => "sqd:2"})
+          "sqd:2" -> Req.Test.json(conn, %{"data" => [oldest], "next_page" => nil})
+        end
+      end)
+
+      ids = client() |> Skills.stream_versions!("skill_1") |> Enum.map(& &1.id)
+
+      assert ids == [newest["id"], oldest["id"]]
+    end
+
+    test "retrieve_version/3 escapes both the skill and the version into the path" do
+      stub_capture(Fixtures.json!("skill_version"))
+
+      assert {:ok, %Version{}} = Skills.retrieve_version(client(), "skill_1/x", "skver_1/y")
+
+      assert_received {:request, conn, _body}
+      assert conn.method == "GET"
+      assert conn.request_path == "/v1/skills/skill_1%2Fx/versions/skver_1%2Fy"
+    end
+
+    test "delete_version/3 answers :ok" do
+      stub_capture(%{"id" => "skver_1", "type" => "skill_version_deleted"})
+
+      assert :ok = Skills.delete_version(client(), "skill_1", "skver_1")
+
+      assert_received {:request, conn, _body}
+      assert conn.method == "DELETE"
+      assert conn.request_path == "/v1/skills/skill_1/versions/skver_1"
+    end
+
+    test "an empty skill id or version is refused without a request" do
+      for id <- [nil, ""] do
+        assert {:error, %Error{message: "skill id can't be empty"}} =
+                 Skills.create_version(client(), id, [{"skill", "SKILL.md"}])
+
+        assert {:error, %Error{}} = Skills.list_versions(client(), id)
+        assert {:error, %Error{}} = Skills.retrieve_version(client(), id, "latest")
+        assert {:error, %Error{}} = Skills.delete_version(client(), id, "skver_1")
+
+        assert {:error, %Error{message: "version can't be empty"}} =
+                 Skills.retrieve_version(client(), "skill_1", id)
+
+        assert {:error, %Error{message: "version can't be empty"}} =
+                 Skills.delete_version(client(), "skill_1", id)
       end
 
       refute_received {:request, _conn, _body}

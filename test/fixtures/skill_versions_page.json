@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "created_at": "2026-11-05T15:34:39.971756Z",
+      "description": "Reads the secret word from docs/word.txt. Use when asked for the secret word.",
+      "id": "skver_01K7dQdihrHdZxjk6rWWGpGc",
+      "name": "pineapple-versions",
+      "skill_id": "skill_015p2ddpDHn1g8xTGULzrkCe",
+      "type": "skill_version"
+    },
+    {
+      "created_at": "2026-11-05T15:34:38.841808Z",
+      "description": "Reads the secret word from docs/word.txt. Use when asked for the secret word.",
+      "id": "skver_01SfVQnutztggvTN2jdHHVDz",
+      "name": "pineapple-versions",
+      "skill_id": "skill_015p2ddpDHn1g8xTGULzrkCe",
+      "type": "skill_version"
+    }
+  ],
+  "next_page": null
+}
