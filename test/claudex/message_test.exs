@@ -260,6 +260,76 @@ defmodule Claudex.MessageTest do
     end
   end
 
+  describe "file_ids/1" do
+    # Both result shapes are copied from live replies on 2026-11-05:
+    # code_execution_20250522 writing out.txt, and code_execution_20250825
+    # running the xlsx skill.
+    @code_execution_result %{
+      "type" => "code_execution_tool_result",
+      "tool_use_id" => "srvtoolu_1",
+      "content" => %{
+        "type" => "code_execution_result",
+        "abort_reason" => nil,
+        "content" => [%{"type" => "code_execution_output", "file_id" => "file_a"}],
+        "return_code" => 0,
+        "stderr" => "",
+        "stdout" => "File written to /files/output/a57b772a7a1499a5/out.txt"
+      }
+    }
+
+    @bash_result %{
+      "type" => "bash_code_execution_tool_result",
+      "tool_use_id" => "srvtoolu_2",
+      "content" => %{
+        "type" => "bash_code_execution_result",
+        "content" => [%{"type" => "bash_code_execution_output", "file_id" => "file_b"}],
+        "return_code" => 0,
+        "stderr" => "",
+        "stdout" => "✓ Exported budget.xlsx\n"
+      }
+    }
+
+    # From a live reply too. A view result's `content` is the file's text, a
+    # string.
+    @view_result %{
+      "type" => "text_editor_code_execution_tool_result",
+      "tool_use_id" => "srvtoolu_3",
+      "content" => %{
+        "type" => "text_editor_code_execution_view_result",
+        "content" => "hi",
+        "file_type" => "text"
+      }
+    }
+
+    # Synthetic, shaped after the TypeScript SDK's
+    # BashCodeExecutionToolResultError: a failed call has no `content` list.
+    @bash_error %{
+      "type" => "bash_code_execution_tool_result",
+      "tool_use_id" => "srvtoolu_4",
+      "content" => %{
+        "type" => "bash_code_execution_tool_result_error",
+        "error_code" => "unavailable"
+      }
+    }
+
+    test "collects the files both code execution results wrote, in order" do
+      message = Message.decode(%{@response | "content" => [@code_execution_result, @bash_result]})
+
+      assert Message.file_ids(message) == ["file_a", "file_b"]
+    end
+
+    test "skips text editor results and failed calls" do
+      message =
+        Message.decode(%{@response | "content" => [@view_result, @bash_error, @bash_result]})
+
+      assert Message.file_ids(message) == ["file_b"]
+    end
+
+    test "is empty for a reply that wrote nothing" do
+      assert Message.file_ids(Message.decode(@response)) == []
+    end
+  end
+
   describe "append/2" do
     test "adds a message and converts it to plain data" do
       reply = %Message{role: "assistant", content: [%ContentBlock.Text{text: "hi"}]}

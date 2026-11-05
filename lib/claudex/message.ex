@@ -292,6 +292,38 @@ defmodule Claudex.Message do
   end
 
   @doc """
+  Returns the ids of the files code execution returned in a message, in the
+  order the message holds them. A command returns the files it left at the top
+  level of `$OUTPUT_DIR`; a file written anywhere else stays in the container
+  and has no id.
+
+      iex> message = %Claudex.Message{
+      ...>   content: [
+      ...>     %Claudex.ContentBlock.ServerToolResult{
+      ...>       tool: :bash_code_execution,
+      ...>       content: %{
+      ...>         "type" => "bash_code_execution_result",
+      ...>         "content" => [%{"type" => "bash_code_execution_output", "file_id" => "file_1"}]
+      ...>       }
+      ...>     }
+      ...>   ]
+      ...> }
+      iex> Claudex.Message.file_ids(message)
+      ["file_1"]
+
+  `Claudex.Files.download/2` fetches each one. A message holds only its own
+  turn's files: `Claudex.ToolRunner.stream!/3` yields every turn's message,
+  and `Claudex.ToolRunner.run/3` returns only the last.
+  """
+  @spec file_ids(t()) :: [String.t()]
+  def file_ids(%__MODULE__{content: blocks}) do
+    for %ContentBlock.ServerToolResult{tool: tool, content: %{"content" => outputs}}
+        when tool in [:code_execution, :bash_code_execution] <- blocks,
+        %{"file_id" => file_id} <- outputs,
+        do: file_id
+  end
+
+  @doc """
   Returns how a reply ended. Takes a message, or its `stop_reason` string on
   its own.
 

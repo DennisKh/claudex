@@ -165,6 +165,27 @@ defmodule Claudex.ReplayTest do
     end
   end
 
+  test "a recorded skill run keeps its skills and the file it wrote, however it is chunked" do
+    for chunk_size <- [1, 7, 4096] do
+      stub_sse("skill_stream", chunk_size)
+
+      events = client() |> Messages.stream!(@params) |> Enum.to_list()
+
+      assert {:ok, message} = Stream.final_message(events)
+      assert message.stop_reason == "end_turn"
+      assert Message.tool_uses(message) == []
+
+      assert %{"id" => "container_" <> _id, "skills" => [skill]} = message.container
+      assert %{"type" => "anthropic", "skill_id" => "xlsx", "version" => "20261027"} = skill
+
+      assert ["file_" <> _id] = Message.file_ids(message)
+
+      for %ContentBlock.ServerToolResult{} = result <- message.content do
+        assert ContentBlock.to_param(result) == result.raw
+      end
+    end
+  end
+
   test "a recorded stream's raw holds what message_start and message_delta both sent" do
     stub_sse("message_stream", 4096)
 
