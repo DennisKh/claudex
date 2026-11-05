@@ -11,6 +11,8 @@ defmodule Claudex.ReplayTest do
     Model,
     Models,
     Page,
+    Skill,
+    Skills,
     Stream
   }
 
@@ -385,6 +387,29 @@ defmodule Claudex.ReplayTest do
 
     assert {:ok, %Page{data: [%FileMetadata{} | _rest]} = page} = Files.list(client())
 
+    assert page.first_id == nil
+    assert page.last_id == nil
+  end
+
+  test "a recorded skill decodes with its source as a string" do
+    stub_json("skill")
+
+    assert {:ok, %Skill{} = skill} = Skills.retrieve(client(), "skill_01N2DPTyA5rX6fXvakHms93e")
+
+    assert skill.id =~ "skill_"
+    assert skill.type == "skill"
+    assert skill.source == "custom"
+    assert skill.latest_version_id =~ "skver_"
+    assert %DateTime{} = skill.created_at
+    assert %DateTime{} = skill.updated_at
+  end
+
+  test "a recorded skills page uses a cursor rather than ids" do
+    stub_json("skills_page")
+
+    assert {:ok, %Page{data: [%Skill{source: "custom"}]} = page} = Skills.list(client())
+
+    assert page.has_more == nil
     assert page.first_id == nil
     assert page.last_id == nil
   end
