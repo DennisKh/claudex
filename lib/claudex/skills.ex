@@ -76,7 +76,8 @@ defmodule Claudex.Skills do
   A directory is uploaded with every file in it, at any depth, except the
   ones whose name or folder starts with a dot, such as `.git`, and the
   symlinks in it, which are skipped whatever they point at. The upload needs a
-  `SKILL.md` at its root and has to stay under 30 MB.
+  `SKILL.md` at its root and has to stay under 30 MB, which a zip counts
+  uncompressed.
 
   ## Options
 
