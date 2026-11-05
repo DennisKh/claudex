@@ -96,7 +96,8 @@ defmodule Claudex.MixProject do
         ],
         Skills: [
           Claudex.Skills,
-          Claudex.Skill
+          Claudex.Skill,
+          Claudex.Skill.Version
         ],
         "Message batches": [
           Claudex.Messages.Batches,

@@ -454,10 +454,24 @@ expenses.xlsx in `$OUTPUT_DIR`, with one sheet per category.
 ```elixir
 {:ok, skill} = Claudex.Skills.create(client, "priv/skills/expense-report")
 
-container: %{skills: [%{type: "custom", skill_id: skill.id, version: "latest"}]}
+params = %{
+  container: %{skills: [%{type: "custom", skill_id: skill.id, version: "latest"}]},
+  ...
+}
 ```
 
 A skill is visible to the whole workspace, and `Claudex.Skills` also lists, looks up and deletes them.
+
+Uploading the folder again with `Claudex.Skills.create_version/3` makes a new version, which `version: "latest"` then runs. A request can pin an older one by its id, and `Claudex.Skills.delete_version/3` removes one, though never a skill's only version:
+
+```elixir
+{:ok, version} = Claudex.Skills.create_version(client, skill.id, "priv/skills/expense-report")
+
+params = %{
+  container: %{skills: [%{type: "custom", skill_id: skill.id, version: version.id}]},
+  ...
+}
+```
 
 `Claudex.ToolRunner` runs every turn in the same container with the same skills. A container named by its id alone runs without its skills, so a later request that goes on in it passes `container: %{id: id, skills: skills}`.
 
