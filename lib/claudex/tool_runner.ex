@@ -64,7 +64,8 @@ defmodule Claudex.ToolRunner do
   Each request after the first runs in the container the last reply named, so
   code execution keeps its files between turns and a tool called from code
   gets its answer in the run that called it. A `:container` in `params` that
-  has no id gets that one.
+  has no id gets that one, and keeps the rest of the map, such as its
+  `skills`.
 
   `stream!/3` hands you one turn at a time instead, so you can watch the
   conversation, log it, or stop it:
@@ -169,7 +170,7 @@ defmodule Claudex.ToolRunner do
           end
         )
 
-      # store turn.messages, turn.tool_results and turn.message.container["id"];
+      # store turn.messages, turn.tool_results and the container, as below;
       # later, once a human has approved:
       params = Map.merge(params, %{messages: messages, container: container})
 
@@ -190,7 +191,9 @@ defmodule Claudex.ToolRunner do
   The container the halted reply ran in is not part of the history, so a run
   that used code execution goes on in it only when `:container` names it again.
   Without it, the resumed run starts in a new container, without the files it
-  wrote or the code that was waiting on the halted call.
+  wrote or the code that was waiting on the halted call. A container named by
+  its id alone runs without its skills, so a run that loaded some names them
+  too: `container: %{id: id, skills: skills}`.
 
   Without `:tool_results`, a history is only ever sent to the API, and a
   history ending in calls nobody answered is refused there. A `:refusal`,

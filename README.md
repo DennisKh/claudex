@@ -410,6 +410,33 @@ end
 
 `use Claudex.Schema` builds the schema while the struct compiles. Without it, a struct compiled in the same build as the tool raises `Claudex.Tool.SchemaError` at compile time, naming the struct. An Ecto schema doesn't need the line for its fields; `use Claudex.Schema, required: [...]` names the ones Claude must fill, since otherwise every field of one is optional. The function still receives the decoded JSON map, with string keys. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. `Claudex.Schema` says when a struct needs the line, and `Claudex.OutputFormat` lists what each type becomes.
 
+### Agent Skills
+
+A [skill](https://platform.claude.com/docs/en/build-with-claude/skills-guide) is a folder of instructions and scripts Claude loads into its code execution container when a task calls for it. Anthropic publishes `xlsx`, `pptx`, `docx` and `pdf`. A request names up to 20 in `container.skills`, next to a code execution tool:
+
+```elixir
+params = %{
+  model: "claude-opus-5",
+  max_tokens: 4096,
+  container: %{skills: [%{type: "anthropic", skill_id: "xlsx", version: "latest"}]},
+  tools: [%{type: "code_execution_20250825", name: "code_execution"}],
+  messages: [Claudex.Message.user("Make budget.xlsx from this month's spending.")]
+}
+```
+
+Each reply's `container` names the version each skill resolved to. A file the skill writes can come back in any turn of the run, and `Claudex.Message.file_ids/1` returns the ones in a reply, for `Claudex.Files.download/2` to fetch:
+
+```elixir
+file_ids =
+  client
+  |> Claudex.ToolRunner.stream!(params)
+  |> Enum.flat_map(&Claudex.Message.file_ids(&1.message))
+
+Enum.map(file_ids, &Claudex.Files.download(client, &1))
+```
+
+`Claudex.ToolRunner` runs every turn in the same container with the same skills. A container named by its id alone runs without its skills, so a later request that goes on in it passes `container: %{id: id, skills: skills}`.
+
 ### Tools on an MCP server
 
 The API can connect to a remote MCP server itself and run its tools. That needs the `mcp-client-2025-11-20` beta, a server in `mcp_servers`, and an `mcp_toolset` in `tools` naming it:
@@ -818,7 +845,7 @@ Claudex.Messages.create(client, %{
 
 Images and PDFs don't *need* this — inline base64 and URL sources work today, because `create/2` passes content blocks through verbatim. Files saves upload time and request size (500 MB per file vs. the 32 MB request limit), not tokens: the content still enters the context window and is still billed.
 
-`download/2` is the other direction, and the part with no inline equivalent — it retrieves files Claude *created* through skills or the code execution tool. Files you uploaded have `downloadable: false` and downloading one returns a 400.
+`download/2` is the other direction, and the part with no inline equivalent — it retrieves files Claude *created* through skills or the code execution tool, whose ids `Claudex.Message.file_ids/1` finds in a reply. Files you uploaded have `downloadable: false` and downloading one returns a 400.
 
 `list/2` pages by cursor rather than by id: pass `page: page.next_page` until it comes back nil, or use `Claudex.Files.stream!/2`, which threads whichever cursor the endpoint uses. Each entry is a `Claudex.FileMetadata`; see `Claudex.Files` for the rest.
 
