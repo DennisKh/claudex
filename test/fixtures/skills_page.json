@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "created_at": "2026-11-05T13:13:20.112076Z",
+      "display_name": "Pineapple pairs",
+      "id": "skill_01LoPbGthHy3kXyrUByxZQPa",
+      "latest_version_id": "skver_01DgBrb34WPTwdcfmyq3xzyx",
+      "source": {
+        "type": "custom"
+      },
+      "type": "skill",
+      "updated_at": "2026-11-05T13:13:20.112076Z"
+    }
+  ],
+  "next_page": null
+}

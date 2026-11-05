@@ -412,7 +412,7 @@ end
 
 ### Agent Skills
 
-A [skill](https://platform.claude.com/docs/en/build-with-claude/skills-guide) is a folder of instructions and scripts Claude loads into its code execution container when a task calls for it. Anthropic publishes `xlsx`, `pptx`, `docx` and `pdf`. A request names up to 20 in `container.skills`, next to a code execution tool:
+A [skill](https://platform.claude.com/docs/en/build-with-claude/skills-guide) is a folder of instructions and scripts Claude loads into its code execution container when a task calls for it. Anthropic publishes `xlsx`, `pptx`, `docx` and `pdf`, and you can write your own. A request names up to 20 in `container.skills`, next to a code execution tool:
 
 ```elixir
 params = %{
@@ -434,6 +434,30 @@ file_ids =
 
 Enum.map(file_ids, &Claudex.Files.download(client, &1))
 ```
+
+A custom skill is a folder with a `SKILL.md` at its root. The frontmatter names the skill and tells Claude when to use it, the body holds the instructions, and any other files in the folder, such as scripts or templates, are there for Claude to read or run:
+
+```markdown
+---
+name: expense-report
+description: Turns a list of expenses into the team's monthly expense report. Use when asked for an expense report.
+---
+
+# Expense report
+
+Group the expenses by category, total each one, and save the report as
+expenses.xlsx in `$OUTPUT_DIR`, with one sheet per category.
+```
+
+`name` is up to 64 lowercase letters, digits and hyphens, and can't contain "anthropic" or "claude". `description` is up to 1,024 characters. `Claudex.Skills.create/3` uploads the folder, and the skill's id goes in as `type: "custom"`:
+
+```elixir
+{:ok, skill} = Claudex.Skills.create(client, "priv/skills/expense-report")
+
+container: %{skills: [%{type: "custom", skill_id: skill.id, version: "latest"}]}
+```
+
+A skill is visible to the whole workspace, and `Claudex.Skills` also lists, looks up and deletes them.
 
 `Claudex.ToolRunner` runs every turn in the same container with the same skills. A container named by its id alone runs without its skills, so a later request that goes on in it passes `container: %{id: id, skills: skills}`.
 

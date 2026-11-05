@@ -94,6 +94,10 @@ defmodule Claudex.MixProject do
           Claudex.Files,
           Claudex.FileMetadata
         ],
+        Skills: [
+          Claudex.Skills,
+          Claudex.Skill
+        ],
         "Message batches": [
           Claudex.Messages.Batches,
           Claudex.Messages.Batch,

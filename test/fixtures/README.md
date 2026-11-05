@@ -11,7 +11,7 @@ Thirteen of them were added in one commit, `88bf1b5` (2026-09-08,
 "test: replay recorded API payloads in the offline suite (#19)"); git history
 carries no earlier or later capture for any of those. The two MCP connector
 fixtures were recorded on 2026-09-17, `programmatic_tool_call_stream.sse`
-on 2026-10-09, `toolset_tool_use.json`, `compaction_stream.sse` and `tool_use_stream.sse` on 2026-10-10, and `skill_stream.sse` on 2026-11-05. A few fixtures embed
+on 2026-10-09, `toolset_tool_use.json`, `compaction_stream.sse` and `tool_use_stream.sse` on 2026-10-10, and `skill_stream.sse`, `skill.json` and `skills_page.json` on 2026-11-05. A few fixtures embed
 their own `created_at`, which is the request's real timestamp rather than a
 guess; the rest carry no timestamp of their own, so the commit date is the
 only dated record of when they entered the repo. Every one of those names `claude-haiku-4-5-20251001` as `model` (or, for the
@@ -42,6 +42,8 @@ resolving to `claude-haiku-4-5` at the time of capture. `server_tools.json` is
 | `compaction_stream.sse` | `POST /v1/messages` (`stream: true`), with `compact_20260112` and `pause_after_compaction` | `live/streaming_live_test.exs` — "a streamed compaction keeps its summary, and the next request is compacted" | 2026-10-10, recorded for the summary a `compaction_delta` carries |
 | `tool_use_stream.sse` | `POST /v1/messages` (`stream: true`), with `tools` and a forced `tool_choice` | `live/tools_live_test.exs` — "a reply cut off inside a tool call goes back without the call and is accepted" | 2026-10-10, recorded for a call cut off part-way |
 | `skill_stream.sse` | `POST /v1/messages` (`stream: true`), with the `xlsx` skill in `container.skills` and `code_execution_20250825` | `live/skills_live_test.exs` — "a skill's spreadsheet comes back as a file id that downloads" | 2026-11-05, recorded for the container's skills and the file id a result carries |
+| `skill.json` | `POST /v1/skills`, a directory with nested and binary files | `live/skills_api_live_test.exs` — "creates a skill from a directory, which a request then runs" | `created_at` in the fixture: `2026-11-05T13:13:24.423254Z` |
+| `skills_page.json` | `GET /v1/skills?source=custom` | `live/skills_api_live_test.exs` — "creates a skill from content with a display name, lists it, and deletes it" | `created_at` in the fixture: `2026-11-05T13:13:20.112076Z` |
 
 "Commit date only" means the fixture carries no timestamp of its own; the
 earliest and only record of when it was captured is `88bf1b5`'s commit date,
