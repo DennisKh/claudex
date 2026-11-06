@@ -151,7 +151,7 @@ defmodule Claudex.Messages.Batches do
   @spec cancel(Client.t(), String.t()) :: {:ok, Batch.t()} | {:error, Error.t()}
   def cancel(%Client{} = client, batch_id) do
     with :ok <- validate_id(batch_id),
-         {:ok, response} <- API.post(client, path(batch_id) <> "/cancel", %{}) do
+         {:ok, response} <- API.post(client, cancel_path(batch_id), %{}) do
       {:ok, Batch.decode(response)}
     end
   end
@@ -202,7 +202,15 @@ defmodule Claudex.Messages.Batches do
 
   defp stream_results(client, %Batch{results_url: results_url}) do
     stream =
-      ChunkStream.stream(client, [method: :get, url: results_url], {JSONL, &result/1})
+      ChunkStream.stream(
+        client,
+        [
+          method: :get,
+          url: results_url,
+          route: "/v1/messages/batches/{message_batch_id}/results"
+        ],
+        {JSONL, &result/1}
+      )
 
     {:ok, stream}
   end
@@ -220,9 +228,10 @@ defmodule Claudex.Messages.Batches do
 
   defp normalize_request(request), do: request
 
-  defp path(batch_id) do
-    "/v1/messages/batches/" <> URI.encode(batch_id, &URI.char_unreserved?/1)
-  end
+  defp path(batch_id), do: {"/v1/messages/batches/{message_batch_id}", message_batch_id: batch_id}
+
+  defp cancel_path(batch_id),
+    do: {"/v1/messages/batches/{message_batch_id}/cancel", message_batch_id: batch_id}
 
   defp validate_id(batch_id) when batch_id in [nil, ""] do
     {:error, %Error{type: :bad_request, message: "batch id can't be empty"}}

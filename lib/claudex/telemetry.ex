@@ -29,12 +29,14 @@ defmodule Claudex.Telemetry do
 
   ### `[:claudex, :request, :start | :stop | :exception]`
 
-  A span around one HTTP request. Metadata has `:method` and `:path`
-  throughout, `:model` when the request names one, and on `:stop` also
-  `:status`, `:request_id`, and, when the response carries usage,
+  A span around one HTTP request. Metadata has `:method`, `:path` and
+  `:route` throughout, `:model` when the request names one, and on `:stop`
+  also `:status`, `:request_id`, and, when the response carries usage,
   `:input_tokens`, `:output_tokens`, and the cache counters
   `:cache_creation_input_tokens` and `:cache_read_input_tokens` when the
-  response reports them. `:request_id` is the id Anthropic support asks for.
+  response reports them. `:route` is the path with its ids as placeholders,
+  such as `/v1/files/{file_id}`. `:request_id` is the id Anthropic support
+  asks for.
 
   A request that got a response reports `:stop` with its `:status`, and a
   4xx or 5xx one also carries `:error_type`, the `Claudex.Error` type such as

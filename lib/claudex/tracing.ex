@@ -74,7 +74,9 @@ defmodule Claudex.Tracing do
   request and tool calls belong together.
 
   A single `Claudex.Messages.create/2` or `stream!/2` is one `chat` span with
-  no conversation around it.
+  no conversation around it. Every other request is an HTTP span named for its
+  method and route, such as `GET /v1/skills/{skill_id}`, with the concrete
+  path in `url.path`.
 
   ## Naming a conversation
 

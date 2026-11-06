@@ -86,9 +86,7 @@ defmodule Claudex.Models do
   end
 
   def retrieve(%Client{} = client, model_id) do
-    path = "/v1/models/" <> URI.encode(model_id, &URI.char_unreserved?/1)
-
-    with {:ok, body} <- API.get(client, path) do
+    with {:ok, body} <- API.get(client, {"/v1/models/{model_id}", model_id: model_id}) do
       {:ok, Model.decode(body)}
     end
   end

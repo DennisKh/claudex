@@ -4,6 +4,9 @@ defmodule Claudex.API do
   alias Claudex.{Client, Error, Tracing, Usage}
   alias Claudex.Tracing.Attributes
 
+  @typedoc "A path, or a route template with the values for its placeholders."
+  @type url :: String.t() | {String.t(), keyword(String.t())}
+
   @doc """
   Runs one request against the client and reduces the result to a tagged tuple:
   the decoded body on a 2xx, a `Claudex.Error` on anything else, including a
@@ -33,10 +36,13 @@ defmodule Claudex.API do
   @spec request(Client.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   @spec request(Client.t(), keyword(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def request(%Client{} = client, request_options, opts \\ []) do
+    {route, request_options} = route(request_options)
+
     metadata =
       %{
         method: Keyword.fetch!(request_options, :method),
-        path: Keyword.get(request_options, :url)
+        path: Keyword.get(request_options, :url),
+        route: route
       }
       |> put_model(request_options)
 
@@ -84,24 +90,51 @@ defmodule Claudex.API do
   end
 
   @doc "GETs `url`, with `params` as the query string."
-  @spec get(Client.t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
-  @spec get(Client.t(), String.t(), keyword()) :: {:ok, term()} | {:error, Error.t()}
+  @spec get(Client.t(), url()) :: {:ok, term()} | {:error, Error.t()}
+  @spec get(Client.t(), url(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def get(%Client{} = client, url, params \\ []) do
     request(client, method: :get, url: url, params: params)
   end
 
   @doc "POSTs `body` to `url` as JSON. `opts` are `request/3`'s."
-  @spec post(Client.t(), String.t(), map()) :: {:ok, term()} | {:error, Error.t()}
-  @spec post(Client.t(), String.t(), map(), keyword()) ::
+  @spec post(Client.t(), url(), map()) :: {:ok, term()} | {:error, Error.t()}
+  @spec post(Client.t(), url(), map(), keyword()) ::
           {:ok, term()} | {:error, Error.t()}
   def post(%Client{} = client, url, body, opts \\ []) do
     request(client, [method: :post, url: url, json: body], opts)
   end
 
   @doc "DELETEs `url`."
-  @spec delete(Client.t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
+  @spec delete(Client.t(), url()) :: {:ok, term()} | {:error, Error.t()}
   def delete(%Client{} = client, url) do
     request(client, method: :delete, url: url)
+  end
+
+  @doc """
+  Splits a request's route from its URL, returning the route and the options
+  Req takes.
+
+  `:url` is a path, or a `{template, bindings}` pair, such as
+  `{"/v1/files/{file_id}", file_id: id}`, whose placeholders are filled with
+  the URI-encoded bindings. `:route` names the template of an absolute URL the
+  API handed back. A plain path is its own route.
+
+  Raises `ArgumentError` for a placeholder no binding fills.
+  """
+  @spec route(keyword()) :: {String.t() | nil, keyword()}
+  def route(request_options) do
+    {route, request_options} = Keyword.pop(request_options, :route)
+
+    case Keyword.fetch(request_options, :url) do
+      {:ok, {template, bindings}} ->
+        {template, Keyword.put(request_options, :url, expand(template, bindings))}
+
+      {:ok, url} ->
+        {route || url, request_options}
+
+      :error ->
+        {route, request_options}
+    end
   end
 
   @doc false
@@ -197,4 +230,15 @@ defmodule Claudex.API do
   end
 
   defp handle({:error, exception}), do: {:error, Error.from_transport(exception)}
+
+  defp expand(template, bindings) do
+    path =
+      Enum.reduce(bindings, template, fn {name, value}, path ->
+        String.replace(path, "{#{name}}", URI.encode(value, &URI.char_unreserved?/1))
+      end)
+
+    if String.contains?(path, "{"),
+      do: raise(ArgumentError, "no binding fills a placeholder in #{template}"),
+      else: path
+  end
 end

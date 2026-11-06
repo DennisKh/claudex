@@ -271,13 +271,12 @@ defmodule Claudex.Skills do
     end
   end
 
-  defp path(skill_id), do: "/v1/skills/" <> encode(skill_id)
+  defp path(skill_id), do: {"/v1/skills/{skill_id}", skill_id: skill_id}
 
-  defp versions_path(skill_id), do: path(skill_id) <> "/versions"
+  defp versions_path(skill_id), do: {"/v1/skills/{skill_id}/versions", skill_id: skill_id}
 
-  defp version_path(skill_id, version), do: versions_path(skill_id) <> "/" <> encode(version)
-
-  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
+  defp version_path(skill_id, version),
+    do: {"/v1/skills/{skill_id}/versions/{version}", skill_id: skill_id, version: version}
 
   defp skill_files(files) when is_list(files), do: files
 
