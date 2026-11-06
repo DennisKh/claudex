@@ -6,7 +6,10 @@ defmodule Claudex.Skill.Version do
   `description` comes from the version's `SKILL.md` frontmatter, and `name`
   from its frontmatter `name`, or the folder holding it when that has none.
   The `name` is fixed when the skill is created, and every later version has
-  to keep it. A request pins a version of a custom skill by its `id`.
+  to keep it. A request pins a version of a custom skill by its `id`. An
+  Anthropic skill's version is pinned by its date instead, such as
+  `"20261105"`, and a request refuses its `id`. A reply's `container` reports
+  that date once code has run in it.
   """
 
   alias Claudex.Timestamp

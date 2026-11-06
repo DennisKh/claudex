@@ -31,6 +31,19 @@ defmodule Claudex.Skills do
       {:ok, version} = Claudex.Skills.create_version(client, skill.id, "priv/skills/expense-report")
 
       Claudex.Skills.delete_version(client, skill.id, version.id)
+
+  ## The `skills-2025-10-02` beta
+
+  The Skills API is GA and takes no beta. A client that still sends
+  `skills-2025-10-02`, as the skills guide said to before GA, gets the older
+  response shape these functions don't read:
+
+    * `Claudex.Skill`'s `display_name`, `latest_version_id` and `source` come
+      back nil, with no error.
+    * A version is addressed by an epoch timestamp, such as
+      `"1793966559318546"`, and its `skver_` id is refused.
+
+  These functions need a client that doesn't send that beta.
   """
 
   alias Claudex.{API, Client, Error, Page, Skill}
@@ -230,7 +243,7 @@ defmodule Claudex.Skills do
   Looks up one version of a skill, by its id or as `"latest"`.
 
   An Anthropic skill's version can also be named by its date, such as
-  `"20261027"`, the form a reply's `container` reports it in.
+  `"20261105"`, the form `Claudex.Skill.Version` says a request pins it by.
   """
   @spec retrieve_version(Client.t(), String.t(), String.t()) ::
           {:ok, Version.t()} | {:error, Error.t()}

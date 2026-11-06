@@ -460,9 +460,9 @@ params = %{
 }
 ```
 
-A skill is visible to the whole workspace, and `Claudex.Skills` also lists, looks up and deletes them.
+A skill is visible to the whole workspace, and `Claudex.Skills` also lists, looks up and deletes them. The Skills API is GA: a client that still sends the pre-GA `skills-2025-10-02` beta gets an older response shape that `Claudex.Skills` doesn't read, as its docs describe.
 
-Uploading the folder again with `Claudex.Skills.create_version/3` makes a new version, which `version: "latest"` then runs. A request can pin an older one by its id, and `Claudex.Skills.delete_version/3` removes one, though never a skill's only version:
+Uploading the folder again with `Claudex.Skills.create_version/3` makes a new version, which `version: "latest"` then runs. A request can pin an older one by its id, and `Claudex.Skills.delete_version/3` removes one, though never a skill's only version. An Anthropic skill is pinned by its date instead, such as `version: "20261105"`, which a reply's `container` reports once code has run in it, and a request refuses its version id:
 
 ```elixir
 {:ok, version} = Claudex.Skills.create_version(client, skill.id, "priv/skills/expense-report")
