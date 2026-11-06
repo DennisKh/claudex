@@ -473,7 +473,7 @@ params = %{
 }
 ```
 
-`Claudex.ToolRunner` runs every turn in the same container with the same skills. A container named by its id alone runs without its skills, so a later request that goes on in it passes `container: %{id: id, skills: skills}`.
+`Claudex.ToolRunner` runs every turn in the same container, on the skill versions the first reply that listed them resolved `version: "latest"` to. A later run that goes on in that container passes the last turn's `container` back as `:container`, which carries both: a container named by its id alone runs without its skills.
 
 ### Tools on an MCP server
 

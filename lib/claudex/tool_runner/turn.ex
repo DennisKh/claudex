@@ -18,6 +18,12 @@ defmodule Claudex.ToolRunner.Turn do
   exception: it is in `message` only, so the history never ends in calls that
   must not run.
 
+  `container` is the code execution container the next request runs in, as
+  the runner would send it, or nil when the run has none. A reply that only
+  calls your tools names no container, so a halted turn's `message.container`
+  is often nil while `container` still holds the one its run is in. Passing it
+  back as `:container` resumes the run there, on the same skill versions.
+
   `stop` is nil while the conversation is still going, and says why it ended on
   the final turn:
 
@@ -50,7 +56,7 @@ defmodule Claudex.ToolRunner.Turn do
   alias Claudex.ContentBlock.ToolUse
   alias Claudex.Message
 
-  defstruct [:message, :index, :stop, tool_uses: [], tool_results: [], messages: []]
+  defstruct [:message, :index, :stop, :container, tool_uses: [], tool_results: [], messages: []]
 
   @typedoc "Why a conversation ended. Any other atom is one a `:before_call` halt named."
   @type stop ::
@@ -62,7 +68,8 @@ defmodule Claudex.ToolRunner.Turn do
           stop: stop() | nil,
           tool_uses: [ToolUse.t()],
           tool_results: [map()],
-          messages: [map()]
+          messages: [map()],
+          container: String.t() | map() | nil
         }
 
   @doc "Whether Claude asked to run anything this turn."

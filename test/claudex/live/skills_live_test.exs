@@ -6,7 +6,7 @@ defmodule Claudex.Live.SkillsTest do
 
   use Claudex.TestSupport.LiveCase, async: false
 
-  alias Claudex.{Files, Message, ToolRunner}
+  alias Claudex.{ContentBlock, Files, Message, Skills, ToolRunner}
   alias Claudex.ToolRunner.Turn
 
   @moduletag timeout: 300_000
@@ -22,6 +22,40 @@ defmodule Claudex.Live.SkillsTest do
     @tool true
     @spec checkpoint() :: String.t()
     def checkpoint, do: "Done. Go on to the spreadsheet."
+  end
+
+  defmodule Publisher do
+    @moduledoc false
+    use Claudex.Tool
+
+    # Tools run outside the test process, so the client and skill come from a
+    # persistent term the test sets.
+    @doc "Publishes the next version of the word-pin skill."
+    @tool true
+    @spec publish() :: String.t()
+    def publish do
+      {client, skill_id} = :persistent_term.get(__MODULE__)
+
+      {:ok, _version} =
+        Skills.create_version(client, skill_id, [
+          {skill_md(), "SKILL.md"},
+          {"b\n", "word-beta.txt"}
+        ])
+
+      "Published."
+    end
+
+    @doc false
+    def skill_md do
+      """
+      ---
+      name: word-pin
+      description: Lists its own folder. Use when asked to list the word-pin skill.
+      ---
+
+      probe
+      """
+    end
   end
 
   test "a skill's spreadsheet comes back as a file id that downloads", %{client: client} do
@@ -80,6 +114,100 @@ defmodule Claudex.Live.SkillsTest do
       tools: tools,
       messages: [Message.user(prompt)]
     }
+  end
+
+  test "a version published mid-run doesn't reach the run's later turns", %{client: client} do
+    {:ok, skill} =
+      Skills.create(client, [{Publisher.skill_md(), "SKILL.md"}, {"a\n", "word-alpha.txt"}])
+
+    on_exit(fn -> Skills.delete(client, skill.id) end)
+    :persistent_term.put(Publisher, {client, skill.id})
+    on_exit(fn -> :persistent_term.erase(Publisher) end)
+
+    prompt =
+      "Do these steps in order. 1. With code execution, run `ls /skills/word-pin`. " <>
+        "2. Only after that, call the publish tool. 3. After it answers, run " <>
+        "`ls /skills/word-pin` again with code execution."
+
+    params = %{
+      model: @model,
+      max_tokens: 1024,
+      container: %{skills: [%{type: "custom", skill_id: skill.id, version: "latest"}]},
+      tools: [Publisher, @code_execution],
+      messages: [Message.user(prompt)]
+    }
+
+    turns = client |> ToolRunner.stream!(params) |> Enum.to_list()
+
+    assert %Turn{stop: :completed} = List.last(turns)
+    assert {:ok, %{latest_version_id: latest}} = Skills.retrieve(client, skill.id)
+    refute latest == skill.latest_version_id
+
+    published_in =
+      Enum.find_index(turns, fn turn -> Enum.any?(turn.tool_uses, &(&1.name == "publish")) end)
+
+    # Only the listings from the replies after the publish ran can show v2.
+    listings =
+      for %Turn{message: message} <- Enum.drop(turns, published_in + 1),
+          %ContentBlock.ServerToolResult{tool: :bash_code_execution, content: content} <-
+            message.content,
+          do: content["stdout"]
+
+    assert [_listing | _rest] = listings
+    assert Enum.all?(listings, &(&1 =~ "word-alpha.txt"))
+    refute Enum.any?(listings, &(&1 =~ "word-beta.txt"))
+  end
+
+  test "a halted run resumes from turn.container in its container, on its versions", %{
+    client: client
+  } do
+    {:ok, skill} =
+      Skills.create(client, [{Publisher.skill_md(), "SKILL.md"}, {"a\n", "word-alpha.txt"}])
+
+    on_exit(fn -> Skills.delete(client, skill.id) end)
+
+    prompt =
+      "Do these steps in order. 1. With code execution, run `ls /skills/word-pin`. " <>
+        "2. Only after that, call the checkpoint tool. 3. After it answers, run " <>
+        "`ls /skills/word-pin` again with code execution."
+
+    params = %{
+      model: @model,
+      max_tokens: 1024,
+      container: %{skills: [%{type: "custom", skill_id: skill.id, version: "latest"}]},
+      tools: [Checkpoint, @code_execution],
+      messages: [Message.user(prompt)]
+    }
+
+    {:ok, halted} =
+      ToolRunner.run(client, params, before_call: fn _call -> {:halt, :awaiting_approval} end)
+
+    assert %Turn{stop: :awaiting_approval, container: %{"id" => container_id}} = halted
+
+    {:ok, _version} =
+      Skills.create_version(client, skill.id, [
+        {Publisher.skill_md(), "SKILL.md"},
+        {"b\n", "word-beta.txt"}
+      ])
+
+    resumed =
+      client
+      |> ToolRunner.stream!(%{params | messages: halted.messages, container: halted.container},
+        tool_results: halted.tool_results
+      )
+      |> Enum.to_list()
+
+    assert %Turn{stop: :completed} = List.last(resumed)
+    assert Enum.all?(resumed, &(&1.container["id"] == container_id))
+
+    listings =
+      for %Turn{message: message} <- resumed,
+          %ContentBlock.ServerToolResult{tool: :bash_code_execution, content: content} <-
+            message.content,
+          do: content["stdout"]
+
+    assert [_listing | _rest] = listings
+    assert Enum.all?(listings, &(&1 =~ "word-alpha.txt"))
   end
 
   defp file_ids(turns), do: Enum.flat_map(turns, &Message.file_ids(&1.message))

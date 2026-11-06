@@ -1468,6 +1468,101 @@ defmodule Claudex.ToolRunnerTest do
     assert_received {:sent, %{"container" => %{"id" => "container_1", "skills" => [_skill]}}}
   end
 
+  test "every later turn runs the skill versions the first reply resolved" do
+    resolved = %{"type" => "anthropic", "skill_id" => "xlsx", "version" => "20261105"}
+
+    container = %{
+      "id" => "container_1",
+      "expires_at" => "2026-11-06T13:40:47.667841Z",
+      "skills" => [resolved]
+    }
+
+    respond_with([
+      Map.put(
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        "container",
+        container
+      ),
+      Map.put(
+        message([tool_use("add", %{"a" => 3, "b" => 4})], "tool_use"),
+        "container",
+        container
+      ),
+      message([text("10")], "end_turn")
+    ])
+
+    skills = [%{type: "anthropic", skill_id: "xlsx", version: "latest"}]
+    params = Map.put(@params, :container, %{skills: skills})
+
+    assert {:ok, %Turn{stop: :completed}} = ToolRunner.run(client(), params)
+
+    assert_received {:sent, %{"container" => %{"skills" => [%{"version" => "latest"}]}}}
+
+    # `latest` resolves again on every request, so sending it again would mount
+    # a version published mid-run in the same container.
+    pinned = %{"id" => "container_1", "skills" => [resolved]}
+    assert_received {:sent, %{"container" => ^pinned}}
+    assert_received {:sent, %{"container" => ^pinned}}
+  end
+
+  test "a container given with an id is pinned to the reply's skill versions too" do
+    resolved = %{"type" => "custom", "skill_id" => "skill_1", "version" => "skver_1"}
+
+    respond_with([
+      Map.put(message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"), "container", %{
+        "id" => "container_1",
+        "skills" => [resolved]
+      }),
+      message([text("3")], "end_turn")
+    ])
+
+    skills = [%{type: "custom", skill_id: "skill_1", version: "latest"}]
+    params = Map.put(@params, :container, %{id: "container_1", skills: skills})
+
+    assert {:ok, _turn} = ToolRunner.run(client(), params)
+
+    assert_received {:sent, _first}
+    assert_received {:sent, %{"container" => %{"id" => "container_1", "skills" => [^resolved]}}}
+  end
+
+  test "a halted turn carries the container its run is in, which resumes it there" do
+    resolved = %{"type" => "anthropic", "skill_id" => "xlsx", "version" => "20261105"}
+    pinned = %{"id" => "container_1", "skills" => [resolved]}
+
+    # The halted reply only calls a client tool, and such a reply names no
+    # container, although the run is still in one.
+    respond_with([
+      Map.put(
+        message([tool_use("add", %{"a" => 1, "b" => 2})], "tool_use"),
+        "container",
+        Map.put(pinned, "expires_at", "2026-11-06T13:40:47.667841Z")
+      ),
+      message([tool_use("add", %{"a" => 3, "b" => 4}, "toolu_2")], "tool_use")
+    ])
+
+    skills = [%{type: "anthropic", skill_id: "xlsx", version: "latest"}]
+    params = Map.put(@params, :container, %{skills: skills})
+
+    assert {:ok, %Turn{stop: :awaiting_approval} = halted} =
+             ToolRunner.run(client(), params, before_call: halt_after(1))
+
+    assert halted.message.container == nil
+    assert halted.container == pinned
+
+    respond_with([message([text("10")], "end_turn")])
+
+    assert {:ok, %Turn{stop: :completed}} =
+             ToolRunner.run(
+               client(),
+               %{params | messages: halted.messages, container: halted.container},
+               tool_results: halted.tool_results
+             )
+
+    assert_received {:sent, _first}
+    assert_received {:sent, _second}
+    assert_received {:sent, %{"container" => ^pinned}}
+  end
+
   test "a toolset call goes back with its toolset_name, and so does its result" do
     respond_with([Fixtures.json!("toolset_tool_use"), message([text("Done.")], "end_turn")])
 

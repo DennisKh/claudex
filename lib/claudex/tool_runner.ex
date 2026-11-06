@@ -64,8 +64,10 @@ defmodule Claudex.ToolRunner do
   Each request after the first runs in the container the last reply named, so
   code execution keeps its files between turns and a tool called from code
   gets its answer in the run that called it. A `:container` in `params` that
-  has no id gets that one, and keeps the rest of the map, such as its
-  `skills`.
+  has no id gets that one. Once a reply lists the container's skills, every
+  later request sends the versions it resolved them to, so a skill on
+  `version: "latest"` stays on one version for the whole run, and a version
+  deleted mid-run fails the request after.
 
   `stream!/3` hands you one turn at a time instead, so you can watch the
   conversation, log it, or stop it:
@@ -170,7 +172,7 @@ defmodule Claudex.ToolRunner do
           end
         )
 
-      # store turn.messages, turn.tool_results and the container, as below;
+      # store turn.messages, turn.tool_results and turn.container;
       # later, once a human has approved:
       params = Map.merge(params, %{messages: messages, container: container})
 
@@ -188,12 +190,12 @@ defmodule Claudex.ToolRunner do
   `ArgumentError` for a history that does not end in tool calls, or for a
   result whose call is not in that reply.
 
-  The container the halted reply ran in is not part of the history, so a run
-  that used code execution goes on in it only when `:container` names it again.
-  Without it, the resumed run starts in a new container, without the files it
-  wrote or the code that was waiting on the halted call. A container named by
-  its id alone runs without its skills, so a run that loaded some names them
-  too: `container: %{id: id, skills: skills}`.
+  The container the run was in is not part of the history, so a run that used
+  code execution goes on in it only when `:container` names it again, as the
+  halted turn's `container`. Without it, the resumed run starts in a new
+  container, without the files it wrote or the code that was waiting on the
+  halted call. `turn.container` carries the skills on the versions the halted
+  run resolved, so the resumed one runs the same.
 
   Without `:tool_results`, a history is only ever sent to the API, and a
   history ending in calls nobody answered is refused there. A `:refusal`,
@@ -605,8 +607,11 @@ defmodule Claudex.ToolRunner do
 
   defp continue(:cancelled, _config, index), do: cancelled_after(index)
 
-  defp continue({turn, next}, config, _index),
-    do: {turn, {in_container(config, turn.message), next}}
+  defp continue({turn, next}, config, _index) do
+    config = in_container(config, turn.message)
+
+    {%{turn | container: config.params[:container]}, {config, next}}
+  end
 
   defp cancelled_after(index), do: {{:cancelled, index - 1}, {nil, :done}}
 
@@ -622,18 +627,25 @@ defmodule Claudex.ToolRunner do
     end)
   end
 
-  defp in_container(config, %Message{container: %{"id" => id}}) do
-    %{config | params: Map.update(config.params, :container, id, &with_container_id(&1, id))}
+  defp in_container(config, %Message{container: %{"id" => id} = container}) do
+    %{
+      config
+      | params: Map.update(config.params, :container, id, &next_container(&1, container))
+    }
   end
 
   defp in_container(config, _message), do: config
 
-  defp with_container_id(nil, id), do: id
+  defp next_container(_given, %{"skills" => [_skill | _rest]} = container) do
+    Map.take(container, ["id", "skills"])
+  end
 
-  defp with_container_id(%{id: pinned} = container, _id) when is_binary(pinned), do: container
-  defp with_container_id(%{"id" => pinned} = container, _id) when is_binary(pinned), do: container
-  defp with_container_id(%{} = container, id), do: Map.put(container, :id, id)
-  defp with_container_id(pinned, _id), do: pinned
+  defp next_container(nil, %{"id" => id}), do: id
+
+  defp next_container(%{id: pinned} = given, _container) when is_binary(pinned), do: given
+  defp next_container(%{"id" => pinned} = given, _container) when is_binary(pinned), do: given
+  defp next_container(%{} = given, %{"id" => id}), do: Map.put(given, :id, id)
+  defp next_container(pinned, _container), do: pinned
 
   defp run_turn(config, history, index) do
     case request(config, history) do
