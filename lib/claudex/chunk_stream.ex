@@ -78,6 +78,7 @@ defmodule Claudex.ChunkStream do
   end
 
   defp connect(client, request_options, decode, cancel_ref, opts) do
+    {route, request_options} = API.route(request_options)
     consumer = self()
     producer_ref = make_ref()
 
@@ -96,7 +97,8 @@ defmodule Claudex.ChunkStream do
     metadata =
       %{
         method: Keyword.get(request_options, :method, :get),
-        path: Keyword.get(request_options, :url)
+        path: Keyword.get(request_options, :url),
+        route: route
       }
       |> API.put_model(request_options)
 

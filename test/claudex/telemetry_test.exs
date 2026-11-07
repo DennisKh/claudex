@@ -155,6 +155,7 @@ defmodule Claudex.TelemetryTest do
                :output_tokens,
                :path,
                :request_id,
+               :route,
                :status
              ]
   end
@@ -614,6 +615,49 @@ defmodule Claudex.TelemetryTest do
     refute Map.has_key?(metadata, :input_tokens)
   end
 
+  test "a request's metadata names its route alongside the concrete path" do
+    Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, Fixtures.json!("skill")) end)
+
+    assert {:ok, _skill} = Claudex.Skills.retrieve(client(), "skill_1")
+
+    assert_receive {:telemetry, [:claudex, :request, :start], _measurements, started}
+    assert started.route == "/v1/skills/{skill_id}"
+    assert started.path == "/v1/skills/skill_1"
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, stopped}
+    assert stopped.route == "/v1/skills/{skill_id}"
+  end
+
+  test "a batch's results stream is named for its route, not the results_url" do
+    results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
+
+    batch =
+      "batch"
+      |> Fixtures.json!()
+      |> Map.merge(%{
+        "id" => "msgbatch_1",
+        "processing_status" => "ended",
+        "results_url" => results_url
+      })
+
+    line = Jason.encode!(%{"custom_id" => "a", "result" => %{"type" => "expired"}})
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      case conn.request_path do
+        "/v1/messages/batches/msgbatch_1" -> Req.Test.json(conn, batch)
+        "/v1/messages/batches/msgbatch_1/results" -> Plug.Conn.send_resp(conn, 200, line <> "\n")
+      end
+    end)
+
+    assert {:ok, stream} = Batches.results(client(), "msgbatch_1")
+    assert [_result] = Enum.to_list(stream)
+
+    assert_receive {:telemetry, [:claudex, :request, :stop], _measurements,
+                    %{path: ^results_url} = metadata}
+
+    assert metadata.route == "/v1/messages/batches/{message_batch_id}/results"
+  end
+
   test "a batch results line that isn't JSON reports an exception, not a stop" do
     results_url = "https://api.anthropic.com/v1/messages/batches/msgbatch_1/results"
 
@@ -714,7 +758,7 @@ defmodule Claudex.TelemetryTest do
     assert_receive {:telemetry, [:claudex, :request, :stop], _measurements, metadata}
 
     assert Map.keys(metadata) |> Enum.sort() ==
-             [:method, :model, :path, :request_id, :status]
+             [:method, :model, :path, :request_id, :route, :status]
   end
 
   test "a request without a model in its body reports none" do
@@ -756,7 +800,7 @@ defmodule Claudex.TelemetryTest do
 
     # :telemetry.span/3 would put :reason and :stacktrace here, and a stack
     # frame from inside a Req step holds the whole request — key and body.
-    assert Map.keys(metadata) |> Enum.sort() == [:error, :kind, :method, :model, :path]
+    assert Map.keys(metadata) |> Enum.sort() == [:error, :kind, :method, :model, :path, :route]
     assert metadata.kind == :error
     assert metadata.error == FunctionClauseError
 

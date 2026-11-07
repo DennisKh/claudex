@@ -150,7 +150,7 @@ defmodule Claudex.Files do
   def download(%Client{} = client, file_id) do
     with :ok <- validate_id(file_id),
          {:ok, body} <-
-           API.request(client, method: :get, url: path(file_id) <> "/content", decode_body: false) do
+           API.request(client, method: :get, url: content_path(file_id), decode_body: false) do
       if is_binary(body) do
         {:ok, body}
       else
@@ -168,7 +168,9 @@ defmodule Claudex.Files do
     end
   end
 
-  defp path(file_id), do: "/v1/files/" <> URI.encode(file_id, &URI.char_unreserved?/1)
+  defp path(file_id), do: {"/v1/files/{file_id}", file_id: file_id}
+
+  defp content_path(file_id), do: {"/v1/files/{file_id}/content", file_id: file_id}
 
   defp part_options(filename, opts) do
     case Keyword.fetch(opts, :content_type) do

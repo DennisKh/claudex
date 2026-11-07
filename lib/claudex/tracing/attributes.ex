@@ -184,7 +184,7 @@ defmodule Claudex.Tracing.Attributes do
   def error_message(_body, status), do: "HTTP #{status}"
 
   defp name(%{model: model, path: "/v1/messages"}), do: name(@chat, model)
-  defp name(%{method: method, path: path}), do: "#{upcase(method)} #{path}"
+  defp name(%{method: method} = metadata), do: "#{upcase(method)} #{route(metadata)}"
 
   defp name(operation, model) when is_binary(model), do: operation <> " " <> model
   defp name(operation, _model), do: operation
@@ -192,6 +192,8 @@ defmodule Claudex.Tracing.Attributes do
   defp base(metadata) do
     %{"http.request.method" => upcase(metadata.method), "url.path" => to_string(metadata.path)}
   end
+
+  defp route(metadata), do: Map.get(metadata, :route) || metadata.path
 
   defp put_request(attributes, %{model: model, path: "/v1/messages"}, %{} = body) do
     attributes

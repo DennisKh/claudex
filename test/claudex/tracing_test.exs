@@ -173,6 +173,56 @@ defmodule Claudex.TracingTest do
     refute Map.has_key?(attributes(recorded), "gen_ai.system")
   end
 
+  test "a request for one resource is named for its route, with the ids only in url.path" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      Req.Test.json(conn, %{"id" => "x", "type" => "x", "data" => [], "next_page" => nil})
+    end)
+
+    alias Claudex.Messages.Batches
+    alias Claudex.Skills
+
+    requests = [
+      {fn -> Claudex.Models.retrieve(client(), "claude-x") end, "GET", "/v1/models/{model_id}",
+       "/v1/models/claude-x"},
+      {fn -> Files.retrieve(client(), "file_1") end, "GET", "/v1/files/{file_id}",
+       "/v1/files/file_1"},
+      {fn -> Files.download(client(), "file_1") end, "GET", "/v1/files/{file_id}/content",
+       "/v1/files/file_1/content"},
+      {fn -> Files.delete(client(), "file_1") end, "DELETE", "/v1/files/{file_id}",
+       "/v1/files/file_1"},
+      {fn -> Batches.retrieve(client(), "msgbatch_1") end, "GET",
+       "/v1/messages/batches/{message_batch_id}", "/v1/messages/batches/msgbatch_1"},
+      {fn -> Batches.cancel(client(), "msgbatch_1") end, "POST",
+       "/v1/messages/batches/{message_batch_id}/cancel",
+       "/v1/messages/batches/msgbatch_1/cancel"},
+      {fn -> Batches.delete(client(), "msgbatch_1") end, "DELETE",
+       "/v1/messages/batches/{message_batch_id}", "/v1/messages/batches/msgbatch_1"},
+      {fn -> Skills.retrieve(client(), "skill_1") end, "GET", "/v1/skills/{skill_id}",
+       "/v1/skills/skill_1"},
+      {fn -> Skills.delete(client(), "skill_1") end, "DELETE", "/v1/skills/{skill_id}",
+       "/v1/skills/skill_1"},
+      {fn -> Skills.create_version(client(), "skill_1", [{"skill", "SKILL.md"}]) end, "POST",
+       "/v1/skills/{skill_id}/versions", "/v1/skills/skill_1/versions"},
+      {fn -> Skills.list_versions(client(), "skill_1") end, "GET",
+       "/v1/skills/{skill_id}/versions", "/v1/skills/skill_1/versions"},
+      {fn -> Skills.retrieve_version(client(), "skill_1", "skver_1") end, "GET",
+       "/v1/skills/{skill_id}/versions/{version}", "/v1/skills/skill_1/versions/skver_1"},
+      {fn -> Skills.delete_version(client(), "skill_1", "skver_1") end, "DELETE",
+       "/v1/skills/{skill_id}/versions/{version}", "/v1/skills/skill_1/versions/skver_1"}
+    ]
+
+    for {request, method, route, path} <- requests do
+      request.()
+      assert_receive {:span, recorded}, 2_000
+
+      assert span(recorded, :name) == method <> " " <> route
+      assert attributes(recorded)["url.path"] == path
+      # An Opt-In attribute, which instrumentation without a switch for it must
+      # not set.
+      refute Map.has_key?(attributes(recorded), "url.template")
+    end
+  end
+
   defmodule Calculator do
     use Claudex.Tool
 
