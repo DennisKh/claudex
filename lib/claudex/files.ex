@@ -60,9 +60,9 @@ defmodule Claudex.Files do
   Raises if a path can't be read — that's a problem with your filesystem
   rather than with the API.
   """
-  @spec upload(Client.t(), Path.t() | {iodata(), String.t()}) ::
+  @spec upload(Client.t(), String.t() | {iodata(), String.t()}) ::
           {:ok, FileMetadata.t()} | {:error, Error.t()}
-  @spec upload(Client.t(), Path.t() | {iodata(), String.t()}, [upload_option()]) ::
+  @spec upload(Client.t(), String.t() | {iodata(), String.t()}, [upload_option()]) ::
           {:ok, FileMetadata.t()} | {:error, Error.t()}
   def upload(client, file, opts \\ [])
 
