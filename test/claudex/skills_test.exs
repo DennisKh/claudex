@@ -145,6 +145,27 @@ defmodule Claudex.SkillsTest do
 
       assert_raise File.Error, ~r/not a directory/, fn -> Skills.create(client(), file) end
     end
+
+    test "uploads a .zip path as that one file", %{tmp_dir: tmp_dir} do
+      zip = Path.join(tmp_dir, "expense-report.zip")
+      File.write!(zip, "zip bytes")
+
+      stub_capture(Fixtures.json!("skill"))
+
+      assert {:ok, %Skill{}} = Skills.create(client(), zip)
+
+      assert_received {:request, _conn, body}
+      assert file_parts(body) == [{"expense-report.zip", "zip bytes"}]
+    end
+
+    test "leaves a nil display name out, as if it weren't given" do
+      stub_capture(Fixtures.json!("skill"))
+
+      assert {:ok, %Skill{}} = Skills.create(client(), [{"skill", "SKILL.md"}], display_name: nil)
+
+      assert_received {:request, _conn, body}
+      refute body =~ "display_name"
+    end
   end
 
   describe "list/2 and stream!/2" do
@@ -233,6 +254,18 @@ defmodule Claudex.SkillsTest do
       assert version.name == "pineapple-versions"
       assert version.description =~ "secret word"
       assert version.created_at == ~U[2026-11-05 15:34:39.971756Z]
+    end
+
+    test "create_version/3 takes a .zip path the way create/3 does", %{tmp_dir: tmp_dir} do
+      zip = Path.join(tmp_dir, "expense-report.zip")
+      File.write!(zip, "zip bytes")
+
+      stub_capture(Fixtures.json!("skill_version"))
+
+      assert {:ok, %Version{}} = Skills.create_version(client(), "skill_1", zip)
+
+      assert_received {:request, _conn, body}
+      assert file_parts(body) == [{"expense-report.zip", "zip bytes"}]
     end
 
     test "create_version/3 takes a directory the way create/3 does", %{tmp_dir: tmp_dir} do

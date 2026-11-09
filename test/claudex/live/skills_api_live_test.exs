@@ -122,6 +122,22 @@ defmodule Claudex.Live.SkillsAPITest do
     assert {:error, %Error{type: :bad_request}} = Skills.delete(client, "xlsx")
   end
 
+  test "creates a skill from a zip of its folder", %{client: client, tmp_dir: tmp_dir} do
+    zip = Path.join(tmp_dir, "pineapple-zip.zip")
+
+    {:ok, _zip} =
+      :zip.create(String.to_charlist(zip), [
+        {~c"pineapple-zip/SKILL.md", skill_md("pineapple-zip")},
+        {~c"pineapple-zip/docs/word.txt", "mango\n"}
+      ])
+
+    assert {:ok, %Skill{} = skill} = Skills.create(client, zip, display_name: nil)
+
+    delete_on_exit(client, skill.id)
+
+    assert skill.display_name == "pineapple-zip"
+  end
+
   test "refuses a skill without a SKILL.md", %{client: client} do
     assert {:error, %Error{type: :bad_request} = error} =
              Skills.create(client, [{"notes\n", "docs/notes.txt"}])

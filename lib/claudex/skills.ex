@@ -50,12 +50,11 @@ defmodule Claudex.Skills do
   alias Claudex.Skill.Version
 
   @typedoc """
-  The files of a skill: a directory, or `{content, path}` pairs for files that
-  aren't on disk, each `path` relative to the skill, such as `"SKILL.md"` or
-  `"scripts/build.py"`. A zip of the skill's folder goes up as one pair,
-  `{File.read!("expense-report.zip"), "expense-report.zip"}`.
+  The files of a skill: the path of its directory or of a `.zip` of it, or
+  `{content, path}` pairs for files that aren't on disk, each `path` relative
+  to the skill, such as `"SKILL.md"` or `"scripts/build.py"`.
   """
-  @type files :: Path.t() | [{iodata(), String.t()}]
+  @type files :: String.t() | [{iodata(), String.t()}]
 
   @typedoc """
   An option for `create/3`, described under "Options" there.
@@ -80,6 +79,8 @@ defmodule Claudex.Skills do
 
       {:ok, skill} = Claudex.Skills.create(client, "priv/skills/expense-report")
 
+      {:ok, skill} = Claudex.Skills.create(client, "expense-report.zip")
+
       {:ok, skill} =
         Claudex.Skills.create(client, [
           {skill_md, "SKILL.md"},
@@ -88,16 +89,22 @@ defmodule Claudex.Skills do
 
   A directory is uploaded with every file in it, at any depth, except the
   ones whose name or folder starts with a dot, such as `.git`, and the
-  symlinks in it, which are skipped whatever they point at. The upload needs a
-  `SKILL.md` at its root and has to stay under 30 MB, which a zip counts
-  uncompressed.
+  symlinks in it, which are skipped whatever they point at. A `.zip` goes up
+  as it is: the API reads a single file as a zip only when its name ends in
+  `.zip`. The upload needs a `SKILL.md` at its root and has to stay under
+  30 MB, which a zip counts uncompressed.
+
+  A create that fails after the API made the skill is retried like any other
+  request, and the API takes a second skill with the same name, so a retried
+  create can leave a duplicate behind.
 
   ## Options
 
-    * `:display_name` - a label for the skill, up to 255 characters. Without
-      it the skill takes the `name` in its `SKILL.md`.
+    * `:display_name` - a label for the skill, up to 255 characters, with no
+      line breaks or other control characters. Without it, or with `nil`, the
+      skill takes its `name`.
 
-  Raises `File.Error` if the directory, or a file in it, can't be read.
+  Raises `File.Error` if the path, or a file in it, can't be read.
   """
   @spec create(Client.t(), files()) :: {:ok, Skill.t()} | {:error, Error.t()}
   @spec create(Client.t(), files(), [create_option()]) ::
@@ -185,7 +192,10 @@ defmodule Claudex.Skills do
   frontmatter `name`, or the folder holding it when that has none. Files of earlier
   versions that the upload leaves out are not carried over.
 
-  Raises `File.Error` if the directory, or a file in it, can't be read.
+  A request that fails after the API made the version is retried like any
+  other, so a retried call can add a second version, which becomes the latest.
+
+  Raises `File.Error` if the path, or a file in it, can't be read.
   """
   @spec create_version(Client.t(), String.t(), files()) ::
           {:ok, Version.t()} | {:error, Error.t()}
@@ -280,10 +290,12 @@ defmodule Claudex.Skills do
 
   defp skill_files(files) when is_list(files), do: files
 
-  defp skill_files(dir) when is_binary(dir) do
-    dir = Path.expand(dir)
+  defp skill_files(path) when is_binary(path) do
+    path = Path.expand(path)
 
-    dir_files(dir, Path.basename(dir))
+    if Path.extname(path) == ".zip" and File.regular?(path),
+      do: [{File.read!(path), Path.basename(path)}],
+      else: dir_files(path, Path.basename(path))
   end
 
   defp dir_files(dir, upload_path) do
@@ -305,9 +317,9 @@ defmodule Claudex.Skills do
   defp file_part({content, path}), do: {"files[]", {content, filename: path}}
 
   defp display_name_field(opts) do
-    case Keyword.fetch(opts, :display_name) do
-      {:ok, display_name} -> [{"display_name", display_name}]
-      :error -> []
+    case opts[:display_name] do
+      nil -> []
+      display_name -> [{"display_name", display_name}]
     end
   end
 

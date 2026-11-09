@@ -6,8 +6,8 @@ defmodule Claudex.Skill do
   A request names a skill by its `id`, as `type: "custom"` when `source` is
   `"custom"` and `type: "anthropic"` when it is `"anthropic"`.
   `latest_version_id` is the id of its newest version, and `display_name` is
-  the `SKILL.md` frontmatter `name` unless the skill was created with a
-  `:display_name`.
+  the skill's `name`, from its `SKILL.md` frontmatter or the folder holding
+  it, unless the skill was created with a `:display_name`.
   """
 
   alias Claudex.Timestamp
