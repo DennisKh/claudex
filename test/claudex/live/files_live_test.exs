@@ -53,8 +53,13 @@ defmodule Claudex.Live.FilesTest do
   end
 
   test "refuses to download a file we uploaded ourselves", %{client: client, uploaded: file} do
-    assert {:error, %Error{status: 400} = error} = Files.download(client, file.id)
+    assert {:error, %Error{status: 400} = error} =
+             client
+             |> Recorder.record_json("error_file_not_downloadable")
+             |> Files.download(file.id)
+
     assert error.message != ""
+    assert error.error_code == "file_not_downloadable"
   end
 
   test "deletes a file, after which it is gone", %{client: client} do

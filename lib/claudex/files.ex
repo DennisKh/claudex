@@ -144,7 +144,8 @@ defmodule Claudex.Files do
       File.write!("chart.png", bytes)
 
   Only works on files Claude created — check `downloadable` on the metadata
-  first. Returns the whole file in memory, so mind the 500 MB ceiling.
+  first. Any other is a 400 with `error_code: "file_not_downloadable"`.
+  Returns the whole file in memory, so mind the 500 MB ceiling.
   """
   @spec download(Client.t(), String.t()) :: {:ok, binary()} | {:error, Error.t()}
   def download(%Client{} = client, file_id) do

@@ -2,6 +2,7 @@ defmodule Claudex.ErrorTest do
   use ExUnit.Case, async: true
 
   alias Claudex.Error
+  alias Claudex.TestSupport.Fixtures
 
   test "from_response/2 classifies known status codes" do
     mapping = %{
@@ -135,6 +136,43 @@ defmodule Claudex.ErrorTest do
 
     assert %Error{type: :overloaded, error_type: "overloaded_error"} =
              Error.from_stream_event(body)
+  end
+
+  test "from_response/2 reads the error code the API puts under details" do
+    error =
+      Error.from_response(400, Fixtures.json!("error_file_not_downloadable"))
+
+    assert error.error_code == "file_not_downloadable"
+    assert error.error_type == "invalid_request_error"
+  end
+
+  test "from_response/2 has no error code when the body names none" do
+    assert %Error{error_code: nil} =
+             Error.from_response(400, Fixtures.json!("error_400"))
+
+    for details <- [nil, "x", %{}, %{"error_code" => 42}] do
+      body = %{
+        "type" => "error",
+        "error" => %{"type" => "invalid_request_error", "details" => details}
+      }
+
+      assert %Error{error_code: nil} = Error.from_response(400, body)
+    end
+  end
+
+  # Synthetic: no recorded stream error event or batch result carries
+  # `details` yet. The body is shaped like the API's error object.
+  test "from_stream_event/1 reads the error code too" do
+    body = %{
+      "type" => "error",
+      "error" => %{
+        "type" => "invalid_request_error",
+        "message" => "m",
+        "details" => %{"error_code" => "tool_name_conflict"}
+      }
+    }
+
+    assert %Error{error_code: "tool_name_conflict"} = Error.from_stream_event(body)
   end
 
   test "from_stream_event/1 survives an error field that isn't an object" do

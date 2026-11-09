@@ -11,7 +11,7 @@ Thirteen of them were added in one commit, `88bf1b5` (2026-09-08,
 "test: replay recorded API payloads in the offline suite (#19)"); git history
 carries no earlier or later capture for any of those. The two MCP connector
 fixtures were recorded on 2026-09-17, `programmatic_tool_call_stream.sse`
-on 2026-10-09, `toolset_tool_use.json`, `compaction_stream.sse` and `tool_use_stream.sse` on 2026-10-10, and `skill_stream.sse`, `skill.json`, `skills_page.json`, `skill_version.json` and `skill_versions_page.json` on 2026-11-05. A few fixtures embed
+on 2026-10-09, `toolset_tool_use.json`, `compaction_stream.sse` and `tool_use_stream.sse` on 2026-10-10, and `skill_stream.sse`, `skill.json`, `skills_page.json`, `skill_version.json` and `skill_versions_page.json` on 2026-11-05, and `error_file_not_downloadable.json` on 2026-11-09. A few fixtures embed
 their own `created_at`, which is the request's real timestamp rather than a
 guess; the rest carry no timestamp of their own, so the commit date is the
 only dated record of when they entered the repo. Every one of those names `claude-haiku-4-5-20251001` as `model` (or, for the
@@ -46,6 +46,7 @@ resolving to `claude-haiku-4-5` at the time of capture. `server_tools.json` is
 | `skills_page.json` | `GET /v1/skills?source=custom` | `live/skills_api_live_test.exs` — "creates a skill from content with a display name, lists it, and deletes it" | `created_at` in the fixture: `2026-11-05T13:13:20.112076Z` |
 | `skill_version.json` | `POST /v1/skills/{id}/versions` | `live/skills_api_live_test.exs` — "a new version becomes the latest, pages, and can be deleted down to one" | `created_at` in the fixture: `2026-11-05T15:34:39.971756Z` |
 | `skill_versions_page.json` | `GET /v1/skills/{id}/versions` | `live/skills_api_live_test.exs` — same test | `created_at` of the newest in the fixture: `2026-11-05T15:34:39.971756Z` |
+| `error_file_not_downloadable.json` | `GET /v1/files/{id}/content` for a file this test uploaded | `live/files_live_test.exs` — "refuses to download a file we uploaded ourselves" | 2026-11-09, recorded for the `details.error_code` an error carries |
 
 "Commit date only" means the fixture carries no timestamp of its own; the
 earliest and only record of when it was captured is `88bf1b5`'s commit date,
