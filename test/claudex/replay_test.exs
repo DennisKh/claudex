@@ -337,6 +337,22 @@ defmodule Claudex.ReplayTest do
     assert bad_request.message != ""
   end
 
+  test "a recorded download refusal carries its error code, though it arrives as raw bytes" do
+    body = File.read!("test/fixtures/error_file_not_downloadable.json")
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(400, body)
+    end)
+
+    assert {:error, %Error{type: :bad_request, status: 400} = error} =
+             Files.download(client(), "file_01W6Eq1YjxpBRfepYBZ6ovoz")
+
+    assert error.error_code == "file_not_downloadable"
+    assert error.request_id =~ "req_"
+  end
+
   test "a recorded models page decodes into models" do
     stub_json("models_page")
 

@@ -14,6 +14,10 @@ defmodule Claudex.Error do
         {:error, %Claudex.Error{type: :rate_limit}} -> :retry_later
         {:error, error} -> raise error
       end
+
+  `:error_code` names the cause more precisely still, when the API sends one,
+  such as `"file_not_downloadable"`. It is nil for an error that has no code,
+  and a code this version doesn't know still arrives as its string.
   """
 
   @status_types %{
@@ -45,7 +49,7 @@ defmodule Claudex.Error do
     "api_error" => :internal_server
   }
 
-  defexception [:type, :error_type, :message, :status, :request_id, :body]
+  defexception [:type, :error_type, :error_code, :message, :status, :request_id, :body]
 
   @type type ::
           :bad_request
@@ -67,6 +71,7 @@ defmodule Claudex.Error do
   @type t :: %__MODULE__{
           type: type(),
           error_type: String.t() | nil,
+          error_code: String.t() | nil,
           message: String.t(),
           status: pos_integer() | nil,
           request_id: String.t() | nil,
@@ -88,6 +93,7 @@ defmodule Claudex.Error do
     %__MODULE__{
       type: known_type(error_type) || type_for_status(status),
       error_type: error_type,
+      error_code: error_code(error_object(body)),
       message: message_from_body(body, status),
       status: status,
       request_id: request_id_from_body(body) || request_id,
@@ -108,6 +114,7 @@ defmodule Claudex.Error do
     %__MODULE__{
       type: type_for_error(error["type"]),
       error_type: error["type"],
+      error_code: error_code(error),
       message: error["message"] || "the API ended the stream with an error",
       request_id: request_id_from_body(body),
       body: body
@@ -143,6 +150,9 @@ defmodule Claudex.Error do
 
   defp error_object(%{"error" => %{} = error}), do: error
   defp error_object(_body), do: %{}
+
+  defp error_code(%{"details" => %{"error_code" => code}}) when is_binary(code), do: code
+  defp error_code(_error), do: nil
 
   defp known_type(nil), do: nil
 
