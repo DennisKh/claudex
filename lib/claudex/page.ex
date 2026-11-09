@@ -1,7 +1,8 @@
 defmodule Claudex.Page do
   @moduledoc """
   One page of results from a list endpoint: `Claudex.Models.list/2`,
-  `Claudex.Files.list/2` and `Claudex.Messages.Batches.list/2` all return one.
+  `Claudex.Files.list/2`, `Claudex.Messages.Batches.list/2`,
+  `Claudex.Skills.list/2` and `Claudex.Skills.list_versions/3` all return one.
 
   `data` holds the items. The API has two cursor styles and this struct
   carries both, so the fields the endpoint doesn't use are nil:
@@ -9,8 +10,8 @@ defmodule Claudex.Page do
     * Models and Message Batches use id cursors: go forward with
       `after_id: page.last_id`, back with `before_id: page.first_id`, and
       check `has_more` to know whether there is a next page.
-    * Files uses an opaque cursor: pass `page: page.next_page` to get the
-      next page, and stop when `next_page` is nil.
+    * Files and Skills use an opaque cursor: pass `page: page.next_page` to
+      get the next page, and stop when `next_page` is nil.
 
   Threading a cursor by hand means owning the loop, the accumulator, and the
   stop condition, and writing it twice because the two styles differ:
@@ -27,8 +28,9 @@ defmodule Claudex.Page do
       end)
       |> Enum.concat()
 
-  Each of those modules has a `stream!/2` that does it, whichever cursor its
-  endpoint uses, yielding items rather than pages:
+  Each of those list functions has a stream that does it, such as
+  `Claudex.Models.stream!/2` or `Claudex.Skills.stream_versions!/3`, whichever
+  cursor its endpoint uses, yielding items rather than pages:
 
       client |> Claudex.Models.stream!() |> Enum.to_list()
 

@@ -109,7 +109,18 @@ defmodule Claudex.Live.SkillsAPITest do
     assert Enum.all?(page.data, &(&1.source == "custom"))
     assert page.has_more == nil
 
-    assert client |> Skills.stream!(source: "custom", limit: 1) |> Enum.any?(&(&1.id == skill.id))
+    # Skills list newest first, so with a newer one ahead of it the first skill
+    # is only reached on a second page.
+    {:ok, newer} = Skills.create(client, [{skill_md("pineapple-newer"), "SKILL.md"}])
+    delete_on_exit(client, newer.id)
+
+    assert {:ok, %Page{next_page: "page_" <> _cursor}} =
+             Skills.list(client, source: "custom", limit: 1)
+
+    streamed = client |> Skills.stream!(source: "custom", limit: 1) |> Enum.map(& &1.id)
+
+    assert newer.id in streamed
+    assert skill.id in streamed
 
     assert :ok = Skills.delete(client, skill.id)
     assert {:error, %Error{type: :not_found}} = Skills.retrieve(client, skill.id)

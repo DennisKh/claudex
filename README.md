@@ -473,7 +473,7 @@ params = %{
 }
 ```
 
-`Claudex.ToolRunner` runs every turn in the same container, on the skill versions the first reply that listed them resolved `version: "latest"` to. A later run that goes on in that container passes the last turn's `container` back as `:container`, which carries both: a container named by its id alone runs without its skills.
+`Claudex.ToolRunner` runs every turn in the same container, on the skill versions the first reply that listed them resolved `version: "latest"` to. A later run that goes on in that container passes the last turn's `container` back as `:container`, which carries both: a request that names the container by its id alone sends no skills, and its reply lists none, though their files stay mounted.
 
 ### Tools on an MCP server
 
