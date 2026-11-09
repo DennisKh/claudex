@@ -133,8 +133,7 @@ defmodule Claudex.Skills do
     * `:source` - `"custom"` for only your own skills, `"anthropic"` for
       only Anthropic's.
 
-  Skills paginate with an opaque cursor: pass `page: page.next_page` for the
-  next page, and stop when it's nil.
+  Skills page by the opaque cursor `Claudex.Page` describes.
   """
   @spec list(Client.t()) :: {:ok, Page.t(Skill.t())} | {:error, Error.t()}
   @spec list(Client.t(), [list_option()]) :: {:ok, Page.t(Skill.t())} | {:error, Error.t()}

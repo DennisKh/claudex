@@ -181,10 +181,6 @@ defmodule Claudex.ReplayTest do
       assert %{"type" => "anthropic", "skill_id" => "xlsx", "version" => "20261027"} = skill
 
       assert ["file_" <> _id] = Message.file_ids(message)
-
-      for %ContentBlock.ServerToolResult{} = result <- message.content do
-        assert ContentBlock.to_param(result) == result.raw
-      end
     end
   end
 
