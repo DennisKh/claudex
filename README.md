@@ -15,7 +15,7 @@ Add `:claudex` to your dependencies:
 ```elixir
 def deps do
   [
-    {:claudex, "~> 0.11.1"}
+    {:claudex, "~> 0.12.0"}
   ]
 end
 ```

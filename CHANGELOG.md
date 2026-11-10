@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.12.0](https://github.com/DennisKh/claudex/compare/v0.11.1...v0.12.0) (2026-11-09)
+
+
+### Features
+
+* **error:** expose the API's error code from error.details ([#148](https://github.com/DennisKh/claudex/issues/148)) ([b28f4a4](https://github.com/DennisKh/claudex/commit/b28f4a40e5d9717664fa626323beb8372cabc386))
+* **message:** add file_ids/1 and document agent skills in requests ([#137](https://github.com/DennisKh/claudex/issues/137)) ([61dd7a5](https://github.com/DennisKh/claudex/commit/61dd7a5d3c503437a00cef9b15faf324c91ad2e5))
+* **skills:** add Claudex.Skills for managing custom skills ([#139](https://github.com/DennisKh/claudex/issues/139)) ([7e81dcf](https://github.com/DennisKh/claudex/commit/7e81dcf2d270a1170d92e4b48e0b6f1ccd6a97df))
+* **skills:** add skill versions to Claudex.Skills ([#140](https://github.com/DennisKh/claudex/issues/140)) ([f0d6245](https://github.com/DennisKh/claudex/commit/f0d62451e77353ff4785ae5ad3fb1d8856c16471))
+
+
+### Bug Fixes
+
+* **skills:** document the pre-GA skills beta and pinning Anthropic versions ([#143](https://github.com/DennisKh/claudex/issues/143)) ([a69d5e7](https://github.com/DennisKh/claudex/commit/a69d5e7468beab965f260341afc6d50cb13dd53b))
+* **skills:** take a .zip path, treat a nil display name as absent, and document retried creates ([#145](https://github.com/DennisKh/claudex/issues/145)) ([480579d](https://github.com/DennisKh/claudex/commit/480579d4d405411137f74e256bb3630ef4bedaed))
+* **tool_runner:** pin skill versions across turns and expose the run's container ([#142](https://github.com/DennisKh/claudex/issues/142)) ([d91ccf0](https://github.com/DennisKh/claudex/commit/d91ccf0439678263e94e6b6b31f629b2d98b4982))
+* **tracing:** name request spans for their route, not the concrete path ([#144](https://github.com/DennisKh/claudex/issues/144)) ([4f0c5e7](https://github.com/DennisKh/claudex/commit/4f0c5e7491edd8eaabfb03a15b9b9a1bcdecdddb))
+
 ## [0.11.1](https://github.com/DennisKh/claudex/compare/v0.11.0...v0.11.1) (2026-11-02)
 
 
