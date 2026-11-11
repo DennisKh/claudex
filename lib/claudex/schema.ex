@@ -68,8 +68,9 @@ defmodule Claudex.Schema do
 
   An Ecto schema doesn't need `use Claudex.Schema` for its fields. Ecto
   doesn't say which of them must be filled, though, so on its own every
-  field is optional, and the schema lets a tool call or a structured output
-  leave any of them out. `required:` names the ones that must be there:
+  field may be null, and a tool call or a structured output can answer null
+  for any of them. A null answer is `nil` once cast, not the field's
+  default. `required:` names the fields that can't be null:
 
       defmodule MyApp.Edit do
         use Ecto.Schema
@@ -190,8 +191,8 @@ defmodule Claudex.Schema do
     raise SchemaError,
       message:
         "`use Claudex.Schema, required:` in `#{inspect(env.module)}` is for an Ecto schema. " <>
-          "A struct's `@type t` decides which fields are required: a field whose type " <>
-          "includes `nil` is optional"
+          "A struct's `@type t` decides which fields can be null: one whose type " <>
+          "includes `nil`"
   end
 
   defp struct_fields!(module) do

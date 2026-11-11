@@ -1,7 +1,7 @@
 defmodule Claudex.Tool.Schema.StructExpansionTest do
   use ExUnit.Case, async: true
 
-  alias Claudex.TestSupport.Schemas.{EctoTicket, Node, Reflected, Ticket, Untyped}
+  alias Claudex.TestSupport.Schemas.{EctoMailbox, EctoTicket, Node, Reflected, Ticket, Untyped}
   alias Claudex.Tool.Schema.StructExpansion
   alias Claudex.Tool.SchemaError
 
@@ -20,11 +20,11 @@ defmodule Claudex.Tool.Schema.StructExpansionTest do
       assert address_object.properties["city"] == %{type: "string"}
     end
 
-    test "marks a nil-able field optional and everything else required" do
+    test "requires every field, a nil-able one included" do
       {:ok, schema} = StructExpansion.expand(Ticket, ctx())
 
-      assert Enum.sort(schema.required) == ["id", "status", "subject"]
-      refute "address" in schema.required
+      assert Enum.sort(schema.required) == ["address", "id", "status", "subject"]
+      assert %{anyOf: [_address, %{type: "null"}]} = schema.properties["address"]
     end
 
     test "breaks a self-referential struct's cycle instead of recursing forever" do
@@ -40,7 +40,7 @@ defmodule Claudex.Tool.Schema.StructExpansionTest do
       assert schema == %{
                type: "object",
                properties: %{"a" => %{}, "b" => %{}},
-               required: [],
+               required: ["a", "b"],
                additionalProperties: false
              }
     end
@@ -74,15 +74,15 @@ defmodule Claudex.Tool.Schema.StructExpansionTest do
     test "includes scalar fields and the belongs_to foreign key, typed correctly", %{
       schema: schema
     } do
-      assert schema.properties["subject"] == %{type: "string"}
-      assert schema.properties["tags"] == %{type: "array", items: %{type: "string"}}
-      assert schema.properties["price"] == %{type: "string"}
-      assert schema.properties["opened_at"] == %{type: "string", format: "date-time"}
-      assert schema.properties["assignee_id"] == %{type: "integer"}
+      assert schema.properties["subject"] == nullable(%{type: "string"})
+      assert schema.properties["tags"] == nullable(%{type: "array", items: %{type: "string"}})
+      assert schema.properties["price"] == nullable(%{type: "string"})
+      assert schema.properties["opened_at"] == nullable(%{type: "string", format: "date-time"})
+      assert schema.properties["assignee_id"] == nullable(%{type: "integer"})
     end
 
     test "maps an Ecto.Enum field to a string enum of its dump values", %{schema: schema} do
-      assert schema.properties["status"] == %{type: "string", enum: ["open", "closed"]}
+      assert schema.properties["status"] == nullable(%{type: "string", enum: ["open", "closed"]})
     end
 
     test "excludes has_many/belongs_to association fields themselves", %{schema: schema} do
@@ -91,18 +91,33 @@ defmodule Claudex.Tool.Schema.StructExpansionTest do
     end
 
     test "expands an embeds_one field into a nested object", %{schema: schema} do
-      assert %{type: "object", properties: address_properties} = schema.properties["address"]
-      assert address_properties["city"] == %{type: "string"}
-      assert address_properties["zip"] == %{type: "string"}
+      assert %{anyOf: [%{type: "object", properties: address_properties}, %{type: "null"}]} =
+               schema.properties["address"]
+
+      assert address_properties["city"] == nullable(%{type: "string"})
+      assert address_properties["zip"] == nullable(%{type: "string"})
     end
 
-    test "required is always empty — Ecto doesn't expose NOT NULL info", %{schema: schema} do
-      assert schema.required == []
+    test "requires every field, each one nullable, since Ecto doesn't expose NOT NULL", %{
+      schema: schema
+    } do
+      assert Enum.sort(schema.required) == schema.properties |> Map.keys() |> Enum.sort()
+      assert Enum.all?(Map.values(schema.properties), &match?(%{anyOf: [_, %{type: "null"}]}, &1))
+    end
+
+    test "keeps an embeds_many list required and not null, since Ecto rejects a nil one" do
+      {:ok, schema} = StructExpansion.expand(EctoMailbox, ctx())
+
+      assert "addresses" in schema.required
+      assert %{type: "array", items: %{type: "object"}} = schema.properties["addresses"]
+      assert schema.properties["owner"] == nullable(%{type: "string"})
     end
 
     test "disallows additional properties on the schema and its embeds", %{schema: schema} do
       assert schema.additionalProperties == false
-      assert schema.properties["address"].additionalProperties == false
+
+      assert %{anyOf: [%{additionalProperties: false}, %{type: "null"}]} =
+               schema.properties["address"]
     end
   end
 
@@ -135,4 +150,6 @@ defmodule Claudex.Tool.Schema.StructExpansionTest do
       end
     end
   end
+
+  defp nullable(schema), do: %{anyOf: [schema, %{type: "null"}]}
 end

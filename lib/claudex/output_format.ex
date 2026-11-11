@@ -52,7 +52,7 @@ defmodule Claudex.OutputFormat do
   | `:urgent`                                      | `const: "urgent"`                        |
   | a union of atom literals                       | `string` with `enum`                     |
   | a union of number literals                     | `integer` with `enum`                    |
-  | a union with `nil`                             | `anyOf` with `null`, and not required    |
+  | a union with `nil`                             | `anyOf` with `null`, still required      |
   | `list(String.t())`, `[String.t()]`             | `array` of `string`                      |
   | `nonempty_list(String.t())`                    | the same, with `minItems: 1`             |
   | `list()`                                       | `array`, elements unconstrained          |
@@ -69,10 +69,10 @@ defmodule Claudex.OutputFormat do
               due: Date.t() | nil
             }
 
-  A required field is one whose type doesn't include `nil`. In an Ecto
-  schema, a required field is one named by
-  `use Claudex.Schema, required: [...]`, and without that list nothing in
-  one is required. See `Claudex.Schema`.
+  Every field is required, and one whose type includes `nil` takes `null`. In
+  an Ecto schema, every field takes `null` except an `embeds_many` list and
+  the fields `use Claudex.Schema, required: [...]` names. See
+  `Claudex.Schema`.
 
   A `map()` field has no keys to declare, and the API takes an object only with
   its keys named, so the model can fill it with `{}` and nothing else. A struct
