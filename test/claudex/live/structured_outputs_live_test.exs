@@ -52,7 +52,9 @@ defmodule Claudex.Live.StructuredOutputsTest do
     assert ticket["priority"] in ["low", "high"]
     assert is_integer(ticket["id"])
     assert [_first | _rest] = ticket["tags"]
-    assert is_binary(ticket["reporter"]["name"])
+    # A nil-able field left optional went unfilled, its value crammed into the
+    # one before it: "Dana Miles," with no email.
+    assert ticket["reporter"] == %{"name" => "Dana Miles", "email" => "dana@example.com"}
 
     # additionalProperties: false on every object, so nothing else comes back.
     assert Map.keys(ticket) -- ~w(id title priority tags due reporter metadata) == []

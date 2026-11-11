@@ -191,16 +191,6 @@ defmodule Claudex.Tool.Schema do
           escape_hatch(ctx)
   end
 
-  # Flattens a right-associated `|` union AST into its member list — `a | b
-  # | c` becomes `[a, b, c]`; a non-union node comes back as `[node]`.
-  # Exposed for StructExpansion, which reuses it to check whether a
-  # struct field's type includes `nil` (and is therefore optional).
-  @doc false
-  @spec flatten_union(Macro.t()) :: [Macro.t()]
-  def flatten_union({:|, _, [left, right]}), do: flatten_union(left) ++ flatten_union(right)
-
-  def flatten_union(other), do: [other]
-
   defp param_info({:\\, _meta, [pattern, _default]}), do: {param_name(pattern), true}
 
   defp param_info(pattern), do: {param_name(pattern), false}
@@ -305,6 +295,11 @@ defmodule Claudex.Tool.Schema do
   """
   @spec escape_hatch(context()) :: String.t()
   def escape_hatch(ctx), do: Map.get(ctx, :escape_hatch, @tool_escape_hatch)
+
+  # Flattens a right-associated `|` union AST into its member list: `a | b | c`
+  # becomes `[a, b, c]`, and a non-union node comes back as `[node]`.
+  defp flatten_union({:|, _, [left, right]}), do: flatten_union(left) ++ flatten_union(right)
+  defp flatten_union(other), do: [other]
 
   defp enum_of(members) do
     values = Enum.map(members, &literal_value/1)

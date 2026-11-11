@@ -127,7 +127,7 @@ defmodule Claudex.ToolTest do
              "subject"
            ]
 
-    assert Enum.sort(ticket_schema.required) == ["id", "status", "subject"]
+    assert Enum.sort(ticket_schema.required) == ["address", "id", "status", "subject"]
   end
 
   defmodule DecodedTools do
@@ -191,7 +191,11 @@ defmodule Claudex.ToolTest do
     [tool] = StructTools.__tools__() |> Enum.filter(&(&1.name == "summarize_ecto_ticket"))
 
     assert %{"ticket" => ticket_schema} = tool.input_schema.properties
-    assert ticket_schema.properties["status"] == %{type: "string", enum: ["open", "closed"]}
+
+    assert ticket_schema.properties["status"] == %{
+             anyOf: [%{type: "string", enum: ["open", "closed"]}, %{type: "null"}]
+           }
+
     refute Map.has_key?(ticket_schema.properties, "comments")
   end
 

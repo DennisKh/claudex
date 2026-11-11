@@ -408,7 +408,7 @@ defmodule MyApp.Tools do
 end
 ```
 
-`use Claudex.Schema` builds the schema while the struct compiles. Without it, a struct compiled in the same build as the tool raises `Claudex.Tool.SchemaError` at compile time, naming the struct. An Ecto schema doesn't need the line for its fields; `use Claudex.Schema, required: [...]` names the ones Claude must fill, since otherwise every field of one is optional. The function still receives the decoded JSON map, with string keys. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. `Claudex.Schema` says when a struct needs the line, and `Claudex.OutputFormat` lists what each type becomes.
+`use Claudex.Schema` builds the schema while the struct compiles. Without it, a struct compiled in the same build as the tool raises `Claudex.Tool.SchemaError` at compile time, naming the struct. An Ecto schema doesn't need the line for its fields; `use Claudex.Schema, required: [...]` names the ones Claude must fill, since otherwise every field of one may be null. The function still receives the decoded JSON map, with string keys. A type Claudex can't map raises `Claudex.Tool.SchemaError` at compile time; pass `args_schema:` in the `@tool` options to describe it yourself. `Claudex.Schema` says when a struct needs the line, and `Claudex.OutputFormat` lists what each type becomes.
 
 ### Agent Skills
 
@@ -557,7 +557,7 @@ end
 
 Without `use Claudex.Schema`, the first request in a release raises `Claudex.Tool.SchemaError`.
 
-An Ecto schema works as an output format too, without the line. Ecto doesn't say which fields must be filled, so every field of one is optional unless `use Claudex.Schema, required: [...]` names them; see `Claudex.Schema`.
+An Ecto schema works as an output format too, without the line. Ecto doesn't say which fields must be filled, so every field of one may be null unless `use Claudex.Schema, required: [...]` names it; see `Claudex.Schema`.
 
 The API takes a subset of JSON Schema, and Claudex fits the struct's schema to it. Every object is closed with `additionalProperties: false`, and a constraint the subset rejects, such as the `minimum: 0` a `non_neg_integer()` field implies, moves into that property's description where the model still reads it. A field typed `map()` becomes an object with no declared keys, since the API needs an object's keys named; give it a struct type to describe it. A field typed `any()`, and a struct that refers to itself, raise `Claudex.Tool.SchemaError`.
 

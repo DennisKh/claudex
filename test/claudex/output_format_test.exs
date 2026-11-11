@@ -33,11 +33,11 @@ defmodule Claudex.OutputFormatTest do
     assert %{anyOf: [%{type: "string", format: "date"}, _null]} = property("due")
   end
 
-  test "an optional field is a union with null, and stays out of required" do
+  test "a field that can be nil is a union with null, and still required" do
     assert %{anyOf: [%{type: "string"}, %{type: "null"}]} =
              property("reporter").properties["email"]
 
-    assert property("reporter").required == ["name"]
+    assert Enum.sort(property("reporter").required) == ["email", "name"]
   end
 
   test "a field with no describable type raises, naming the field" do

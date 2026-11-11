@@ -68,7 +68,7 @@ defmodule Claudex.SchemaTest do
                    "name" => %{type: "string"},
                    "email" => %{anyOf: [%{type: "string"}, %{type: "null"}]}
                  },
-                 required: ["name"],
+                 required: ["name", "email"],
                  additionalProperties: false
                }
              },
@@ -283,14 +283,26 @@ defmodule Claudex.SchemaTest do
 
     [tool] = module(prefix, Tools).__tools__()
 
-    assert tool.input_schema.properties["edit"].required == ["old_string", "new_string"]
+    edit = tool.input_schema.properties["edit"]
+
+    assert edit.required == ["id", "old_string", "new_string", "replace_all"]
+    assert edit.properties["old_string"] == %{type: "string"}
+    assert edit.properties["replace_all"] == %{anyOf: [%{type: "boolean"}, %{type: "null"}]}
   end
 
   test "an Ecto schema's required fields reach its output format" do
     prefix = compile(@edit)
 
-    assert %{schema: %{required: ["old_string", "new_string"]}} =
+    assert %{
+             schema: %{
+               required: ["id", "old_string", "new_string", "replace_all"],
+               properties: properties
+             }
+           } =
              OutputFormat.json_schema(module(prefix, Edit))
+
+    assert properties["new_string"] == %{type: "string"}
+    assert %{anyOf: [%{type: "boolean"}, %{type: "null"}]} = properties["replace_all"]
   end
 
   # The check runs in the compiler's verifier process after the module is

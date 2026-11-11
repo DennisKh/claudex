@@ -147,7 +147,7 @@ defmodule Claudex.Tool.SchemaTest do
              built.properties["ticket"]
 
     assert Map.keys(properties) |> Enum.sort() == ["address", "id", "status", "subject"]
-    assert Enum.sort(required) == ["id", "status", "subject"]
+    assert Enum.sort(required) == ["address", "id", "status", "subject"]
   end
 
   test "maps list(t) and the [t] shorthand to array schemas" do

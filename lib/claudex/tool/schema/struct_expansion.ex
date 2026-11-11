@@ -4,10 +4,16 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   # A referenced module that isn't compiled yet is waited for, so a struct from
   # the same project can be expanded while that project compiles.
   #
+  # Every field of an object is required, and one that can be nil takes null.
+  # Left optional, a field that sorts before a required one in `properties`
+  # went unfilled: Claude put its value into the field after it instead (seen
+  # live with structured outputs on claude-haiku-4-5).
+  #
   # Ecto leaves association fields out of `__schema__(:fields)`, so they are
   # skipped; embeds are data and are expanded. Ecto doesn't expose which fields
-  # are `NOT NULL`, so an Ecto-backed object requires only what its
-  # `use Claudex.Schema, required:` names.
+  # are `NOT NULL`, so in an Ecto-backed object only the fields its
+  # `use Claudex.Schema, required:` names, and embeds_many lists, can't be
+  # null.
   #
   # A plain struct with no `@type t` still expands, with every field
   # unconstrained, since the field names alone are more useful to Claude than
@@ -46,12 +52,7 @@ defmodule Claudex.Tool.Schema.StructExpansion do
         {Atom.to_string(field), Schema.type_to_schema(type_ast, ctx)}
       end)
 
-    required =
-      fields
-      |> Enum.reject(fn {_field, type_ast} -> nullable?(type_ast) end)
-      |> Enum.map(fn {field, _type_ast} -> Atom.to_string(field) end)
-
-    object(properties, required)
+    object(properties, Keyword.keys(fields))
   end
 
   @doc """
@@ -108,26 +109,45 @@ defmodule Claudex.Tool.Schema.StructExpansion do
   defp struct?(module), do: function_exported?(module, :__struct__, 0)
 
   defp ecto_object(module, ctx) do
+    filled = ecto_required(module)
+
     properties =
       Map.new(module.__schema__(:fields), fn field ->
-        {Atom.to_string(field), ecto_type_schema(module.__schema__(:type, field), ctx)}
+        type = module.__schema__(:type, field)
+        schema = ecto_type_schema(type, ctx)
+
+        {Atom.to_string(field),
+         if(null?(field, type, filled), do: nullable(schema), else: schema)}
       end)
 
-    object(properties, ecto_required(module))
+    object(properties, module.__schema__(:fields))
   end
 
   defp ecto_required(module) do
     if function_exported?(module, :__json_required__, 0),
-      do: Enum.map(module.__json_required__(), &Atom.to_string/1),
+      do: module.__json_required__(),
       else: []
   end
+
+  # `cast_embed/3` rejects a nil embeds_many, and `[]` says the same thing.
+  defp null?(_field, {:parameterized, {Ecto.Embedded, %{cardinality: :many}}}, _filled),
+    do: false
+
+  defp null?(field, _type, filled), do: field not in filled
+
+  defp nullable(schema), do: %{anyOf: [schema, %{type: "null"}]}
 
   # Every object Claudex builds here comes from a known, closed set of
   # fields, so extra properties are always disallowed — same reasoning as
   # the top-level input_schema in Claudex.Tool, and what a tool declared
   # `strict: true` needs at every level, not just the outer one.
-  defp object(properties, required) do
-    %{type: "object", properties: properties, required: required, additionalProperties: false}
+  defp object(properties, fields) do
+    %{
+      type: "object",
+      properties: properties,
+      required: Enum.map(fields, &Atom.to_string/1),
+      additionalProperties: false
+    }
   end
 
   defp ecto_type_schema(:id, _ctx), do: %{type: "integer"}
@@ -235,14 +255,9 @@ defmodule Claudex.Tool.Schema.StructExpansion do
       "to `#{inspect(module)}` so its schema is built while it compiles"
   end
 
-  defp nullable?(type_ast), do: nil in Schema.flatten_union(type_ast)
-
   defp untyped_struct_object(module) do
-    properties =
-      module.__struct__()
-      |> Map.from_struct()
-      |> Map.new(fn {field, _value} -> {Atom.to_string(field), %{}} end)
+    fields = Enum.map(module.__info__(:struct), & &1.field)
 
-    object(properties, [])
+    object(Map.new(fields, &{Atom.to_string(&1), %{}}), fields)
   end
 end

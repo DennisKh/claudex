@@ -45,6 +45,18 @@ defmodule Claudex.TestSupport.Schemas.EctoTicket do
   end
 end
 
+defmodule Claudex.TestSupport.Schemas.EctoMailbox do
+  @moduledoc false
+  use Ecto.Schema
+
+  alias Claudex.TestSupport.Schemas.EctoAddress
+
+  embedded_schema do
+    field(:owner, :string)
+    embeds_many(:addresses, EctoAddress)
+  end
+end
+
 defmodule Claudex.TestSupport.Schemas.Reflected do
   @moduledoc """
   The three Ecto field types Claudex can't map, reachable only through the
